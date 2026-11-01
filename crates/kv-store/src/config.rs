@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
+use time::{Duration, OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 
 use crate::{StoreError, envname, fsx, pyjson};
 
@@ -798,40 +798,41 @@ fn parse_timestamp(value: &str) -> Result<OffsetDateTime, StoreError> {
     })
 }
 
-pub fn timestamp_now() -> String {
-    let now = OffsetDateTime::now_utc();
-    let micros = now.nanosecond() / 1_000;
+fn format_python_timestamp(timestamp: OffsetDateTime) -> String {
+    let timestamp = timestamp.to_offset(UtcOffset::UTC);
+    let micros = timestamp.nanosecond() / 1_000;
     if micros == 0 {
         format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
-            now.year(),
-            u8::from(now.month()),
-            now.day(),
-            now.hour(),
-            now.minute(),
-            now.second()
+            timestamp.year(),
+            u8::from(timestamp.month()),
+            timestamp.day(),
+            timestamp.hour(),
+            timestamp.minute(),
+            timestamp.second()
         )
     } else {
         format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}+00:00",
-            now.year(),
-            u8::from(now.month()),
-            now.day(),
-            now.hour(),
-            now.minute(),
-            now.second(),
+            timestamp.year(),
+            u8::from(timestamp.month()),
+            timestamp.day(),
+            timestamp.hour(),
+            timestamp.minute(),
+            timestamp.second(),
             micros
         )
     }
 }
 
+pub fn timestamp_now() -> String {
+    format_python_timestamp(OffsetDateTime::now_utc())
+}
+
 pub fn purge_after(days: u64) -> Result<String, StoreError> {
     let timestamp =
         OffsetDateTime::now_utc() + Duration::days(i64::try_from(days).unwrap_or(i64::MAX));
-    timestamp
-        .format(&Rfc3339)
-        .map(|value| value.replace('Z', "+00:00"))
-        .map_err(|error| StoreError::ConfigConflict(error.to_string()))
+    Ok(format_python_timestamp(timestamp))
 }
 
 /// Production must provide an approval-reference index before enabling environment changes.
@@ -1285,10 +1286,8 @@ impl Vault {
         self.check_approval(name)?;
         let deleted_at = timestamp_now();
         let days = deleted_keep_days(&config)?;
-        let purge_after = (parse_timestamp(&deleted_at)? + Duration::days(days as i64))
-            .format(&Rfc3339)
-            .map_err(|error| StoreError::ConfigConflict(error.to_string()))?
-            .replace('Z', "+00:00");
+        let purge_after =
+            format_python_timestamp(parse_timestamp(&deleted_at)? + Duration::days(days as i64));
         commit_env_delete(&self.root, name, &deleted_at, &purge_after)?;
         Ok(DeletedEnvironment {
             name: name.to_owned(),
@@ -1333,5 +1332,21 @@ impl Vault {
         fsx::clear_env_tree(self.store.secrets_dir(), &self.store.env_id(name))?;
         clear_env_wipe(&self.root, name)?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Rfc3339, format_python_timestamp};
+    use time::OffsetDateTime;
+
+    #[test]
+    fn timestamps_preserve_python_isoformat_microseconds() {
+        let timestamp =
+            OffsetDateTime::parse("2026-11-01T13:20:15.136990+00:00", &Rfc3339).unwrap();
+        assert_eq!(
+            format_python_timestamp(timestamp),
+            "2026-11-01T13:20:15.136990+00:00"
+        );
     }
 }
