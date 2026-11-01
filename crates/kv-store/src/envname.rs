@@ -88,9 +88,34 @@ pub fn validate_registered_name(name: &str, registered: &[String]) -> Result<(),
     Ok(())
 }
 
+pub fn validate_environment_registry(
+    names: &[String],
+    default_env: &str,
+) -> Result<(), StoreError> {
+    for name in names {
+        validate_registered_name(name, names)?;
+    }
+    let mut unique = std::collections::HashSet::new();
+    if names.iter().any(|name| !unique.insert(name)) {
+        return Err(StoreError::InvalidName(
+            "environments contain duplicates".into(),
+        ));
+    }
+    validate_env_name(default_env)?;
+    if !names.iter().any(|name| name == default_env) {
+        return Err(StoreError::InvalidName(
+            "default environment must be registered".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{has_path_syntax, portable_name_key, validate_env_name, validate_registered_name};
+    use super::{
+        has_path_syntax, portable_name_key, validate_env_name, validate_environment_registry,
+        validate_registered_name,
+    };
 
     #[test]
     fn rejects_path_and_windows_reserved_forms() {
@@ -120,5 +145,13 @@ mod tests {
         assert!(validate_registered_name("Dev", &["dev".to_owned()]).is_err());
         assert!(validate_registered_name("é", &["e\u{301}".to_owned()]).is_err());
         assert!(validate_registered_name("Dev", &["Dev".to_owned()]).is_ok());
+    }
+
+    #[test]
+    fn complete_environment_registry_rejects_duplicates_aliases_and_bad_default() {
+        assert!(validate_environment_registry(&["dev".into(), "prod".into()], "dev").is_ok());
+        assert!(validate_environment_registry(&["dev".into(), "dev".into()], "dev").is_err());
+        assert!(validate_environment_registry(&["Dev".into(), "dev".into()], "Dev").is_err());
+        assert!(validate_environment_registry(&["dev".into()], "prod").is_err());
     }
 }
