@@ -6,23 +6,30 @@ use std::fs::File;
 #[cfg(unix)]
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::Arc;
 #[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(unix)]
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex};
 #[cfg(unix)]
 use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use kv_crypto::{Key32, Zeroizing, derive_labeled_key, keyfile};
-use kv_store::{DrawerStore, config_authority};
+use kv_store::DrawerStore;
+#[cfg(unix)]
+use kv_store::config_authority;
 use serde_json::{Value, json};
+#[cfg(unix)]
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+#[cfg(unix)]
 const START_REFUSAL_PREFIX: &str = "Cannot start kv daemon:";
+#[cfg(unix)]
 const SHORT_STOP_WAIT_SECONDS: u64 = 10;
+#[cfg(unix)]
 const AGENT_VERSION: &str = "0.4.0";
 #[cfg(unix)]
 const API_TIMEOUT: u64 = 120;
@@ -460,6 +467,7 @@ fn read_request_with_timeout(
     kv_proto::read_request(stream)
 }
 
+#[cfg(unix)]
 fn request_error_response(error: &kv_proto::ProtocolError) -> Value {
     match error {
         kv_proto::ProtocolError::RequestTooLarge => {
@@ -482,6 +490,7 @@ fn request_error_response(error: &kv_proto::ProtocolError) -> Value {
     }
 }
 
+#[cfg(unix)]
 fn status_response(
     root: &str,
     _store: &DrawerStore,
@@ -539,6 +548,7 @@ fn status_response(
     })
 }
 
+#[cfg(unix)]
 fn http_policy_status(config: &Value) -> Value {
     let configured = config.get("broker_policy").is_some();
     let providers = config
@@ -567,6 +577,7 @@ fn http_policy_status(config: &Value) -> Value {
     })
 }
 
+#[cfg(unix)]
 fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -577,6 +588,7 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
+#[cfg(unix)]
 fn token_hex(bytes: usize) -> Result<String, AgentError> {
     let mut random = vec![0u8; bytes];
     getrandom::getrandom(&mut random)
