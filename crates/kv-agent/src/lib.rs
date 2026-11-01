@@ -4,7 +4,7 @@ use std::fs;
 #[cfg(unix)]
 use std::fs::File;
 #[cfg(unix)]
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(unix)]
@@ -16,6 +16,10 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use base64::Engine as _;
+#[cfg(unix)]
+use base64::engine::general_purpose::URL_SAFE;
 use kv_approvals::owner::{OwnerSeed, owner_key_id, owner_public_key};
 use kv_approvals::wire::{self, FieldValue, MessageFields, MessageKind};
 use kv_crypto::{Key32, Zeroizing, derive_labeled_key, keyfile};
@@ -146,6 +150,8 @@ struct PinState {
     folder: Option<File>,
     key_id: Option<(u64, u64)>,
     key_digest: Option<[u8; 32]>,
+    approval_key_id: Option<(u64, u64)>,
+    approval_key_digest: Option<[u8; 32]>,
     latched: Option<String>,
     closed: bool,
 }
@@ -197,6 +203,8 @@ impl TrustContext {
             }
             None => false,
         };
+        #[cfg(unix)]
+        let approval_key_pin = pin_approval_signing_key(&root_path, &folder)?;
         let mut nonce = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(&mut nonce[..])
             .map_err(|_| AgentError("operating-system randomness unavailable".into()))?;
@@ -218,6 +226,8 @@ impl TrustContext {
                     folder: Some(folder),
                     key_id: Some(key_id),
                     key_digest: Some(key_digest),
+                    approval_key_id: approval_key_pin.0,
+                    approval_key_digest: approval_key_pin.1,
                     latched: None,
                     closed: false,
                 }),
@@ -241,42 +251,49 @@ impl TrustContext {
         } else {
             let metadata = match fs::symlink_metadata(&state.root) {
                 Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Self::latch_locked(&mut state, "the vault folder is gone");
-                }
-                Err(_) => {
-                    return Self::latch_locked(&mut state, "the vault folder cannot be checked");
-                }
+                Err(_) => return Self::latch_locked(&mut state, "the vault folder is gone"),
             };
             if metadata.file_type().is_symlink() {
                 Some("the vault path now contains a link".to_owned())
             } else if (metadata.dev(), metadata.ino()) != state.folder_id {
                 Some("the vault folder was replaced or moved".to_owned())
-            } else if state
-                .folder
-                .as_ref()
-                .and_then(|folder| folder.metadata().ok())
-                .map(|metadata| metadata.nlink() == 0)
-                .unwrap_or(true)
-            {
-                Some("the vault folder was deleted".to_owned())
             } else {
-                let key_path = state.root.join(".secrets").join("key");
-                match (fs::symlink_metadata(&key_path), fs::read(&key_path)) {
-                    (Err(error), _) if error.kind() == std::io::ErrorKind::NotFound => {
-                        Some("the key file is gone".to_owned())
-                    }
-                    (Err(_), _) => Some("the key file cannot be read".to_owned()),
-                    (Ok(metadata), Ok(blob)) => {
-                        if Some((metadata.dev(), metadata.ino())) != state.key_id {
-                            Some("the key file was replaced".to_owned())
-                        } else if Some(Sha256::digest(&blob).into()) != state.key_digest {
-                            Some("the key file changed".to_owned())
-                        } else {
-                            None
+                match state.folder.as_ref() {
+                    Some(folder) => match folder.metadata() {
+                        Err(error) => {
+                            return Self::latch_locked(
+                                &mut state,
+                                &format!(
+                                    "the vault could not be checked ({})",
+                                    python_io_exception_name(&error)
+                                ),
+                            );
                         }
-                    }
-                    (Ok(_), Err(_)) => Some("the key file cannot be read".to_owned()),
+                        Ok(metadata) if metadata.nlink() == 0 => {
+                            Some("the vault folder was deleted".to_owned())
+                        }
+                        Ok(_) => {
+                            let key_path = state.root.join(".secrets").join("key");
+                            match (fs::symlink_metadata(&key_path), fs::read(&key_path)) {
+                                (Err(error), _) if error.kind() == std::io::ErrorKind::NotFound => {
+                                    Some("the key file is gone".to_owned())
+                                }
+                                (Err(_), _) => Some("the key file cannot be read".to_owned()),
+                                (Ok(metadata), Ok(blob)) => {
+                                    if Some((metadata.dev(), metadata.ino())) != state.key_id {
+                                        Some("the key file was replaced".to_owned())
+                                    } else if Some(Sha256::digest(&blob).into()) != state.key_digest
+                                    {
+                                        Some("the key file changed".to_owned())
+                                    } else {
+                                        approval_key_difference(&state, folder).map(str::to_owned)
+                                    }
+                                }
+                                (Ok(_), Err(_)) => Some("the key file cannot be read".to_owned()),
+                            }
+                        }
+                    },
+                    None => Some("the vault folder pin is closed".to_owned()),
                 }
             }
         };
@@ -312,6 +329,206 @@ impl TrustContext {
             state.closed = true;
             state.folder.take();
         }
+    }
+}
+
+#[cfg(unix)]
+const APPROVAL_KEY_RELATIVE: &str = ".secrets/approval_signing_key";
+#[cfg(unix)]
+const APPROVAL_KEY_READ_LIMIT: u64 = 1024 * 1024;
+#[cfg(unix)]
+type ApprovalKeyFileId = (u64, u64);
+#[cfg(unix)]
+type ApprovalKeyPin = (Option<ApprovalKeyFileId>, Option<[u8; 32]>);
+#[cfg(unix)]
+type ApprovalKeyFile = (Zeroizing<Vec<u8>>, ApprovalKeyFileId);
+
+#[cfg(unix)]
+enum ApprovalKeyReadError {
+    Io(std::io::Error),
+    NotRegular,
+    TooLarge,
+}
+
+#[cfg(unix)]
+enum EnsureApprovalKeyError {
+    Structural(AgentError),
+    Ignorable,
+}
+
+#[cfg(unix)]
+impl From<std::io::Error> for ApprovalKeyReadError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+#[cfg(unix)]
+fn pin_approval_signing_key(root: &Path, folder: &File) -> Result<ApprovalKeyPin, AgentError> {
+    match ensure_approval_signing_key(root, folder) {
+        Ok(()) | Err(EnsureApprovalKeyError::Ignorable) => {}
+        Err(EnsureApprovalKeyError::Structural(error)) => return Err(error),
+    }
+    match read_approval_signing_key(folder) {
+        Ok(Some((blob, file_id))) => {
+            let _ = kv_approvals::artifacts::parse_signing_key(&blob);
+            Ok((Some(file_id), Some(Sha256::digest(&blob).into())))
+        }
+        Ok(None) | Err(ApprovalKeyReadError::TooLarge) => Ok((None, None)),
+        Err(ApprovalKeyReadError::NotRegular) => Err(AgentError(
+            "the approval signing key must be a regular file".into(),
+        )),
+        Err(ApprovalKeyReadError::Io(error)) => Err(AgentError(error.to_string())),
+    }
+}
+
+#[cfg(unix)]
+fn ensure_approval_signing_key(root: &Path, folder: &File) -> Result<(), EnsureApprovalKeyError> {
+    use rustix::fs::{AtFlags, Mode, OFlags, fchmod, fsync, openat, statat};
+    use std::os::fd::AsFd;
+
+    let secrets_path = root.join(".secrets");
+    let secrets_metadata = match fs::symlink_metadata(&secrets_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&secrets_path).map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&secrets_path, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+            }
+            fs::symlink_metadata(&secrets_path).map_err(|_| EnsureApprovalKeyError::Ignorable)?
+        }
+        Err(_) => return Err(EnsureApprovalKeyError::Ignorable),
+    };
+    if !secrets_metadata.is_dir() {
+        return Err(EnsureApprovalKeyError::Structural(AgentError(
+            "the .secrets path must be a real directory".into(),
+        )));
+    }
+    match statat(folder, APPROVAL_KEY_RELATIVE, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(_) => return Ok(()),
+        Err(error) if error == rustix::io::Errno::NOENT => {}
+        Err(_) => return Err(EnsureApprovalKeyError::Ignorable),
+    }
+    let _ = kv_store::config::update_vault_ignores(
+        &secrets_path,
+        &["approval_signing_key"],
+        false,
+        Some("# Local-only kv runtime records"),
+    );
+
+    let mut key = Zeroizing::new([0_u8; 32]);
+    getrandom::getrandom(&mut key[..]).map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+    let encoded = Zeroizing::new(format!("{}\n", URL_SAFE.encode(&key[..])));
+    let fd = match openat(
+        folder,
+        APPROVAL_KEY_RELATIVE,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    ) {
+        Ok(fd) => fd,
+        Err(error) if error == rustix::io::Errno::EXIST => return Ok(()),
+        Err(_) => return Err(EnsureApprovalKeyError::Ignorable),
+    };
+    let mut file = File::from(fd);
+    if fchmod(&file, Mode::RUSR | Mode::WUSR).is_err()
+        || file.write_all(encoded.as_bytes()).is_err()
+        || file.sync_all().is_err()
+    {
+        return Err(EnsureApprovalKeyError::Ignorable);
+    }
+    let secrets_dir = openat(
+        folder,
+        ".secrets",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+    fsync(secrets_dir.as_fd()).map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_approval_signing_key(
+    folder: &File,
+) -> Result<Option<ApprovalKeyFile>, ApprovalKeyReadError> {
+    use rustix::fs::{AtFlags, Mode, OFlags, openat, statat};
+    use std::os::unix::fs::MetadataExt;
+
+    let fd = match openat(
+        folder,
+        APPROVAL_KEY_RELATIVE,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    ) {
+        Ok(fd) => fd,
+        Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
+        Err(error) => {
+            return Err(ApprovalKeyReadError::Io(std::io::Error::from_raw_os_error(
+                error.raw_os_error(),
+            )));
+        }
+    };
+    let file = File::from(fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(ApprovalKeyReadError::NotRegular);
+    }
+    if metadata.len() > APPROVAL_KEY_READ_LIMIT {
+        return Err(ApprovalKeyReadError::TooLarge);
+    }
+    let named =
+        statat(folder, APPROVAL_KEY_RELATIVE, AtFlags::SYMLINK_NOFOLLOW).map_err(|error| {
+            ApprovalKeyReadError::Io(std::io::Error::from_raw_os_error(error.raw_os_error()))
+        })?;
+    if (named.st_mode & 0o170000) != 0o100000
+        || (named.st_dev, named.st_ino) != (metadata.dev(), metadata.ino())
+    {
+        return Err(ApprovalKeyReadError::NotRegular);
+    }
+    let mut blob = Zeroizing::new(Vec::with_capacity(metadata.len() as usize));
+    file.take(APPROVAL_KEY_READ_LIMIT + 1)
+        .read_to_end(&mut blob)?;
+    if blob.len() as u64 > APPROVAL_KEY_READ_LIMIT {
+        return Err(ApprovalKeyReadError::TooLarge);
+    }
+    Ok(Some((blob, (metadata.dev(), metadata.ino()))))
+}
+
+#[cfg(unix)]
+fn approval_key_difference(state: &PinState, folder: &File) -> Option<&'static str> {
+    match read_approval_signing_key(folder) {
+        Err(ApprovalKeyReadError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            state
+                .approval_key_digest
+                .map(|_| "the approval signing key is gone")
+        }
+        Err(_) => Some("the approval signing key cannot be read or is not a regular file"),
+        Ok(None) => state
+            .approval_key_digest
+            .map(|_| "the approval signing key is gone"),
+        Ok(Some((_, _))) if state.approval_key_digest.is_none() => {
+            Some("an approval signing key appeared")
+        }
+        Ok(Some((_, file_id))) if Some(file_id) != state.approval_key_id => {
+            Some("the approval signing key was replaced")
+        }
+        Ok(Some((blob, _))) if Some(Sha256::digest(&blob).into()) != state.approval_key_digest => {
+            Some("the approval signing key changed")
+        }
+        Ok(Some(_)) => None,
+    }
+}
+
+#[cfg(unix)]
+fn python_io_exception_name(error: &std::io::Error) -> &'static str {
+    // Python maps these io::ErrorKinds to the matching OSError subclass; other OS errors use OSError.
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "FileNotFoundError",
+        std::io::ErrorKind::PermissionDenied => "PermissionError",
+        _ => "OSError",
     }
 }
 
@@ -684,8 +901,14 @@ fn serve_owner_endpoint(
         if trust.observe().is_err() {
             return Ok(hard_locked.clone());
         }
-        if config_authority::require_current(root, approved, master_key).is_err() {
-            return owner_error(trust, challenge.clone(), "config_authority_changed");
+        match config_authority::require_current(root, approved, master_key) {
+            Ok(()) => {}
+            Err(config_authority::AuthorityError::Refused(_)) => {
+                return owner_error(trust, challenge.clone(), "config_authority_changed");
+            }
+            Err(config_authority::AuthorityError::Internal(_)) => {
+                return Err(AgentError("owner authority check failed".into()));
+            }
         }
         if cmd != "owner_channel" {
             return owner_error(trust, challenge.clone(), "unsupported");
@@ -1115,6 +1338,23 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn io_errors_use_python_exception_names() {
+        assert_eq!(
+            python_io_exception_name(&std::io::Error::from(std::io::ErrorKind::NotFound)),
+            "FileNotFoundError"
+        );
+        assert_eq!(
+            python_io_exception_name(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            "PermissionError"
+        );
+        assert_eq!(
+            python_io_exception_name(&std::io::Error::other("unexpected")),
+            "OSError"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn closing_trust_context_retires_folder_descriptor() {
         let context = TrustContext {
             session_nonce: Zeroizing::new([0; 32]),
@@ -1133,6 +1373,8 @@ mod tests {
                     folder: Some(File::open(".").unwrap()),
                     key_id: None,
                     key_digest: None,
+                    approval_key_id: None,
+                    approval_key_digest: None,
                     latched: None,
                     closed: false,
                 }),
@@ -1178,6 +1420,8 @@ mod tests {
                     folder: Some(File::open(".").unwrap()),
                     key_id: None,
                     key_digest: None,
+                    approval_key_id: None,
+                    approval_key_digest: None,
                     latched: None,
                     closed: false,
                 }),

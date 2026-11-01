@@ -436,6 +436,129 @@ fn exercise_hard_lock(
     (normal, status, restored)
 }
 
+#[derive(Clone, Copy)]
+enum ApprovalKeyMutation {
+    Replace,
+    Change,
+    Delete,
+    NonRegular,
+}
+
+impl ApprovalKeyMutation {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Replace => "the approval signing key was replaced",
+            Self::Change => "the approval signing key changed",
+            Self::Delete => "the approval signing key is gone",
+            Self::NonRegular => "the approval signing key cannot be read or is not a regular file",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Replace => "replace",
+            Self::Change => "change",
+            Self::Delete => "delete",
+            Self::NonRegular => "non-regular",
+        }
+    }
+}
+
+fn remove_approval_signing_key(root: &Path) {
+    let path = root.join(".secrets/approval_signing_key");
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).unwrap(),
+        Ok(_) => fs::remove_file(path).unwrap(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("inspect approval signing key path: {error}"),
+    }
+}
+
+fn mutate_approval_signing_key(root: &Path, mutation: ApprovalKeyMutation) {
+    let path = root.join(".secrets/approval_signing_key");
+    match mutation {
+        ApprovalKeyMutation::Replace => {
+            let replacement = path.with_file_name("approval_signing_key.replacement");
+            fs::write(&replacement, b"replacement-key\n").unwrap();
+            fs::remove_file(&path).unwrap();
+            fs::rename(replacement, path).unwrap();
+        }
+        ApprovalKeyMutation::Change => fs::write(path, b"changed-key\n").unwrap(),
+        ApprovalKeyMutation::Delete => fs::remove_file(path).unwrap(),
+        ApprovalKeyMutation::NonRegular => {
+            fs::remove_file(&path).unwrap();
+            fs::create_dir(path).unwrap();
+        }
+    }
+}
+
+fn approval_key_hard_lock(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    home: &Path,
+    passphrase: &str,
+    mutation: ApprovalKeyMutation,
+    python_daemon: bool,
+    log: &Path,
+) -> Value {
+    remove_approval_signing_key(root);
+    let socket_path = kv_proto::agent_socket_path(Some(root)).unwrap();
+    let mut daemon = if python_daemon {
+        spawn_python_daemon(python, root, home, passphrase, log)
+    } else {
+        spawn_rust_daemon(root, home, passphrase, log)
+    };
+    daemon.wait_for_socket(&socket_path, log);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let key_path = root.join(".secrets/approval_signing_key");
+        assert_eq!(
+            fs::metadata(&key_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let key_file = kv_crypto::Zeroizing::new(fs::read(key_path).unwrap());
+        assert!(kv_approvals::artifacts::parse_signing_key(&key_file).is_ok());
+    }
+
+    mutate_approval_signing_key(root, mutation);
+    let normal = if python_daemon {
+        python_agent_request(python, root, home, "list", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "list", &Map::new()).unwrap()
+    };
+    assert_eq!(normal["error_code"], "vault_hard_locked");
+    assert!(
+        normal["error"]
+            .as_str()
+            .unwrap()
+            .contains(mutation.reason()),
+        "hard-lock reason for {}: {}",
+        mutation.name(),
+        normal["error"]
+    );
+    let status = if python_daemon {
+        python_agent_request(python, root, home, "status", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "status", &Map::new()).unwrap()
+    };
+    assert_eq!(status["hard_locked"], true);
+    if python_daemon {
+        assert_eq!(
+            python_agent_request(python, root, home, "stop", &json!({}))["stopping"],
+            true
+        );
+    } else {
+        assert_eq!(
+            kv_proto::agent_request(root, "stop", &Map::new()).unwrap()["stopping"],
+            true
+        );
+    }
+    assert!(daemon.wait().success());
+    normal
+}
+
 fn generated_json(seed: usize, depth: usize) -> Value {
     match seed % 9 {
         0 => Value::Null,
@@ -1295,4 +1418,149 @@ time.sleep(30)
         "Cannot start kv daemon: another kv service for this vault holds its pid file; run 'kv lock' first, or 'kv agent status' for details."
     );
     assert!(holder.0.try_wait().unwrap().is_none());
+}
+
+#[test]
+fn approval_signing_key_changes_hard_lock_with_python_reason_parity() {
+    let Some(python) = std::env::var_os("KV_PY_REF") else {
+        eprintln!("SKIP Stage 4b approval-key parity: set KV_PY_REF");
+        return;
+    };
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let temp = TestDir::new();
+    let home = temp.0.join("home");
+    fs::create_dir(&home).unwrap();
+    let _home_guard = HomeGuard::set(&home);
+    let root = temp.0.join("vault");
+    fs::create_dir(&root).unwrap();
+    copy_dir(
+        &fixture_root().join("vaults/basic/.secrets"),
+        &root.join(".secrets"),
+    );
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(root.join(".secrets/key"), fs::Permissions::from_mode(0o600)).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let home = fs::canonicalize(home).unwrap();
+    let (master, passphrase) = fixture_master_key();
+    run_python(
+        &python,
+        "import json,sys\nfrom kv import vault_origin\nprint(json.dumps(vault_origin.record_created(sys.argv[1])))",
+        &root,
+        &home,
+        &[],
+    );
+    rebind_fixture_key(&python, &root, &home, &passphrase);
+    kv_store::config_authority::approve_config_unattended(&root, &master).unwrap();
+
+    let python_log = temp.0.join("python-approval-key-change.log");
+    let python_change = approval_key_hard_lock(
+        &python,
+        &root,
+        &home,
+        &passphrase,
+        ApprovalKeyMutation::Change,
+        true,
+        &python_log,
+    );
+    assert!(
+        python_change["error"]
+            .as_str()
+            .unwrap()
+            .contains(ApprovalKeyMutation::Change.reason())
+    );
+    let rust_log = temp.0.join("rust-approval-key-change.log");
+    let rust_change = approval_key_hard_lock(
+        &python,
+        &root,
+        &home,
+        &passphrase,
+        ApprovalKeyMutation::Change,
+        false,
+        &rust_log,
+    );
+    assert_eq!(rust_change, python_change);
+
+    for mutation in [
+        ApprovalKeyMutation::Replace,
+        ApprovalKeyMutation::Delete,
+        ApprovalKeyMutation::NonRegular,
+    ] {
+        let log = temp
+            .0
+            .join(format!("rust-approval-key-{}.log", mutation.name()));
+        let response =
+            approval_key_hard_lock(&python, &root, &home, &passphrase, mutation, false, &log);
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .contains(mutation.reason())
+        );
+    }
+}
+
+#[test]
+fn owner_authority_internal_failures_are_signed_internal() {
+    let Some(python) = std::env::var_os("KV_PY_REF") else {
+        eprintln!("SKIP Stage 4b owner authority error classification: set KV_PY_REF");
+        return;
+    };
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let temp = TestDir::new();
+    let home = temp.0.join("home");
+    fs::create_dir(&home).unwrap();
+    let _home_guard = HomeGuard::set(&home);
+    let root = temp.0.join("vault");
+    fs::create_dir(&root).unwrap();
+    copy_dir(
+        &fixture_root().join("vaults/basic/.secrets"),
+        &root.join(".secrets"),
+    );
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(root.join(".secrets/key"), fs::Permissions::from_mode(0o600)).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let home = fs::canonicalize(home).unwrap();
+    let (master, passphrase) = fixture_master_key();
+    run_python(
+        &python,
+        "import json,sys\nfrom kv import vault_origin\nprint(json.dumps(vault_origin.record_created(sys.argv[1])))",
+        &root,
+        &home,
+        &[],
+    );
+    rebind_fixture_key(&python, &root, &home, &passphrase);
+    kv_store::config_authority::approve_config_unattended(&root, &master).unwrap();
+
+    let socket_path = kv_proto::agent_socket_path(Some(&root)).unwrap();
+    let log = temp.0.join("rust-owner-authority-error.log");
+    let mut daemon = spawn_rust_daemon(&root, &home, &passphrase, &log);
+    daemon.wait_for_socket(&socket_path, &log);
+    let identity = keyfile::unwrap_v4(
+        &fs::read(root.join(".secrets/key")).unwrap(),
+        passphrase.as_bytes(),
+    )
+    .unwrap();
+    let config_path = root.join(".secrets/config.json");
+    let saved_config = temp.0.join("config.json.saved");
+    fs::rename(&config_path, &saved_config).unwrap();
+    fs::create_dir(&config_path).unwrap();
+
+    let challenge = [0x37; kv_approvals::wire::NONCE_LEN];
+    let fields = [(
+        "challenge".to_owned(),
+        Value::String(hex_encode(&challenge)),
+    )]
+    .into_iter()
+    .collect::<Map<_, _>>();
+    let answer = kv_proto::agent_request(&root, "owner_channel", &fields).unwrap();
+    let shape = owner_error_shape(&answer, &identity, &challenge);
+    assert_eq!(shape["code"], "internal");
+
+    fs::remove_dir(config_path).unwrap();
+    fs::rename(saved_config, root.join(".secrets/config.json")).unwrap();
+    assert_eq!(
+        kv_proto::agent_request(&root, "stop", &Map::new()).unwrap()["stopping"],
+        true
+    );
+    assert!(daemon.wait().success());
 }
