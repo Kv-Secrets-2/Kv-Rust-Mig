@@ -1,0 +1,146 @@
+{
+  "codes": [
+    {
+      "code": "ABCDE-FGHIJ",
+      "index": 1,
+      "normalized": "ABCDEFGHIJ",
+      "sha256_hex": "261305762671a58cae5b74990bcfc236c2336fb04a0fbac626166d9491d2884c",
+      "source": "fixed"
+    },
+    {
+      "code": "abcde-fghij",
+      "index": 2,
+      "normalized": "ABCDEFGHIJ",
+      "sha256_hex": "261305762671a58cae5b74990bcfc236c2336fb04a0fbac626166d9491d2884c",
+      "source": "fixed"
+    },
+    {
+      "code": " ABCDE FGHIJ ",
+      "index": 3,
+      "normalized": "ABCDEFGHIJ",
+      "sha256_hex": "261305762671a58cae5b74990bcfc236c2336fb04a0fbac626166d9491d2884c",
+      "source": "fixed"
+    },
+    {
+      "code": "ABCDEFGHIJ",
+      "index": 4,
+      "normalized": "ABCDEFGHIJ",
+      "sha256_hex": "261305762671a58cae5b74990bcfc236c2336fb04a0fbac626166d9491d2884c",
+      "source": "fixed"
+    },
+    {
+      "code": "5AMXZ-HLANI",
+      "index": 1,
+      "normalized": "5AMXZHLANI",
+      "sha256_hex": "eefabc083e77952d725525e1b088a4f00c7a68d7ff9f12cb9de6b5a755bbf43d",
+      "source": "generated"
+    },
+    {
+      "code": "KWHEP-KFNY2",
+      "index": 2,
+      "normalized": "KWHEPKFNY2",
+      "sha256_hex": "ff4a6231fd5e60d8820e2fd722698ca8ddc97d5b2fb3abbb853a546323e3cd00",
+      "source": "generated"
+    },
+    {
+      "code": "SSWBV-E5A5C",
+      "index": 3,
+      "normalized": "SSWBVE5A5C",
+      "sha256_hex": "eb4ab22dd8e974dfdd1a7077229270de04d61fdfeae4f24f64b01807c7d81d78",
+      "source": "generated"
+    }
+  ],
+  "key_export_import": [
+    {
+      "imported_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "name": "ascending",
+      "token": "kvkey_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "imported_key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "master_key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "name": "all-ff",
+      "token": "kvkey___________________________________________8"
+    }
+  ],
+  "malformed_key_tokens": [
+    {
+      "name": "wrong-prefix",
+      "python_outcome": "value_error:invalid key token (must start with kvkey_)",
+      "token": "not-a-kvkey"
+    },
+    {
+      "name": "wrong-length",
+      "python_outcome": "value_error:invalid master key text: expected a kvkey_ token from 'kv export-key' or 43 base64url/base64 characters (optionally '=' padded) for a 32-byte key; one alphabet only, no spaces or other characters",
+      "token": "kvkey_AA"
+    },
+    {
+      "name": "bad-character",
+      "python_outcome": "value_error:invalid master key text: expected a kvkey_ token from 'kv export-key' or 43 base64url/base64 characters (optionally '=' padded) for a 32-byte key; one alphabet only, no spaces or other characters",
+      "token": "kvkey_!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    }
+  ],
+  "passphrase_strength": [
+    {
+      "ok": false,
+      "passphrase": "password",
+      "reason": "this passphrase is too common — it appears in breach databases"
+    },
+    {
+      "ok": false,
+      "passphrase": " password ",
+      "reason": "this passphrase is too common — it appears in breach databases"
+    },
+    {
+      "ok": false,
+      "passphrase": "short",
+      "reason": "passphrase must be at least 12 characters"
+    },
+    {
+      "ok": false,
+      "passphrase": "1234567890123",
+      "reason": "all-digit passphrases under 16 characters are too weak"
+    },
+    {
+      "ok": true,
+      "passphrase": "1234567890123456",
+      "reason": ""
+    },
+    {
+      "ok": false,
+      "passphrase": "aaaaaaaaaaaa",
+      "reason": "passphrase cannot be a single repeated character"
+    },
+    {
+      "ok": true,
+      "passphrase": "correct horse battery staple",
+      "reason": ""
+    },
+    {
+      "ok": true,
+      "passphrase": "pässphrase-✓-2026",
+      "reason": ""
+    },
+    {
+      "ok": true,
+      "passphrase": "Tr0ub4dor&3-long",
+      "reason": ""
+    },
+    {
+      "ok": false,
+      "passphrase": "hello world",
+      "reason": "passphrase must be at least 12 characters"
+    },
+    {
+      "ok": false,
+      "passphrase": "letmein1",
+      "reason": "this passphrase is too common — it appears in breach databases"
+    },
+    {
+      "ok": false,
+      "passphrase": "这是一个足够长的口令",
+      "reason": "passphrase must be at least 12 characters"
+    }
+  ]
+}
