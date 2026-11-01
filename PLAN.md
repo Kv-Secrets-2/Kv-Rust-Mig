@@ -43,8 +43,8 @@ Cargo workspace, one release binary:
 
 | Crate | Replaces | Notes |
 |---|---|---|
-| `kv-crypto` | crypto.py, key_config, owner_key, old_key | RustCrypto (`chacha20poly1305`, `aes-gcm`, `blake2`, `scrypt`, `pbkdf2`, `sha2`, `hmac`), `ed25519-dalek`; `zeroize`/`secrecy` everywhere |
-| `kv-store` | store.py (drawer backend only), vaultfs, fssec, file_lock, structure, backup, drawer_integrity, env_recovery | atomic writes, storage lock, drawer + env-bundle backends |
+| `kv-crypto` | crypto.py, key_config, owner_key | RustCrypto (`chacha20poly1305`, `aes-gcm`, `blake2`, `scrypt`, `sha2`, `hmac`), `ed25519-dalek`; `zeroize`/`secrecy` everywhere |
+| `kv-store` | store.py (drawer backend only), vaultfs, fssec, file_lock, structure, backup, drawer_integrity, env_recovery | atomic writes, storage lock, drawer backend |
 | `kv-config` | config.py, config_authority, setup_toml, trust, vault_origin, vault_registry | `serde_json`, `toml_edit` |
 | `kv-approvals` | approval_*.py, approvals, grants, owner_approval, saved_passes, policy_requests, request_records, runtime_anchor | signed artifacts, verifier |
 | `kv-proto` | control_proto, client, cap_client wire, approval_wire | framed canonical JSON + MAC handshake; fuzzed |
