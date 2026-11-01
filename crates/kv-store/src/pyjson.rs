@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Number, Value};
 
 use crate::StoreError;
 
@@ -6,6 +6,132 @@ pub fn to_vec(value: &Value) -> Result<Vec<u8>, StoreError> {
     let mut output = Vec::new();
     write_value(value, &mut output)?;
     Ok(output)
+}
+
+pub fn to_vec_python(value: &Value, sort_keys: bool) -> Result<Vec<u8>, StoreError> {
+    let mut output = Vec::new();
+    write_python(value, &mut output, sort_keys, false)?;
+    Ok(output)
+}
+
+pub fn to_vec_python_compact(value: &Value, sort_keys: bool) -> Result<Vec<u8>, StoreError> {
+    let mut output = Vec::new();
+    write_python(value, &mut output, sort_keys, true)?;
+    Ok(output)
+}
+
+fn write_python(
+    value: &Value,
+    output: &mut Vec<u8>,
+    sort_keys: bool,
+    compact: bool,
+) -> Result<(), StoreError> {
+    match value {
+        Value::Null => output.extend_from_slice(b"null"),
+        Value::Bool(true) => output.extend_from_slice(b"true"),
+        Value::Bool(false) => output.extend_from_slice(b"false"),
+        Value::Number(number) => output.extend_from_slice(python_number(number).as_bytes()),
+        Value::String(string) => write_ascii_string(string, output),
+        Value::Array(items) => {
+            output.push(b'[');
+            for (index, item) in items.iter().enumerate() {
+                if index != 0 {
+                    output.extend_from_slice(if compact { b"," } else { b", " });
+                }
+                write_python(item, output, sort_keys, compact)?;
+            }
+            output.push(b']');
+        }
+        Value::Object(items) => {
+            output.push(b'{');
+            let mut entries = items.iter().collect::<Vec<_>>();
+            if sort_keys {
+                entries.sort_by(|left, right| left.0.cmp(right.0));
+            }
+            for (index, (key, item)) in entries.into_iter().enumerate() {
+                if index != 0 {
+                    output.extend_from_slice(if compact { b"," } else { b", " });
+                }
+                write_ascii_string(key, output);
+                output.extend_from_slice(if compact { b":" } else { b": " });
+                write_python(item, output, sort_keys, compact)?;
+            }
+            output.push(b'}');
+        }
+    }
+    Ok(())
+}
+
+fn python_number(number: &Number) -> String {
+    if !number.is_f64() {
+        return number.to_string();
+    }
+    let raw = number.to_string();
+    let (negative, unsigned) = raw
+        .strip_prefix('-')
+        .map_or((false, raw.as_str()), |value| (true, value));
+    let (mantissa, exponent) = unsigned
+        .split_once(['e', 'E'])
+        .map_or((unsigned, 0), |(mantissa, exponent)| {
+            (mantissa, exponent.parse::<i32>().unwrap_or(0))
+        });
+    let decimal_position = mantissa.find('.').unwrap_or(mantissa.len()) as i32 + exponent;
+    let mut digits = mantissa
+        .bytes()
+        .filter(|byte| *byte != b'.')
+        .map(char::from)
+        .collect::<String>();
+    let leading_zeroes = digits.bytes().take_while(|byte| *byte == b'0').count();
+    digits.drain(..leading_zeroes);
+    let decimal_position = decimal_position - leading_zeroes as i32;
+    while digits.len() > 1 && digits.ends_with('0') {
+        digits.pop();
+    }
+    if digits.is_empty() {
+        return if negative { "-0.0" } else { "0.0" }.into();
+    }
+
+    let exponent = decimal_position - 1;
+    let mut result = String::new();
+    if negative {
+        result.push('-');
+    }
+    if (-4..16).contains(&exponent) {
+        if decimal_position <= 0 {
+            result.push_str("0.");
+            result.extend(std::iter::repeat_n(
+                '0',
+                usize::try_from(-decimal_position).unwrap_or_default(),
+            ));
+            result.push_str(&digits);
+        } else if decimal_position as usize >= digits.len() {
+            result.push_str(&digits);
+            result.extend(std::iter::repeat_n(
+                '0',
+                decimal_position as usize - digits.len(),
+            ));
+            result.push_str(".0");
+        } else {
+            let split = decimal_position as usize;
+            result.push_str(&digits[..split]);
+            result.push('.');
+            result.push_str(&digits[split..]);
+        }
+    } else {
+        result.push(digits.as_bytes()[0] as char);
+        if digits.len() > 1 {
+            result.push('.');
+            result.push_str(&digits[1..]);
+        }
+        result.push('e');
+        result.push(if exponent < 0 { '-' } else { '+' });
+        let magnitude = exponent.unsigned_abs();
+        if magnitude < 10 {
+            result.push('0');
+        }
+        result.push_str(&magnitude.to_string());
+    }
+    result
 }
 
 pub fn to_vec_indent2_ascii(value: &Value) -> Result<Vec<u8>, StoreError> {
@@ -177,7 +303,7 @@ fn write_string(string: &str, output: &mut Vec<u8>) {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{to_vec, to_vec_indent2_ascii};
+    use super::{to_vec, to_vec_indent2_ascii, to_vec_python, to_vec_python_compact};
 
     #[test]
     fn matches_python_string_escaping_and_raw_unicode() {
@@ -223,5 +349,18 @@ mod tests {
             b"{\n  \"second\": \"v\\u00e4rde \\u2713 \\ud83d\\ude42\",\n  \"first\": {\n    \"empty\": [],\n    \"object\": {}\n  }\n}\n"
         );
         assert!(to_vec_indent2_ascii(&json!({"number":1.25})).is_err());
+    }
+
+    #[test]
+    fn python_float_repr_matches_json_dumps_exponent_boundaries() {
+        let value = serde_json::json!([1.0, -0.0, 1e-4, 1e-5, 1e-7, 1e15, 1e16, 1.2345e20]);
+        assert_eq!(
+            to_vec_python(&value, false).unwrap(),
+            b"[1.0, -0.0, 0.0001, 1e-05, 1e-07, 1000000000000000.0, 1e+16, 1.2345e+20]"
+        );
+        assert_eq!(
+            to_vec_python_compact(&value, false).unwrap(),
+            b"[1.0,-0.0,0.0001,1e-05,1e-07,1000000000000000.0,1e+16,1.2345e+20]"
+        );
     }
 }
