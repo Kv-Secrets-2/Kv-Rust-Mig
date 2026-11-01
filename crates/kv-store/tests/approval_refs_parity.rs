@@ -32,7 +32,6 @@ fn run_python(python: &std::ffi::OsStr, temp: &TestDir, root: &Path, command: Va
         .arg(root)
         .arg("00")
         .arg(&spec)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python approval reference");
     assert!(
@@ -634,6 +633,7 @@ fn assert_refused_named_without_changes(
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn rename_also_refuses_when_the_destination_is_named() {
     let temp = TestDir::new("approval-rename-destination");

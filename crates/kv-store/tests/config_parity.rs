@@ -34,7 +34,6 @@ fn run_python(
         .arg(root)
         .arg(hex(master.as_bytes()))
         .arg(&spec)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python parity subcommand");
     assert!(
