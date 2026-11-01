@@ -11,6 +11,12 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+kv-mcp = { path = "../kv-mcp" }
+
+[dev-dependencies]
+kv-crypto = { path = "../kv-crypto" }
+kv-store = { path = "../kv-store" }
+serde_json = "1"
 
 [lints]
 workspace = true

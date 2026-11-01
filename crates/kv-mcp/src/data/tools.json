@@ -1,0 +1,259 @@
+[
+  {
+    "name": "kv_status",
+    "description": "[SAFE] Show kv project status. Returns whether a kv project is initialized, the current environment, the number of secrets stored, configured providers, run policy, and the loaded HTTP-policy digest.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "profile": "safe"
+  },
+  {
+    "name": "kv_envs",
+    "description": "[SAFE] List available environments (e.g. dev, staging, prod). Does not reveal any secret values.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "profile": "safe"
+  },
+  {
+    "name": "kv_list",
+    "description": "[SAFE] List secret key names in an environment. Returns names only — no secret values are revealed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      }
+    },
+    "profile": "safe"
+  },
+  {
+    "name": "kv_run",
+    "description": "[EXECUTE] Run a command with secrets injected as environment variables. Returns exit code and redacted stdout/stderr — the environment's secret values (4 or more characters) and some common encodings of them are replaced with [REDACTED] before the output reaches the AI context (a run with env_names=[] loads no secrets, so nothing is redacted). For a run that receives secrets or a capability, the command is validated against a security policy (allowlist or blocklist) before execution, and shells, inline code, and brokerable network/DB tools are blocked; a run without secrets is checked only for exfiltration patterns. Runs are network-isolated except in three cases: (1) the command matches an entry the owner added with kv network-allow; (2) the run has no vault secrets (env_names=[] and no capability_names); (3) the run uses capability_names. In a protected session, a run with the owner's signed approval gets exactly the network that approval signed, so case 3 alone does not give it the network. Prefer policy-checked kv_api for HTTP work. kv_query and kv_ssh share this execute profile; they are parked on passphrase-protected (v3/v4) vaults, and elsewhere they do not yet have action-level policy. Blocked brokerable commands return broker_handoff guidance with available provider names or setup instructions. When kv_run is necessary, pass env_names with the smallest required secret set; env_names=[] runs without vault secrets. Omitting env_names is blocked for secret-bearing runs because grants must bind to explicit secret names. For brokered HTTP/API work inside a script, pass capability_names with an api:<provider> entry per service so the subprocess receives only a temporary KV_CAP_TOKEN, not the raw provider secret. Capability runs use a private working-directory copy by default; set private_cwd=false only when the user explicitly accepts direct workspace writes. The MCP client SHOULD prompt for user confirmation before calling. Long-running commands are supported.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Command and arguments as an array (e.g. [\"python\", \"app.py\"])"
+        },
+        "env_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Explicit secret names to inject. Use [] for no secrets; omit is blocked for secret-bearing runs."
+        },
+        "capability_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Broker capabilities to expose through one KV_CAP_TOKEN, api:<provider> only; several services are counted each on its own (the owner approves a count for each). Do not combine with env_names."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for the command. If omitted, uses the daemon's working directory."
+        },
+        "private_cwd": {
+          "type": "boolean",
+          "description": "Use a private working-directory copy. Defaults on for capability runs; optional for raw secret runs. Set false only for explicit direct-write compatibility."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why this run needs secrets or services, in a short sentence. Recorded in the owner's audit record (and shown with an approval request); never put a secret or key in it."
+        }
+      },
+      "required": [
+        "argv"
+      ]
+    },
+    "profile": "execute"
+  },
+  {
+    "name": "kv_api",
+    "description": "[SAFE] Make a policy-checked HTTP API call with credentials injected by the kv broker. The API key is held in the daemon (or explicit direct-mode MCP broker) — it never enters your environment, is redacted from tool responses by value matching, and never touches the filesystem. Supports: openai, anthropic, google, github, google-cloud, and custom providers. The agent adds the correct auth header/param automatically. The provider, method, canonical path, query use, and headers must match broker policy; unsafe methods return permit_required without executing. Ask the owner to approve the request, then retry the unchanged call with its permit_id. Returns the API response body (with any secret values redacted).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "API provider name: openai, anthropic, google, github, google-cloud"
+        },
+        "path": {
+          "type": "string",
+          "description": "API endpoint path (e.g. /v1/models)"
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method (default: GET). Mutating calls require an owner-configured rule and a signed one-call permit for the exact call.",
+          "enum": [
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "permit_id": {
+          "type": "string",
+          "description": "One-call permit ID from permit_required; retry the exact unchanged call after owner approval."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why this call is needed, in a short sentence. Recorded with a one-call permit in the owner's audit record; never put a secret or key in it."
+        },
+        "body": {
+          "type": "object",
+          "description": "Request body (JSON). Omit for GET requests."
+        },
+        "headers": {
+          "type": "object",
+          "description": "Extra headers to include (auth headers are added automatically)."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      },
+      "required": [
+        "provider",
+        "path"
+      ]
+    },
+    "profile": "safe"
+  },
+  {
+    "name": "kv_query",
+    "description": "[EXECUTE] Run an arbitrary database/Redis operation with credentials injected by the kv broker. Parked on passphrase-protected (v3/v4) vaults, the kind kv init makes, in this release (not offered there). The database password is held in the daemon (or explicit direct-mode MCP broker) — it never enters your environment. Supports PostgreSQL, MySQL, and Redis providers configured via 'kv provider add'. Action-level SQL/Redis policy is not implemented, so this tool is opt-in. Returns query results with any secret values redacted. For HTTP API calls, use kv_api instead.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Database provider name (configured via kv provider add --type postgres/mysql/redis)"
+        },
+        "query": {
+          "type": "string",
+          "description": "SQL query (Postgres/MySQL) or Redis command to execute"
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      },
+      "required": [
+        "provider",
+        "query"
+      ]
+    },
+    "profile": "execute"
+  },
+  {
+    "name": "kv_ssh",
+    "description": "[EXECUTE] Run an arbitrary command on a remote server via SSH with credentials injected by the kv broker. Parked on passphrase-protected (v3/v4) vaults, the kind kv init makes, in this release (not offered there). The SSH key or password is held in the daemon (or explicit direct-mode MCP broker) — it never enters your environment. Configure SSH providers via 'kv provider add --type ssh'. Remote-command action policy is not implemented, so this tool is opt-in. Returns stdout, stderr, and exit code with any secret values redacted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "SSH provider name (configured via kv provider add --type ssh)"
+        },
+        "command": {
+          "type": "string",
+          "description": "Command to execute on the remote server"
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      },
+      "required": [
+        "provider",
+        "command"
+      ]
+    },
+    "profile": "execute"
+  },
+  {
+    "name": "kv_set",
+    "description": "[MUTATE] [DIRECT ONLY] Store or update an encrypted secret. Requires explicit direct vault access while the daemon is stopped, which passphrase-protected (v3/v4) vaults refuse (not offered there); prefer the CLI. The value is encrypted immediately using ChaCha20-Poly1305. The MCP client SHOULD prompt for user confirmation before calling.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Secret key name (e.g. OPENAI_API_KEY)"
+        },
+        "value": {
+          "type": "string",
+          "description": "Secret value to store"
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "profile": "mutate"
+  },
+  {
+    "name": "kv_rm",
+    "description": "[MUTATE] [DIRECT ONLY] Remove a secret from the encrypted store. Requires explicit direct vault access while the daemon is stopped, which passphrase-protected (v3/v4) vaults refuse (not offered there); prefer the CLI. This action is irreversible. The MCP client SHOULD prompt for user confirmation before calling.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Secret key name to remove"
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "profile": "mutate"
+  },
+  {
+    "name": "kv_get",
+    "description": "[REVEAL] [DIRECT ONLY] Get a secret value by name. Requires explicit direct vault access while the daemon is stopped, which passphrase-protected (v3/v4) vaults refuse (not offered there); prefer the CLI. WARNING: The decrypted value is returned in plaintext to the AI context. This means the secret will be visible to the language model. Prefer kv_run to use secrets without revealing them. The MCP client SHOULD prompt for user confirmation before calling.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Secret key name to retrieve"
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment name (default: project default)"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "profile": "reveal"
+  }
+]
