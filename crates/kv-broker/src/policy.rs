@@ -104,7 +104,7 @@ fn canonical_json(value: &Value) -> String {
                 .map(|key| {
                     format!(
                         "{}:{}",
-                        serde_json::to_string(key).unwrap_or_default(),
+                        python_ascii_string(key),
                         canonical_json(&object[key])
                     )
                 })
@@ -119,8 +119,36 @@ fn canonical_json(value: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        Value::String(text) => python_ascii_string(text),
         _ => serde_json::to_string(value).unwrap_or_else(|_| "null".into()),
     }
+}
+
+/// `json.dumps` with `ensure_ascii=True`: everything outside `' '..='~'` becomes `\uXXXX`
+/// (UTF-16 units, so astral characters are surrogate pairs), like Python's `ESCAPE_ASCII`.
+fn python_ascii_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            ' '..='~' => out.push(ch),
+            _ => {
+                let mut units = [0_u16; 2];
+                for unit in ch.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+    out
 }
 
 pub fn describe_http_policy_snapshot(snapshot: &HttpPolicySnapshot) -> Value {
@@ -750,4 +778,20 @@ pub fn evaluate_http_policy(
         return json!({"allowed":true,"policy_rule":rule.id});
     }
     policy_denied(&method, target.as_str().unwrap_or_default())
+}
+
+#[cfg(test)]
+mod digest_tests {
+    use super::*;
+
+    #[test]
+    fn describe_digest_escapes_non_ascii_like_python() {
+        let snapshot = HttpPolicySnapshot {
+            configured: true,
+            legacy_providers: None,
+            providers: serde_json::json!({"p":{"name":"h\u{e9}llo \u{2713} \u{1F600}","rules":[{"path":"/\u{7f}"}]}}),
+        };
+        let described = describe_http_policy_snapshot(&snapshot);
+        assert_eq!(described["digest"], "82033b13e7c73915");
+    }
 }

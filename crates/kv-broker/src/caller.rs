@@ -362,8 +362,12 @@ impl ApiCaller {
         match result {
             Ok(response) => {
                 let status = response.status();
+                let chunked = is_chunked(&response);
                 let mut reader = response.into_reader();
-                let (body_text, truncated) = read_limited(&mut reader, limit);
+                let (body_text, truncated) = match read_limited(&mut reader, limit, chunked) {
+                    Ok(read) => read,
+                    Err(error) => return read_failure(&error, timeout),
+                };
                 let body_value = if truncated {
                     truncated_text(&body_text, needles)
                 } else if (300..400).contains(&status) {
@@ -399,8 +403,12 @@ impl ApiCaller {
                 result
             }
             Err(ureq::Error::Status(code, response)) => {
+                let chunked = is_chunked(&response);
                 let mut reader = response.into_reader();
-                let (body_text, truncated) = read_limited(&mut reader, limit);
+                let (body_text, truncated) = match read_limited(&mut reader, limit, chunked) {
+                    Ok(read) => read,
+                    Err(error) => return read_failure(&error, timeout),
+                };
                 let error_body = if truncated {
                     truncated_text(&body_text, needles)
                 } else {
@@ -586,14 +594,50 @@ fn is_global(ip: IpAddr) -> bool {
     }
 }
 
-fn read_limited(reader: &mut impl Read, limit: usize) -> (String, bool) {
+fn is_chunked(response: &ureq::Response) -> bool {
+    response
+        .header("transfer-encoding")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"))
+}
+
+/// Read at most `limit` bytes and report truncation, like Python's `_read_limited_text`.
+///
+/// Python's `HTTPResponse.read(amt)` treats a connection that closes before a declared
+/// `Content-Length` is reached as end of body (the partial body is the response), but a
+/// chunked body cut short raises `IncompleteRead`; every other read failure (reset, TLS
+/// error, timeout) raises too. Mirror that: an early EOF is final only for a framed body.
+fn read_limited(
+    reader: &mut impl Read,
+    limit: usize,
+    chunked: bool,
+) -> std::io::Result<(String, bool)> {
     let mut data = Vec::new();
-    let _ = reader
+    match reader
         .take(limit.saturating_add(1) as u64)
-        .read_to_end(&mut data);
+        .read_to_end(&mut data)
+    {
+        Ok(_) => {}
+        Err(error) if !chunked && error.kind() == std::io::ErrorKind::UnexpectedEof => {}
+        Err(error) => return Err(error),
+    }
     let truncated = data.len() > limit;
     data.truncate(limit);
-    (String::from_utf8_lossy(&data).into_owned(), truncated)
+    Ok((String::from_utf8_lossy(&data).into_owned(), truncated))
+}
+
+/// Python's `make_api_call` lets a failed body read escape to its generic handlers:
+/// `socket.timeout` → `timeout (Ns)`, anything else → `request failed: <ExceptionName>`.
+fn read_failure(error: &std::io::Error, timeout: std::time::Duration) -> Value {
+    use std::io::ErrorKind;
+    match error.kind() {
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => {
+            json!({"error":format!("timeout ({}s)", timeout.as_secs())})
+        }
+        ErrorKind::UnexpectedEof => json!({"error":"request failed: IncompleteRead"}),
+        ErrorKind::ConnectionReset => json!({"error":"request failed: ConnectionResetError"}),
+        ErrorKind::ConnectionAborted => json!({"error":"request failed: ConnectionAbortedError"}),
+        _ => json!({"error":"request failed: OSError"}),
+    }
 }
 
 fn decode_body(text: &str, needles: &crate::Needles) -> Value {

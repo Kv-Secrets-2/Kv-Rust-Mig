@@ -900,18 +900,15 @@ fn handle_connection(
                 .and_then(Value::as_str)
                 .or_else(|| approved.get("default_env").and_then(Value::as_str))
                 .unwrap_or("dev");
-            let response = match cache.lock() {
-                Ok(mut cache) => api_call_response(
-                    request,
-                    env,
-                    store,
-                    &mut cache,
-                    providers,
-                    http_policy,
-                    api_caller,
-                ),
-                Err(_) => json!({"error":"secret cache is unavailable"}),
-            };
+            let response = api_call_response(
+                request,
+                env,
+                store,
+                cache,
+                providers,
+                http_policy,
+                api_caller,
+            );
             let _ = audit_api_call(
                 request,
                 env,
@@ -1253,7 +1250,7 @@ fn api_call_response(
     request: &serde_json::Map<String, Value>,
     env: &str,
     store: &DrawerStore,
-    cache: &mut SecretCache,
+    cache: &Mutex<SecretCache>,
     providers: &kv_broker::ProviderTable,
     policy: &kv_broker::HttpPolicySnapshot,
     caller: &kv_broker::ApiCaller,
@@ -1327,7 +1324,11 @@ fn api_call_response(
         .get("secret_name")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let secret_value = match cache.get(store, env, secret_name) {
+    let lookup = match cache.lock() {
+        Ok(mut cache) => cache.get(store, env, secret_name),
+        Err(_) => return json!({"error":"secret cache is unavailable"}),
+    };
+    let secret_value = match lookup {
         Ok(Some(secret)) if !secret.is_empty() => secret,
         Ok(_) => return json!({"error":format!("secret '{secret_name}' not found in env '{env}'")}),
         Err(error) => return json!({"error":error.to_string()}),

@@ -6,8 +6,6 @@ use kv_broker::{
 };
 use serde_json::{Value, json};
 
-const PYTHONPATH: &str = "/home/ubuntu/repos/kv-secrets";
-
 fn python_results(code: &str, input: &Value) -> Value {
     let Some(python) = std::env::var_os("KV_PY_REF") else {
         panic!("KV_PY_REF must be set by the test caller");
@@ -15,7 +13,6 @@ fn python_results(code: &str, input: &Value) -> Value {
     let mut child = Command::new(python)
         .arg("-c")
         .arg(code)
-        .env("PYTHONPATH", PYTHONPATH)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
