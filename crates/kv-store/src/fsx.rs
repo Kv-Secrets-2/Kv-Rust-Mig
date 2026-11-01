@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -7,7 +8,22 @@ use crate::StoreError;
 pub const VAULT_FILE_LIMIT: usize = 64 * 1024 * 1024;
 
 pub(crate) struct StorageLock {
+    identity: PathBuf,
     _file: File,
+}
+
+pub(crate) struct ConfigLock {
+    identity: PathBuf,
+    _file: Option<File>,
+}
+
+struct HeldLock {
+    rank: u8,
+    identity: PathBuf,
+}
+
+thread_local! {
+    static LOCK_STACK: RefCell<Vec<HeldLock>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) fn strictly_present(path: &Path) -> Result<bool, StoreError> {
@@ -461,7 +477,10 @@ pub(crate) fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError
             secrets_dir.display()
         )));
     }
-    let path = secrets_dir.join("storage.lock");
+    let identity = lock_identity(secrets_dir, "storage.lock")?;
+    let reentrant = check_lock_order(1, &identity)?;
+    debug_assert!(!reentrant);
+    let path = identity.clone();
     let named = match fs::symlink_metadata(&path) {
         Ok(metadata) => {
             if is_indirect(&metadata) || !metadata.is_file() {
@@ -519,7 +538,159 @@ pub(crate) fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError
     }
 
     file.lock()?;
-    Ok(StorageLock { _file: file })
+    push_lock(1, &identity);
+    Ok(StorageLock {
+        identity,
+        _file: file,
+    })
+}
+
+pub(crate) fn lock_config(secrets_dir: &Path) -> Result<ConfigLock, StoreError> {
+    if !check_directory(secrets_dir)? {
+        return Err(StoreError::Structure(format!(
+            "{} must be a real directory",
+            secrets_dir.display()
+        )));
+    }
+    let identity = lock_identity(secrets_dir, "config.lock")?;
+    if check_lock_order(2, &identity)? {
+        push_lock(2, &identity);
+        return Ok(ConfigLock {
+            identity,
+            _file: None,
+        });
+    }
+    let path = identity.clone();
+    let named = match fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if is_indirect(&metadata) || !metadata.is_file() {
+                return Err(StoreError::Structure(format!(
+                    "{} must be a regular lock file",
+                    path.display()
+                )));
+            }
+            true
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(StoreError::Io(error)),
+    };
+
+    #[cfg(unix)]
+    let file = {
+        use rustix::fs::{Mode, OFlags, open};
+
+        let mut flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+        if !named {
+            flags |= OFlags::CREATE;
+        }
+        let fd = open(
+            &path,
+            flags,
+            if named {
+                Mode::empty()
+            } else {
+                Mode::RUSR | Mode::WUSR
+            },
+        )
+        .map_err(rustix_io_error)?;
+        File::from(fd)
+    };
+    #[cfg(not(unix))]
+    let file = {
+        use std::fs::OpenOptions;
+
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(!named);
+        options.open(&path)?
+    };
+
+    if !file.metadata()?.is_file() {
+        return Err(StoreError::Structure(format!(
+            "{} must be a regular lock file",
+            path.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    file.lock()?;
+    push_lock(2, &identity);
+    Ok(ConfigLock {
+        identity,
+        _file: Some(file),
+    })
+}
+
+impl Drop for StorageLock {
+    fn drop(&mut self) {
+        pop_lock(1, &self.identity);
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        pop_lock(2, &self.identity);
+    }
+}
+
+fn lock_identity(secrets_dir: &Path, name: &str) -> Result<PathBuf, StoreError> {
+    let directory = fs::canonicalize(secrets_dir)?;
+    let path = directory.join(name);
+    #[cfg(windows)]
+    {
+        Ok(PathBuf::from(path.to_string_lossy().to_ascii_lowercase()))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(path)
+    }
+}
+
+fn check_lock_order(rank: u8, identity: &Path) -> Result<bool, StoreError> {
+    LOCK_STACK.with(|stack| {
+        let stack = stack.borrow();
+        let Some(top) = stack.last() else {
+            return Ok(false);
+        };
+        if rank == 1 {
+            return Err(StoreError::LockOrder(
+                "lock order violation: storage locks cannot be nested or acquired under config"
+                    .into(),
+            ));
+        }
+        if top.rank == 2 {
+            if top.identity == identity {
+                return Ok(true);
+            }
+            return Err(StoreError::LockOrder(
+                "lock order violation: config locks are reentrant only for the same vault".into(),
+            ));
+        }
+        Ok(false)
+    })
+}
+
+fn push_lock(rank: u8, identity: &Path) {
+    LOCK_STACK.with(|stack| {
+        stack.borrow_mut().push(HeldLock {
+            rank,
+            identity: identity.to_path_buf(),
+        });
+    });
+}
+
+fn pop_lock(rank: u8, identity: &Path) {
+    LOCK_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack
+            .last()
+            .is_some_and(|held| held.rank == rank && held.identity == identity)
+        {
+            stack.pop();
+        }
+    });
 }
 
 pub(crate) fn unlink_record(
@@ -656,4 +827,31 @@ fn hex(bytes: &[u8]) -> String {
         output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::lock_storage;
+    use crate::StoreError;
+
+    #[test]
+    fn nested_storage_lock_is_rejected_before_relocking() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let secrets =
+            std::env::temp_dir().join(format!("kv-store-lock-{}-{suffix}", std::process::id()));
+        std::fs::create_dir_all(&secrets).expect("create secrets directory");
+
+        let first = lock_storage(&secrets).expect("first storage lock");
+        assert!(matches!(
+            lock_storage(&secrets),
+            Err(StoreError::LockOrder(_))
+        ));
+        drop(first);
+        std::fs::remove_dir_all(secrets).expect("remove temporary secrets directory");
+    }
 }

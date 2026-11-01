@@ -7,7 +7,7 @@ use kv_store::DrawerStore;
 use kv_store::backup::{self, BackupError, FORMAT_VERSION, HEADER_LEN, MAGIC};
 use serde_json::{Value, json};
 
-use common::TestDir;
+use common::{TestDir, copy_fixture_secrets, fixture_master_key, key_copy};
 
 const PASSPHRASE: &str = "stage2c test passphrase";
 
@@ -198,6 +198,70 @@ fn backup_creation_refuses_existing_and_in_vault_destinations() {
         make_test_backup(&store, &existing),
         Err(BackupError::Message(message)) if message.contains("already exists")
     ));
+}
+
+#[test]
+fn restore_target_must_be_a_new_or_empty_real_folder() {
+    let temp = TestDir::new("backup-restore-target");
+    let empty = temp.path().join("empty");
+    fs::create_dir(&empty).unwrap();
+    assert_eq!(backup::check_restore_target(&empty).unwrap(), empty);
+
+    let new = temp.path().join("new");
+    assert_eq!(backup::check_restore_target(&new).unwrap(), new);
+
+    let occupied = temp.path().join("occupied");
+    fs::create_dir(&occupied).unwrap();
+    fs::write(occupied.join("file"), b"x").unwrap();
+    assert!(matches!(
+        backup::check_restore_target(&occupied),
+        Err(BackupError::Message(message)) if message.contains("is not empty")
+    ));
+
+    let file = temp.path().join("file");
+    fs::write(&file, b"x").unwrap();
+    assert!(matches!(
+        backup::check_restore_target(&file),
+        Err(BackupError::Message(message)) if message.contains("not a new folder")
+    ));
+}
+
+#[test]
+fn backup_restores_into_a_new_v4_vault() {
+    let temp = TestDir::new("backup-new-vault");
+    let source_root = temp.project_root("source");
+    let source_secrets = copy_fixture_secrets(&source_root);
+    let master = fixture_master_key();
+    let store = DrawerStore::open(&source_secrets, key_copy(&master));
+    let state = store
+        .backup_state(&["dev", "prod"], "dev", 10)
+        .expect("snapshot source vault");
+    let plain = backup::payload_bytes(&state, "/source", "2026-01-02T03:04:05Z").unwrap();
+    let blob = backup::seal(&plain, PASSPHRASE, [14, 8, 1]).unwrap();
+    let opened = backup::open_backup_bytes(&blob, PASSPHRASE).unwrap();
+    let payload = backup::parse_payload(&opened).unwrap();
+
+    let target = temp.project_root("restored");
+    let restored = backup::restore_backup(payload, PASSPHRASE, &target).unwrap();
+    assert_eq!(restored.get_default_env().unwrap(), "dev");
+    assert_eq!(
+        restored
+            .get_secret("dev", "API_KEY")
+            .unwrap()
+            .unwrap()
+            .as_str(),
+        "sk-test-456"
+    );
+    let key_blob = fs::read(target.join(".secrets/key")).unwrap();
+    let identity = kv_crypto::keyfile::unwrap_v4(&key_blob, PASSPHRASE.as_bytes()).unwrap();
+    assert_eq!(
+        restored.store.env_id("dev"),
+        DrawerStore::open(
+            target.join(".secrets"),
+            Key32::new(*identity.master_key.as_bytes()),
+        )
+        .env_id("dev")
+    );
 }
 
 #[cfg(unix)]
