@@ -80,7 +80,7 @@ pub fn save_config(root: impl AsRef<Path>, config: &mut ConfigSnapshot) -> Resul
     let payload = pyjson::to_vec_indent2_ascii(&config.value)?;
     let path = config_path(root);
     config_write_guard(root, config, || {
-        fsx::write_atomic_limit(&path, &payload, false, CONFIG_LIMIT, "config file")
+        write_config(&root.join(".secrets"), &config.value)
     })?;
     config.digest = Sha256::digest(&payload).into();
     config.path = fs::canonicalize(path)?;
@@ -93,7 +93,7 @@ pub fn config_write_guard<T>(
     operation: impl FnOnce() -> Result<T, StoreError>,
 ) -> Result<T, StoreError> {
     let _guard = config_lock(root)?;
-    _assert_config_current(root, config)?;
+    assert_config_current(root, config)?;
     operation()
 }
 
@@ -112,7 +112,10 @@ pub fn config_transaction<T>(
     Ok(result)
 }
 
-pub fn _assert_config_current(root: &Path, config: &ConfigSnapshot) -> Result<(), StoreError> {
+pub(crate) fn assert_config_current(
+    root: &Path,
+    config: &ConfigSnapshot,
+) -> Result<(), StoreError> {
     let path = config_path(root);
     let canonical = fs::canonicalize(&path)?;
     if config.path != canonical {
@@ -300,7 +303,7 @@ pub struct DeletedEnvironment {
     pub purge_after: String,
 }
 
-pub fn deleted_entries(config: &Value) -> Result<Vec<DeletedEnvironment>, StoreError> {
+pub(crate) fn deleted_entries(config: &Value) -> Result<Vec<DeletedEnvironment>, StoreError> {
     let entries = config_object(config)?
         .get("deleted_environments")
         .and_then(Value::as_array);
@@ -336,11 +339,7 @@ pub fn deleted_entries(config: &Value) -> Result<Vec<DeletedEnvironment>, StoreE
         .collect()
 }
 
-pub fn _deleted_entries(config: &Value) -> Result<Vec<DeletedEnvironment>, StoreError> {
-    deleted_entries(config)
-}
-
-pub fn pending_wipes(config: &Value) -> Result<Vec<String>, StoreError> {
+pub(crate) fn pending_wipes(config: &Value) -> Result<Vec<String>, StoreError> {
     let Some(value) = config_object(config)?.get("env_wipes_pending") else {
         return Ok(Vec::new());
     };
@@ -359,10 +358,6 @@ pub fn pending_wipes(config: &Value) -> Result<Vec<String>, StoreError> {
             Ok(name.to_owned())
         })
         .collect()
-}
-
-pub fn _pending_wipes(config: &Value) -> Result<Vec<String>, StoreError> {
-    pending_wipes(config)
 }
 
 pub fn list_deleted_environments(
@@ -596,15 +591,11 @@ fn set_pending(config: &mut Value, pending: Vec<String>) -> Result<(), StoreErro
     Ok(())
 }
 
-fn ensure_config_ignores(sdir: &Path) -> Result<(), StoreError> {
+pub(crate) fn ensure_config_ignores(sdir: &Path) -> Result<(), StoreError> {
     update_vault_ignores(sdir, OLD_IGNORE_RULES, true, Some(IGNORE_HEADER))
 }
 
-pub fn _ensure_config_ignores(sdir: &Path) -> Result<(), StoreError> {
-    ensure_config_ignores(sdir)
-}
-
-pub fn _write_config(sdir: &Path, value: &Value) -> Result<(), StoreError> {
+pub(crate) fn write_config(sdir: &Path, value: &Value) -> Result<(), StoreError> {
     let payload = pyjson::to_vec_indent2_ascii(value)?;
     fsx::write_atomic_limit(
         &sdir.join(CONFIG_FILE),
@@ -657,16 +648,7 @@ pub fn update_vault_ignores(
     Ok(())
 }
 
-pub fn _merge_ignore_rules(
-    existing: &str,
-    required: &[&str],
-    tail_rules: &[&str],
-    header: Option<&str>,
-) -> String {
-    merge_ignore_rules(existing, required, tail_rules, header)
-}
-
-fn merge_ignore_rules(
+pub(crate) fn merge_ignore_rules(
     existing: &str,
     required: &[&str],
     tail_rules: &[&str],
@@ -718,11 +700,7 @@ fn merge_ignore_rules(
     output
 }
 
-pub fn _ignore_rule_present(existing: &str, rule: &str) -> bool {
-    ignore_rule_present(existing, rule)
-}
-
-fn ignore_rule_present(existing: &str, rule: &str) -> bool {
+pub(crate) fn ignore_rule_present(existing: &str, rule: &str) -> bool {
     let mut protected = false;
     for raw in existing.split('\n') {
         let mut line = git_trim_trailing_spaces(raw);
@@ -747,11 +725,7 @@ fn ignore_rule_present(existing: &str, rule: &str) -> bool {
     protected
 }
 
-pub fn _git_trim_trailing_spaces(line: &str) -> &str {
-    git_trim_trailing_spaces(line)
-}
-
-fn git_trim_trailing_spaces(line: &str) -> &str {
+pub(crate) fn git_trim_trailing_spaces(line: &str) -> &str {
     let mut run = None;
     let mut chars = line.char_indices();
     while let Some((index, character)) = chars.next() {
@@ -769,11 +743,7 @@ fn git_trim_trailing_spaces(line: &str) -> &str {
     run.map_or(line, |index| &line[..index])
 }
 
-pub fn _ignore_negation_matches(pattern: &str, rule: &str) -> bool {
-    ignore_negation_matches(pattern, rule)
-}
-
-fn ignore_negation_matches(pattern: &str, rule: &str) -> bool {
+pub(crate) fn ignore_negation_matches(pattern: &str, rule: &str) -> bool {
     if !pattern
         .chars()
         .all(|character| character.is_ascii_alphanumeric() || "._/*?-".contains(character))
@@ -1094,6 +1064,16 @@ impl Vault {
         passphrase: &str,
         made_from: &str,
     ) -> Result<crate::backup::BackupSummary, crate::backup::BackupError> {
+        self.make_backup_with_setting(path, passphrase, made_from, crate::backup::DEFAULT_SETTING)
+    }
+
+    pub fn make_backup_with_setting(
+        &self,
+        path: impl AsRef<Path>,
+        passphrase: &str,
+        made_from: &str,
+        setting: [u8; 3],
+    ) -> Result<crate::backup::BackupSummary, crate::backup::BackupError> {
         crate::backup::check_destination(&self.store, path.as_ref())?;
         let state = self.backup_state()?;
         crate::backup::make_backup_from_state(
@@ -1102,7 +1082,7 @@ impl Vault {
             state,
             passphrase,
             made_from,
-            crate::backup::DEFAULT_SETTING,
+            setting,
         )
     }
 

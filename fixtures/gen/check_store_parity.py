@@ -267,6 +267,164 @@ def stage3a_lifecycle(root, master_key, operations):
         "default_env": kv_config.get_default_env(root),
     }, ensure_ascii=False, separators=(",", ":")))
 
+def normalized_config(config):
+    value = dict(config)
+    if value.get("created") is not None:
+        value["created"] = "TIME"
+    for entry in value.get("deleted_environments", []):
+        for field in ("deleted_at", "purge_after"):
+            if field in entry:
+                entry[field] = "TIME"
+    return value
+
+def stage3a_step(root, master_key, operation):
+    backend = DrawerUpgradeBackend(root, lambda: master_key, require_active=True)
+    kind = operation["op"]
+    try:
+        if kind == "history_keep":
+            result = backend.set_history_keep(operation["keep"])
+        elif kind == "add":
+            result = kv_config.add_environment(root, operation["name"])
+        elif kind == "deleted_keep_days":
+            kv_config.set_deleted_env_keep_days(root, operation["days"])
+            result = kv_config.get_deleted_env_keep_days(root)
+        elif kind == "default":
+            kv_config.set_default_env(root, operation["name"])
+            result = None
+        elif kind == "rename":
+            backend.rename_env(operation["old"], operation["new"])
+            result = None
+        elif kind == "delete":
+            entry = backend.delete_env(operation["name"])
+            result = {
+                "name": entry["name"],
+                "deleted_at": "TIME",
+                "purge_after": "TIME",
+            }
+        elif kind == "restore":
+            backend.restore_env(operation["name"])
+            result = None
+        elif kind == "purge":
+            result = backend.purge_env(operation["name"])
+        elif kind == "set":
+            backend.set_secret(
+                operation["env"], operation["key"], operation["value"]
+            )
+            result = backend.list_versions(
+                operation["env"], operation["key"]
+            )[0]["version"]
+        elif kind == "remove":
+            result = backend.remove_secret(operation["env"], operation["key"])
+        elif kind == "copy":
+            result = backend.copy_env_checked(
+                operation["source"],
+                operation["destination"],
+                keep_existing=operation.get("keep_existing", False),
+            )
+        elif kind == "queue_wipe":
+            kv_config.queue_env_wipes(root, operation["names"])
+            result = None
+        elif kind == "list_get":
+            env, key = operation["env"], operation["key"]
+            result = {
+                "value": backend.get_secret(env, key),
+                "versions": backend.list_versions(env, key),
+            }
+        else:
+            raise ValueError(f"unknown Stage 3a step {kind}")
+        result = {"result": result}
+    except Exception as exc:
+        result = {"error": str(exc)}
+
+    config = kv_config.load_config(root)
+    names = list(config.get("environments", []))
+    names.extend(
+        entry["name"] for entry in kv_config._deleted_entries(config)
+    )
+    names.extend(kv_config._pending_wipes(config))
+    inventories = {}
+    for env in dict.fromkeys(names):
+        if Path(backend._index_path(env)).exists():
+            inventories[env] = normalized_inventory(backend, env)
+    normalized = normalized_config(config)
+    print(json.dumps({
+        **result,
+        "config": normalized,
+        "config_bytes": json.dumps(
+            normalized, ensure_ascii=True, indent=2
+        ) + "\n",
+        "indexes": inventories,
+    }, ensure_ascii=False, separators=(",", ":")))
+
+def stage3a_backup(root, master_key, operation):
+    kind = operation["op"]
+    passphrase = operation["passphrase"]
+    report_master = master_key
+    if kind == "make":
+        backend = DrawerUpgradeBackend(root, lambda: master_key, require_active=True)
+        seal = backup.seal
+        backup.seal = lambda plaintext, phrase, setting=None: seal(
+            plaintext, phrase, setting=(14, 8, 1)
+        )
+        try:
+            summary = backup.make_backup(
+                root, backend, passphrase, operation["path"]
+            )
+        finally:
+            backup.seal = seal
+        result = {"summary": summary}
+        report_root = root
+    elif kind == "restore":
+        data = backup.open_backup(operation["path"], passphrase)
+        vault_origin.record_created = lambda _root: None
+        restored_root, store = backup.restore_backup(
+            data, passphrase, operation["target"]
+        )
+        vault_origin.require_local = lambda _root: None
+        restored_backend = DrawerUpgradeBackend(
+            restored_root, lambda: store._load_master_key(), require_active=True
+        )
+        result = {"values": {}, "versions": {}}
+        for env in kv_config.list_environments(restored_root):
+            values = dict(store.list_secrets(env))
+            result["values"][env] = values
+            result["versions"][env] = {}
+            index = restored_backend._load_index(env)
+            for key, entry in index["secrets"].items():
+                if not entry.get("current_record_id"):
+                    continue
+                result["versions"][env][key] = [
+                    {
+                        "version": item["version"],
+                        "value": store.get_version(env, key, item["version"]),
+                    }
+                    for item in store.list_versions(env, key)
+                ]
+        report_root = restored_root
+        report_master = store._load_master_key()
+    else:
+        raise ValueError(f"unknown Stage 3a backup step {kind}")
+
+    backend = DrawerUpgradeBackend(
+        report_root, lambda: report_master, require_active=True
+    )
+    config = kv_config.load_config(report_root)
+    indexes = {}
+    names = list(config.get("environments", []))
+    names.extend(entry["name"] for entry in kv_config._deleted_entries(config))
+    for env in dict.fromkeys(names):
+        if Path(backend._index_path(env)).exists():
+            indexes[env] = normalized_inventory(backend, env)
+    normalized = normalized_config(config)
+    print(json.dumps({
+        **result,
+        "config": normalized,
+        "config_bytes": json.dumps(
+            normalized, ensure_ascii=True, indent=2
+        ) + "\n",
+        "indexes": indexes,
+    }, ensure_ascii=False, separators=(",", ":")))
+
 
 def main():
     python_root = Path(sys.argv[1])
@@ -283,6 +441,12 @@ def main():
         return
     if isinstance(operations, dict) and "stage3a_lifecycle" in operations:
         stage3a_lifecycle(python_root, master_key, operations["stage3a_lifecycle"])
+        return
+    if isinstance(operations, dict) and "stage3a_step" in operations:
+        stage3a_step(python_root, master_key, operations["stage3a_step"])
+        return
+    if isinstance(operations, dict) and "stage3a_backup" in operations:
+        stage3a_backup(python_root, master_key, operations["stage3a_backup"])
         return
     if isinstance(operations, dict) and operations.get("stage2c"):
         stage2c_parity(python_root, rust_root, master_key, operations)
