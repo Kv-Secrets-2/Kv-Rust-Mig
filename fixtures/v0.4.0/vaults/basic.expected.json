@@ -1,0 +1,21 @@
+{
+  "api_key_generation": 2,
+  "env_id": {
+    "dev": "e_724acd3f4428756134289cd7d607d87a",
+    "prod": "e_75e1e5ce441ac98d1d222aac976b0c3e"
+  },
+  "live_secrets": {
+    "dev": {
+      "API_KEY": "sk-test-456",
+      "MULTILINE": "a\nb",
+      "UNICODE": "värde ✓"
+    },
+    "prod": {
+      "DB_URL": "postgres://u:p@h/db"
+    }
+  },
+  "location_hex": "2f7661722f746d702f6b762d666978747572652d7661756c74732f6261736963",
+  "passphrase": "fixture-pass-1",
+  "realpath": "/var/tmp/kv-fixture-vaults/basic",
+  "removed_name": "GONE"
+}
