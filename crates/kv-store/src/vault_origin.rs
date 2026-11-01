@@ -1,18 +1,32 @@
+#[cfg(unix)]
 use std::fs::{self, File};
+#[cfg(unix)]
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(any(unix, test))]
+use serde_json::json;
+#[cfg(unix)]
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{StoreError, fsx, pyjson};
+use crate::StoreError;
+#[cfg(all(test, not(unix)))]
+use crate::pyjson;
+#[cfg(unix)]
+use crate::{fsx, pyjson};
 
 pub const MARKER: &str = "vault-marker";
+#[cfg(unix)]
 const RECORD_LIMIT: usize = 16 * 1024;
+#[cfg(unix)]
 const START_REFUSAL: &str = "This vault was not created or approved on this machine; run kv vault approve-local at your terminal.";
+#[cfg(unix)]
 const LOCAL_CHANGED: &str = "Local vault approval changed; run kv vault approve-local again.";
 
 #[derive(Debug, Error)]
@@ -51,6 +65,7 @@ pub fn state_dir() -> Result<PathBuf, VaultOriginError> {
     }
 }
 
+#[cfg(unix)]
 fn random_hex(bytes: usize) -> Result<String, VaultOriginError> {
     let mut value = vec![0u8; bytes];
     getrandom::getrandom(&mut value)
@@ -58,6 +73,7 @@ fn random_hex(bytes: usize) -> Result<String, VaultOriginError> {
     Ok(hex(&value))
 }
 
+#[cfg(unix)]
 fn hex(value: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(value.len() * 2);
@@ -68,6 +84,7 @@ fn hex(value: &[u8]) -> String {
     output
 }
 
+#[cfg(unix)]
 fn record_name(path: &str) -> String {
     format!(
         "vault-origin-{}.json",
@@ -239,6 +256,7 @@ impl Drop for FileLock {
     }
 }
 
+#[cfg(unix)]
 fn valid_record(record: &Value) -> bool {
     let Some(object) = record.as_object() else {
         return false;
@@ -294,6 +312,7 @@ pub fn identity(root: impl AsRef<Path>) -> Result<Value, VaultOriginError> {
     }
 }
 
+#[cfg(unix)]
 fn record_path_name(here: &Value) -> Result<String, VaultOriginError> {
     let path = here
         .get("path")
@@ -302,6 +321,7 @@ fn record_path_name(here: &Value) -> Result<String, VaultOriginError> {
     Ok(record_name(path))
 }
 
+#[cfg(unix)]
 fn read_record(
     folder: Option<&StateFolder>,
     here: &Value,
@@ -312,6 +332,7 @@ fn read_record(
     folder.read(&record_path_name(here)?)
 }
 
+#[cfg(unix)]
 fn write_record(
     folder: &StateFolder,
     here: &Value,
