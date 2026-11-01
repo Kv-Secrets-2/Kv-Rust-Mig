@@ -164,6 +164,15 @@ fn derive_scrypt(
     Ok(output)
 }
 
+pub fn derive_backup_key(
+    passphrase: &[u8],
+    salt: &[u8; 16],
+    setting: [u8; 3],
+) -> Result<Key32, CryptoError> {
+    let wrapping_key = derive_scrypt(passphrase, salt, (setting[0], setting[1], setting[2]))?;
+    Ok(Key32::from_zeroizing(wrapping_key))
+}
+
 fn aead_seal(
     key: &[u8; 32],
     nonce: &[u8; 12],
@@ -217,6 +226,25 @@ pub fn decrypt(key: &Key32, blob: &[u8], aad: &[u8]) -> Result<Zeroizing<Vec<u8>
     let nonce: &[u8; 12] = blob[..12].try_into().map_err(|_| CryptoError::Auth)?;
     let plaintext = aead_open(key.as_bytes(), nonce, &blob[12..], aad)?;
     Ok(Zeroizing::new(plaintext))
+}
+
+pub fn encrypt_with_nonce(key: &Key32, nonce: &[u8; 12], plaintext: &[u8], aad: &[u8]) -> Vec<u8> {
+    aead_seal(key.as_bytes(), nonce, plaintext, aad)
+        .expect("ChaCha20-Poly1305 accepts a 32-byte key and 12-byte nonce")
+}
+
+pub fn decrypt_with_nonce(
+    key: &Key32,
+    nonce: &[u8; 12],
+    ciphertext: &[u8],
+    aad: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    Ok(Zeroizing::new(aead_open(
+        key.as_bytes(),
+        nonce,
+        ciphertext,
+        aad,
+    )?))
 }
 
 pub mod keyfile {
@@ -826,7 +854,7 @@ pub fn import_key(token: &str) -> Result<Key32, CryptoError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key32, keyed_blake2b_128};
+    use super::{Key32, derive_backup_key, keyed_blake2b_128};
 
     #[test]
     fn keyed_blake2b_128_matches_python_hashlib_vector() {
@@ -836,6 +864,20 @@ mod tests {
             [
                 0xec, 0xe2, 0xe1, 0x9c, 0xd5, 0x74, 0x6d, 0xb8, 0x71, 0xe3, 0x30, 0x86, 0x79, 0xca,
                 0x9f, 0x52,
+            ]
+        );
+    }
+
+    #[test]
+    fn derive_backup_key_matches_python_scrypt_vector() {
+        let salt = std::array::from_fn(|index| index as u8);
+        let key = derive_backup_key(b"stage2c test passphrase", &salt, [14, 8, 1]).unwrap();
+        assert_eq!(
+            key.as_bytes(),
+            &[
+                0xfa, 0xcb, 0xc5, 0x84, 0xba, 0xd5, 0x2a, 0x8b, 0x08, 0x89, 0xf3, 0x61, 0xd5, 0xee,
+                0x4e, 0xd7, 0xc7, 0x8a, 0x7b, 0x74, 0x68, 0xfa, 0xf9, 0xd1, 0x2d, 0xa2, 0x43, 0xcc,
+                0x77, 0x07, 0xb2, 0xb6,
             ]
         );
     }

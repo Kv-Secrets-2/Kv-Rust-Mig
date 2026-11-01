@@ -258,3 +258,87 @@ fn keep_and_environment_validation_are_enforced() {
     assert!(store.set_secret("dev", "TOKEN", "value", 101).is_err());
     assert!(store.remove_secret("dev", "TOKEN", 101).is_err());
 }
+
+#[test]
+fn clear_env_tree_treats_an_absent_environment_as_a_noop() {
+    let temp = TestDir::new("clear-absent");
+    let (_, store, _) = store_in(&temp, "copy");
+    store
+        .clear_env_tree("dev")
+        .expect("absent tree is harmless");
+}
+
+#[cfg(unix)]
+#[test]
+fn clear_env_tree_refuses_symlinks_and_record_subdirectories() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TestDir::new("clear-links");
+    let (secrets_dir, store, _) = store_in(&temp, "env-link");
+    let envs = secrets_dir.join("drawers").join("envs");
+    fs::create_dir_all(&envs).unwrap();
+    let outside_env = temp.path().join("outside-env");
+    fs::create_dir(&outside_env).unwrap();
+    symlink(&outside_env, envs.join(store.env_id("dev"))).unwrap();
+    assert!(matches!(
+        store.clear_env_tree("dev"),
+        Err(StoreError::Structure(_))
+    ));
+
+    let (secrets_dir, store, _) = store_in(&temp, "records-link");
+    let env_dir = secrets_dir
+        .join("drawers")
+        .join("envs")
+        .join(store.env_id("dev"));
+    fs::create_dir_all(&env_dir).unwrap();
+    let outside_records = temp.path().join("outside-records");
+    fs::create_dir(&outside_records).unwrap();
+    symlink(&outside_records, env_dir.join("records")).unwrap();
+    assert!(matches!(
+        store.clear_env_tree("dev"),
+        Err(StoreError::Structure(_))
+    ));
+}
+
+#[test]
+fn clear_env_tree_refuses_record_subdirectories() {
+    let temp = TestDir::new("clear-records-child-dir");
+    let (secrets_dir, store, _) = store_in(&temp, "records-child-dir");
+    let records = secrets_dir
+        .join("drawers")
+        .join("envs")
+        .join(store.env_id("dev"))
+        .join("records");
+    fs::create_dir_all(records.join("subdirectory")).unwrap();
+    assert!(store.clear_env_tree("dev").is_err());
+    assert!(records.join("subdirectory").is_dir());
+}
+
+#[cfg(windows)]
+#[test]
+fn clear_env_tree_refuses_windows_directory_symlinks() {
+    use std::os::windows::fs::symlink_dir;
+
+    let temp = TestDir::new("clear-links");
+    let (secrets_dir, store, _) = store_in(&temp, "env-link");
+    let envs = secrets_dir.join("drawers").join("envs");
+    fs::create_dir_all(&envs).unwrap();
+    let outside_env = temp.path().join("outside-env");
+    fs::create_dir(&outside_env).unwrap();
+    if symlink_dir(&outside_env, envs.join(store.env_id("dev"))).is_err() {
+        eprintln!("SKIP Windows directory symlink test: symlink privilege unavailable");
+        return;
+    }
+    assert!(store.clear_env_tree("dev").is_err());
+
+    let (secrets_dir, store, _) = store_in(&temp, "records-link");
+    let env_dir = secrets_dir
+        .join("drawers")
+        .join("envs")
+        .join(store.env_id("dev"));
+    fs::create_dir_all(&env_dir).unwrap();
+    let outside_records = temp.path().join("outside-records");
+    fs::create_dir(&outside_records).unwrap();
+    symlink_dir(&outside_records, env_dir.join("records")).unwrap();
+    assert!(store.clear_env_tree("dev").is_err());
+}
