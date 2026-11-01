@@ -4,7 +4,7 @@ use std::fs;
 #[cfg(unix)]
 use std::fs::File;
 #[cfg(unix)]
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(unix)]
@@ -16,11 +16,21 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use base64::Engine as _;
+#[cfg(unix)]
+use base64::engine::general_purpose::URL_SAFE;
+use kv_approvals::owner::{OwnerSeed, owner_key_id, owner_public_key};
+use kv_approvals::wire::{self, FieldValue, MessageFields, MessageKind};
 use kv_crypto::{Key32, Zeroizing, derive_labeled_key, keyfile};
 use kv_store::DrawerStore;
 #[cfg(unix)]
 use kv_store::config_authority;
 use serde_json::{Value, json};
+#[cfg(unix)]
+use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -120,6 +130,30 @@ pub struct TrustContext {
     pub grant_state_key: Key32,
     pub token_key: Key32,
     pub protected: bool,
+    pub owner_key_id: String,
+    pub local_approval_id: Vec<u8>,
+    pub location: Vec<u8>,
+    pub version: String,
+    #[cfg(unix)]
+    pin: Arc<TrustPin>,
+}
+
+#[cfg(unix)]
+struct TrustPin {
+    state: std::sync::Mutex<PinState>,
+}
+
+#[cfg(unix)]
+struct PinState {
+    root: std::path::PathBuf,
+    folder_id: (u64, u64),
+    folder: Option<File>,
+    key_id: Option<(u64, u64)>,
+    key_digest: Option<[u8; 32]>,
+    approval_key_id: Option<(u64, u64)>,
+    approval_key_digest: Option<[u8; 32]>,
+    latched: Option<String>,
+    closed: bool,
 }
 
 impl TrustContext {
@@ -128,8 +162,26 @@ impl TrustContext {
         passphrase: Option<&[u8]>,
         master_key: &Key32,
     ) -> Result<Self, AgentError> {
-        let key_path = root.as_ref().join(".secrets").join("key");
+        let root = root.as_ref();
+        #[cfg(unix)]
+        let root_path = fs::canonicalize(root)?;
+        #[cfg(unix)]
+        let folder = File::open(&root_path)?;
+        #[cfg(unix)]
+        let folder_metadata = folder.metadata()?;
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        let key_path = root.join(".secrets").join("key");
         let blob = fs::read(key_path)?;
+        #[cfg(unix)]
+        let key_metadata = fs::symlink_metadata(root.join(".secrets").join("key"))?;
+        #[cfg(unix)]
+        let key_id = (key_metadata.dev(), key_metadata.ino());
+        #[cfg(unix)]
+        let key_digest: [u8; 32] = Sha256::digest(&blob).into();
+        let mut owner_id = String::new();
+        let mut local_approval_id = Vec::new();
+        let mut location = root.to_string_lossy().as_bytes().to_vec();
         let protected = match passphrase {
             Some(passphrase) => {
                 let identity = keyfile::unwrap_v4(&blob, passphrase)
@@ -139,20 +191,353 @@ impl TrustContext {
                         "the key file changed while unlocking; try again".into(),
                     ));
                 }
+                let seed = OwnerSeed::from_slice(&identity.owner_seed[..])
+                    .map_err(|error| AgentError(error.to_string()))?;
+                let public = owner_public_key(&seed);
+                owner_id = owner_key_id(&public, &identity.local_approval_id);
+                local_approval_id = identity.local_approval_id.to_vec();
+                if !identity.location.is_empty() {
+                    location = identity.location.clone();
+                }
                 true
             }
             None => false,
         };
+        #[cfg(unix)]
+        let approval_key_pin = pin_approval_signing_key(&root_path, &folder)?;
         let mut nonce = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(&mut nonce[..])
             .map_err(|_| AgentError("operating-system randomness unavailable".into()))?;
-        Ok(Self {
+        let output = Self {
             session_nonce: nonce,
             daemon_auth_key: derive_labeled_key(master_key, b"kv-approval:daemon-auth", &[]),
             grant_state_key: derive_labeled_key(master_key, b"kv-approval:grant-state", &[]),
             token_key: derive_labeled_key(master_key, b"kv-approval:token", &[]),
             protected,
-        })
+            owner_key_id: owner_id,
+            local_approval_id,
+            location,
+            version: "0.4.0".to_owned(),
+            #[cfg(unix)]
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: root_path,
+                    folder_id: (folder_metadata.dev(), folder_metadata.ino()),
+                    folder: Some(folder),
+                    key_id: Some(key_id),
+                    key_digest: Some(key_digest),
+                    approval_key_id: approval_key_pin.0,
+                    approval_key_digest: approval_key_pin.1,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
+        };
+        Ok(output)
+    }
+
+    #[cfg(unix)]
+    pub fn observe(&self) -> Result<(), AgentError> {
+        let mut state = self
+            .pin
+            .state
+            .lock()
+            .map_err(|_| AgentError("the vault could not be checked (LockPoisoned)".into()))?;
+        if let Some(reason) = &state.latched {
+            return Err(AgentError(reason.clone()));
+        }
+        let reason = if state.closed {
+            Some("the vault folder pin is closed".to_owned())
+        } else {
+            let metadata = match fs::symlink_metadata(&state.root) {
+                Ok(metadata) => metadata,
+                Err(_) => return Self::latch_locked(&mut state, "the vault folder is gone"),
+            };
+            if metadata.file_type().is_symlink() {
+                Some("the vault path now contains a link".to_owned())
+            } else if (metadata.dev(), metadata.ino()) != state.folder_id {
+                Some("the vault folder was replaced or moved".to_owned())
+            } else {
+                match state.folder.as_ref() {
+                    Some(folder) => match folder.metadata() {
+                        Err(error) => {
+                            return Self::latch_locked(
+                                &mut state,
+                                &format!(
+                                    "the vault could not be checked ({})",
+                                    python_io_exception_name(&error)
+                                ),
+                            );
+                        }
+                        Ok(metadata) if metadata.nlink() == 0 => {
+                            Some("the vault folder was deleted".to_owned())
+                        }
+                        Ok(_) => {
+                            let key_path = state.root.join(".secrets").join("key");
+                            match (fs::symlink_metadata(&key_path), fs::read(&key_path)) {
+                                (Err(error), _) if error.kind() == std::io::ErrorKind::NotFound => {
+                                    Some("the key file is gone".to_owned())
+                                }
+                                (Err(_), _) => Some("the key file cannot be read".to_owned()),
+                                (Ok(metadata), Ok(blob)) => {
+                                    if Some((metadata.dev(), metadata.ino())) != state.key_id {
+                                        Some("the key file was replaced".to_owned())
+                                    } else if Some(Sha256::digest(&blob).into()) != state.key_digest
+                                    {
+                                        Some("the key file changed".to_owned())
+                                    } else {
+                                        approval_key_difference(&state, folder).map(str::to_owned)
+                                    }
+                                }
+                                (Ok(_), Err(_)) => Some("the key file cannot be read".to_owned()),
+                            }
+                        }
+                    },
+                    None => Some("the vault folder pin is closed".to_owned()),
+                }
+            }
+        };
+        if let Some(reason) = reason {
+            return Self::latch_locked(&mut state, &reason);
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn latch_locked(state: &mut PinState, reason: &str) -> Result<(), AgentError> {
+        let message = state.latched.get_or_insert_with(|| {
+            format!(
+                "vault changed under the running daemon ({reason}); kv refuses all requests. Stop the daemon and unlock again."
+            )
+        });
+        Err(AgentError(message.clone()))
+    }
+
+    #[cfg(unix)]
+    pub fn hard_locked(&self) -> Option<String> {
+        self.pin
+            .state
+            .lock()
+            .ok()
+            .and_then(|state| state.latched.clone())
+    }
+
+    /// Retire the held folder pin. Work-window waiting is deferred until stage 6.
+    #[cfg(unix)]
+    pub fn close(&self) {
+        if let Ok(mut state) = self.pin.state.lock() {
+            state.closed = true;
+            state.folder.take();
+        }
+    }
+}
+
+#[cfg(unix)]
+const APPROVAL_KEY_RELATIVE: &str = ".secrets/approval_signing_key";
+#[cfg(unix)]
+const APPROVAL_KEY_READ_LIMIT: u64 = 1024 * 1024;
+#[cfg(unix)]
+type ApprovalKeyFileId = (u64, u64);
+#[cfg(unix)]
+type ApprovalKeyPin = (Option<ApprovalKeyFileId>, Option<[u8; 32]>);
+#[cfg(unix)]
+type ApprovalKeyFile = (Zeroizing<Vec<u8>>, ApprovalKeyFileId);
+
+#[cfg(unix)]
+fn file_id_component<T: TryInto<u64>>(value: T) -> Option<u64> {
+    value.try_into().ok()
+}
+
+#[cfg(unix)]
+enum ApprovalKeyReadError {
+    Io(std::io::Error),
+    NotRegular,
+    TooLarge,
+}
+
+#[cfg(unix)]
+enum EnsureApprovalKeyError {
+    Structural(AgentError),
+    Ignorable,
+}
+
+#[cfg(unix)]
+impl From<std::io::Error> for ApprovalKeyReadError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+#[cfg(unix)]
+fn pin_approval_signing_key(root: &Path, folder: &File) -> Result<ApprovalKeyPin, AgentError> {
+    match ensure_approval_signing_key(root, folder) {
+        Ok(()) | Err(EnsureApprovalKeyError::Ignorable) => {}
+        Err(EnsureApprovalKeyError::Structural(error)) => return Err(error),
+    }
+    match read_approval_signing_key(folder) {
+        Ok(Some((blob, file_id))) => {
+            let _ = kv_approvals::artifacts::parse_signing_key(&blob);
+            Ok((Some(file_id), Some(Sha256::digest(&blob).into())))
+        }
+        Ok(None) | Err(ApprovalKeyReadError::TooLarge) => Ok((None, None)),
+        Err(ApprovalKeyReadError::NotRegular) => Err(AgentError(
+            "the approval signing key must be a regular file".into(),
+        )),
+        Err(ApprovalKeyReadError::Io(error)) => Err(AgentError(error.to_string())),
+    }
+}
+
+#[cfg(unix)]
+fn ensure_approval_signing_key(root: &Path, folder: &File) -> Result<(), EnsureApprovalKeyError> {
+    use rustix::fs::{AtFlags, Mode, OFlags, fchmod, fsync, openat, statat};
+    use std::os::fd::AsFd;
+
+    let secrets_path = root.join(".secrets");
+    let secrets_metadata = match fs::symlink_metadata(&secrets_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&secrets_path).map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&secrets_path, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+            }
+            fs::symlink_metadata(&secrets_path).map_err(|_| EnsureApprovalKeyError::Ignorable)?
+        }
+        Err(_) => return Err(EnsureApprovalKeyError::Ignorable),
+    };
+    if !secrets_metadata.is_dir() {
+        return Err(EnsureApprovalKeyError::Structural(AgentError(
+            "the .secrets path must be a real directory".into(),
+        )));
+    }
+    match statat(folder, APPROVAL_KEY_RELATIVE, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(_) => return Ok(()),
+        Err(error) if error == rustix::io::Errno::NOENT => {}
+        Err(_) => return Err(EnsureApprovalKeyError::Ignorable),
+    }
+    let _ = kv_store::config::update_vault_ignores(
+        &secrets_path,
+        &["approval_signing_key"],
+        false,
+        Some("# Local-only kv runtime records"),
+    );
+
+    let mut key = Zeroizing::new([0_u8; 32]);
+    getrandom::getrandom(&mut key[..]).map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+    let encoded = Zeroizing::new(format!("{}\n", URL_SAFE.encode(&key[..])));
+    let fd = match openat(
+        folder,
+        APPROVAL_KEY_RELATIVE,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    ) {
+        Ok(fd) => fd,
+        Err(error) if error == rustix::io::Errno::EXIST => return Ok(()),
+        Err(_) => return Err(EnsureApprovalKeyError::Ignorable),
+    };
+    let mut file = File::from(fd);
+    if fchmod(&file, Mode::RUSR | Mode::WUSR).is_err()
+        || file.write_all(encoded.as_bytes()).is_err()
+        || file.sync_all().is_err()
+    {
+        return Err(EnsureApprovalKeyError::Ignorable);
+    }
+    let secrets_dir = openat(
+        folder,
+        ".secrets",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+    fsync(secrets_dir.as_fd()).map_err(|_| EnsureApprovalKeyError::Ignorable)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_approval_signing_key(
+    folder: &File,
+) -> Result<Option<ApprovalKeyFile>, ApprovalKeyReadError> {
+    use rustix::fs::{AtFlags, Mode, OFlags, openat, statat};
+    use std::os::unix::fs::MetadataExt;
+
+    let fd = match openat(
+        folder,
+        APPROVAL_KEY_RELATIVE,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    ) {
+        Ok(fd) => fd,
+        Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
+        Err(error) => {
+            return Err(ApprovalKeyReadError::Io(std::io::Error::from_raw_os_error(
+                error.raw_os_error(),
+            )));
+        }
+    };
+    let file = File::from(fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(ApprovalKeyReadError::NotRegular);
+    }
+    if metadata.len() > APPROVAL_KEY_READ_LIMIT {
+        return Err(ApprovalKeyReadError::TooLarge);
+    }
+    let named =
+        statat(folder, APPROVAL_KEY_RELATIVE, AtFlags::SYMLINK_NOFOLLOW).map_err(|error| {
+            ApprovalKeyReadError::Io(std::io::Error::from_raw_os_error(error.raw_os_error()))
+        })?;
+    let named_file_id = (
+        file_id_component(named.st_dev),
+        file_id_component(named.st_ino),
+    );
+    if (named.st_mode & 0o170000) != 0o100000
+        || named_file_id != (Some(metadata.dev()), Some(metadata.ino()))
+    {
+        return Err(ApprovalKeyReadError::NotRegular);
+    }
+    let mut blob = Zeroizing::new(Vec::with_capacity(metadata.len() as usize));
+    file.take(APPROVAL_KEY_READ_LIMIT + 1)
+        .read_to_end(&mut blob)?;
+    if blob.len() as u64 > APPROVAL_KEY_READ_LIMIT {
+        return Err(ApprovalKeyReadError::TooLarge);
+    }
+    Ok(Some((blob, (metadata.dev(), metadata.ino()))))
+}
+
+#[cfg(unix)]
+fn approval_key_difference(state: &PinState, folder: &File) -> Option<&'static str> {
+    match read_approval_signing_key(folder) {
+        Err(ApprovalKeyReadError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            state
+                .approval_key_digest
+                .map(|_| "the approval signing key is gone")
+        }
+        Err(_) => Some("the approval signing key cannot be read or is not a regular file"),
+        Ok(None) => state
+            .approval_key_digest
+            .map(|_| "the approval signing key is gone"),
+        Ok(Some((_, _))) if state.approval_key_digest.is_none() => {
+            Some("an approval signing key appeared")
+        }
+        Ok(Some((_, file_id))) if Some(file_id) != state.approval_key_id => {
+            Some("the approval signing key was replaced")
+        }
+        Ok(Some((blob, _))) if Some(Sha256::digest(&blob).into()) != state.approval_key_digest => {
+            Some("the approval signing key changed")
+        }
+        Ok(Some(_)) => None,
+    }
+}
+
+#[cfg(unix)]
+fn python_io_exception_name(error: &std::io::Error) -> &'static str {
+    // Python maps these io::ErrorKinds to the matching OSError subclass; other OS errors use OSError.
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "FileNotFoundError",
+        std::io::ErrorKind::PermissionDenied => "PermissionError",
+        _ => "OSError",
     }
 }
 
@@ -349,7 +734,17 @@ fn handle_connection(
         return Ok(());
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
-        eprintln!("owner endpoint {cmd}: Stage 4b endpoint is not implemented");
+        let _ = serve_owner_endpoint(stream, cmd, request, trust, root, approved, master_key);
+        return Ok(());
+    }
+    if cmd != "status"
+        && cmd != "stop"
+        && let Err(error) = trust.observe()
+    {
+        kv_proto::write_reply(
+            stream,
+            &json!({"error":error.to_string(),"error_code":"vault_hard_locked"}),
+        )?;
         return Ok(());
     }
     if !matches!(cmd, "status" | "stop" | "lock")
@@ -458,6 +853,169 @@ fn handle_connection(
 }
 
 #[cfg(unix)]
+fn owner_challenge(request: &serde_json::Map<String, Value>) -> Option<Vec<u8>> {
+    let text = request.get("challenge")?.as_str()?;
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..32)
+        .map(|index| u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok())
+        .collect::<Option<Vec<_>>>()
+}
+
+#[cfg(unix)]
+fn signed_owner(
+    trust: &TrustContext,
+    kind: MessageKind,
+    fields: MessageFields,
+) -> Result<Value, AgentError> {
+    let tag = wire::mac(trust.daemon_auth_key.as_ref(), kind, &fields)
+        .map_err(|error| AgentError(error.to_string()))?;
+    wire::to_json(kind, &fields, &tag).map_err(|error| AgentError(error.to_string()))
+}
+
+#[cfg(unix)]
+fn owner_error(trust: &TrustContext, challenge: Vec<u8>, code: &str) -> Result<Value, AgentError> {
+    let mut fields = MessageFields::new();
+    fields.insert("challenge".into(), FieldValue::Nonce(challenge));
+    fields.insert(
+        "session_nonce".into(),
+        FieldValue::Nonce(trust.session_nonce.to_vec()),
+    );
+    fields.insert("code".into(), FieldValue::Text(code.to_owned()));
+    signed_owner(trust, MessageKind::ErrorV1, fields)
+}
+
+#[cfg(unix)]
+fn serve_owner_endpoint(
+    stream: &mut std::os::unix::net::UnixStream,
+    cmd: &str,
+    request: &serde_json::Map<String, Value>,
+    trust: &TrustContext,
+    root: &Path,
+    approved: &Value,
+    master_key: &Key32,
+) -> Result<(), AgentError> {
+    let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
+    let hard_locked = owner_error(trust, challenge.clone(), "hard_locked");
+    let too_large = owner_error(trust, challenge.clone(), "response_too_large");
+    let (Ok(hard_locked), Ok(too_large)) = (hard_locked, too_large) else {
+        eprintln!("owner endpoint {cmd}: cannot sign an error; closing without an answer");
+        return Ok(());
+    };
+    let answer = (|| {
+        if owner_challenge(request).is_none() {
+            return owner_error(trust, challenge.clone(), "bad_request");
+        }
+        if trust.observe().is_err() {
+            return Ok(hard_locked.clone());
+        }
+        match config_authority::require_current(root, approved, master_key) {
+            Ok(()) => {}
+            Err(config_authority::AuthorityError::Refused(_)) => {
+                return owner_error(trust, challenge.clone(), "config_authority_changed");
+            }
+            Err(config_authority::AuthorityError::Internal(_)) => {
+                return Err(AgentError("owner authority check failed".into()));
+            }
+        }
+        if cmd != "owner_channel" {
+            return owner_error(trust, challenge.clone(), "unsupported");
+        }
+        let mut fields = MessageFields::new();
+        fields.insert("challenge".into(), FieldValue::Nonce(challenge.clone()));
+        fields.insert(
+            "session_nonce".into(),
+            FieldValue::Nonce(trust.session_nonce.to_vec()),
+        );
+        fields.insert(
+            "mode".into(),
+            FieldValue::Enum(if trust.protected {
+                "protected".into()
+            } else {
+                "unprotected".into()
+            }),
+        );
+        fields.insert(
+            "owner_key_id".into(),
+            FieldValue::Text(trust.owner_key_id.clone()),
+        );
+        fields.insert(
+            "local_approval_id".into(),
+            FieldValue::Bytes(trust.local_approval_id.clone()),
+        );
+        fields.insert("location".into(), FieldValue::Bytes(trust.location.clone()));
+        fields.insert(
+            "daemon_version".into(),
+            FieldValue::Text(trust.version.clone()),
+        );
+        fields.insert("providers".into(), FieldValue::List(owner_providers(root)));
+        signed_owner(trust, MessageKind::ChannelV1, fields)
+    })();
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(_) => {
+            eprintln!("owner endpoint {cmd}: internal error (details withheld)");
+            match owner_error(trust, challenge, "internal") {
+                Ok(answer) => answer,
+                Err(_) => return Ok(()),
+            }
+        }
+    };
+    let raw = kv_store::pyjson::to_vec_python(&answer, false)
+        .map_err(|error| AgentError(error.to_string()))?;
+    let replacement = if raw.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+        too_large
+    } else {
+        answer
+    };
+    kv_proto::write_reply(stream, &replacement)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn owner_providers(root: &Path) -> Vec<Vec<FieldValue>> {
+    let mut providers: BTreeMap<String, Value> = BTreeMap::new();
+    providers.insert(
+        "anthropic".into(),
+        json!({"auth_type":"x-api-key","base_url":"https://api.anthropic.com","default_headers":{"Content-Type":"application/json","anthropic-version":"2023-06-01"},"secret_name":"ANTHROPIC_API_KEY"}),
+    );
+    providers.insert(
+        "github".into(),
+        json!({"auth_type":"bearer","base_url":"https://api.github.com","default_headers":{"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},"secret_name":"GITHUB_TOKEN"}),
+    );
+    providers.insert(
+        "google".into(),
+        json!({"auth_query_param":"key","auth_type":"query","base_url":"https://generativelanguage.googleapis.com","default_headers":{"Content-Type":"application/json"},"secret_name":"GOOGLE_API_KEY"}),
+    );
+    providers.insert(
+        "google-cloud".into(),
+        json!({"auth_query_param":"key","auth_type":"query","base_url":"https://www.googleapis.com","default_headers":{"Content-Type":"application/json"},"secret_name":"GOOGLE_CLOUD_API_KEY"}),
+    );
+    providers.insert(
+        "openai".into(),
+        json!({"auth_type":"bearer","base_url":"https://api.openai.com","default_headers":{"Content-Type":"application/json"},"secret_name":"OPENAI_API_KEY"}),
+    );
+    if let Ok(snapshot) = kv_store::config::load_config(root)
+        && let Some(custom) = snapshot.value.get("providers").and_then(Value::as_object)
+    {
+        for (name, value) in custom {
+            providers.insert(name.clone(), value.clone());
+        }
+    }
+    providers
+        .into_iter()
+        .filter_map(|(name, value)| {
+            let canonical = kv_approvals::canonical::canonical_json(&value).ok()?;
+            Some(vec![
+                FieldValue::Text(name.to_owned()),
+                FieldValue::Text(canonical),
+            ])
+        })
+        .collect()
+}
+
+#[cfg(unix)]
 fn read_request_with_timeout(
     stream: &mut std::os::unix::net::UnixStream,
     timeout: Duration,
@@ -543,7 +1101,7 @@ fn status_response(
         "version":AGENT_VERSION,
         "enforcement":kv_proto::ENFORCEMENT_GENERATION,
         "session":if trust.protected {"protected"} else {"unprotected"},
-        "hard_locked":false,
+        "hard_locked":trust.hard_locked().is_some(),
         "runs":[]
     })
 }
@@ -789,6 +1347,60 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn io_errors_use_python_exception_names() {
+        assert_eq!(
+            python_io_exception_name(&std::io::Error::from(std::io::ErrorKind::NotFound)),
+            "FileNotFoundError"
+        );
+        assert_eq!(
+            python_io_exception_name(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            "PermissionError"
+        );
+        assert_eq!(
+            python_io_exception_name(&std::io::Error::other("unexpected")),
+            "OSError"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_trust_context_retires_folder_descriptor() {
+        let context = TrustContext {
+            session_nonce: Zeroizing::new([0; 32]),
+            daemon_auth_key: Key32::new([0; 32]),
+            grant_state_key: Key32::new([0; 32]),
+            token_key: Key32::new([0; 32]),
+            protected: false,
+            owner_key_id: String::new(),
+            local_approval_id: Vec::new(),
+            location: Vec::new(),
+            version: "0.4.0".into(),
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: std::path::PathBuf::from("."),
+                    folder_id: (0, 0),
+                    folder: Some(File::open(".").unwrap()),
+                    key_id: None,
+                    key_digest: None,
+                    approval_key_id: None,
+                    approval_key_digest: None,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
+        };
+        context.close();
+        let state = context.pin.state.lock().unwrap();
+        assert!(state.folder.is_none());
+        drop(state);
+        assert_eq!(
+            context.observe().unwrap_err().to_string(),
+            "vault changed under the running daemon (the vault folder pin is closed); kv refuses all requests. Stop the daemon and unlock again."
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn silent_connection_times_out_and_closes() {
         use std::io::Read;
         use std::os::unix::net::UnixStream;
@@ -806,6 +1418,23 @@ mod tests {
             grant_state_key: Key32::new([0; 32]),
             token_key: Key32::new([0; 32]),
             protected: false,
+            owner_key_id: String::new(),
+            local_approval_id: Vec::new(),
+            location: Vec::new(),
+            version: "0.4.0".into(),
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: std::path::PathBuf::from("."),
+                    folder_id: (0, 0),
+                    folder: Some(File::open(".").unwrap()),
+                    key_id: None,
+                    key_digest: None,
+                    approval_key_id: None,
+                    approval_key_digest: None,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
         };
         let approved = json!({});
         let token = Zeroizing::new(String::new());

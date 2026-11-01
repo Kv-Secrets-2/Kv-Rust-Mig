@@ -23,6 +23,181 @@ pub const OWNER_ENDPOINTS: &[&str] = &[
     "owner_end_job",
 ];
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Channel {
+    pub session_nonce: Vec<u8>,
+    pub protected: bool,
+    pub owner_key_id: String,
+    pub daemon_version: String,
+    pub providers: Vec<(String, String)>,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ChannelError {
+    #[error("{0}")]
+    Message(String),
+    #[error(transparent)]
+    DaemonRefused(#[from] DaemonRefused),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("the daemon refused: {code}")]
+pub struct DaemonRefused {
+    pub code: String,
+}
+
+pub fn check_answer(
+    answer: &Value,
+    challenge: &[u8],
+    unwrapped: &kv_crypto::Identity,
+    expect: &str,
+) -> Result<Map<String, Value>, ChannelError> {
+    let (kind, fields, tag) = kv_approvals::wire::from_json(answer)
+        .map_err(|_| ChannelError::Message("the daemon's answer is not a signed message".into()))?;
+    let key = kv_crypto::derive_labeled_key(&unwrapped.master_key, b"kv-approval:daemon-auth", &[]);
+    if !kv_approvals::wire::verify(key.as_ref(), kind, &fields, &tag) {
+        return Err(ChannelError::Message(
+            "the daemon's answer is not signed with this vault's key".into(),
+        ));
+    }
+    let answer_challenge = fields
+        .get("challenge")
+        .and_then(|value| match value {
+            kv_approvals::wire::FieldValue::Nonce(bytes) => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            ChannelError::Message("the daemon's answer is not a signed message".into())
+        })?;
+    if answer_challenge != challenge {
+        return Err(ChannelError::Message(
+            "the daemon's answer is for another challenge (a replay)".into(),
+        ));
+    }
+    if kind == kv_approvals::wire::MessageKind::ErrorV1 {
+        let code = fields
+            .get("code")
+            .and_then(|value| match value {
+                kv_approvals::wire::FieldValue::Text(code)
+                | kv_approvals::wire::FieldValue::Enum(code) => Some(code.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        return Err(ChannelError::DaemonRefused(DaemonRefused { code }));
+    }
+    if kind.name() != expect {
+        return Err(ChannelError::Message(format!(
+            "the daemon answered {}, not {expect}",
+            kind.name()
+        )));
+    }
+    let mut output = Map::new();
+    for (name, value) in fields {
+        output.insert(name, wire_value_json(value));
+    }
+    Ok(output)
+}
+
+fn wire_value_json(value: kv_approvals::wire::FieldValue) -> Value {
+    match value {
+        kv_approvals::wire::FieldValue::Nonce(bytes)
+        | kv_approvals::wire::FieldValue::Bytes(bytes) => Value::String(hex::encode(bytes)),
+        kv_approvals::wire::FieldValue::Text(text) | kv_approvals::wire::FieldValue::Enum(text) => {
+            Value::String(text)
+        }
+        kv_approvals::wire::FieldValue::Bool(value) => Value::Bool(value),
+        kv_approvals::wire::FieldValue::List(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| Value::Array(item.into_iter().map(wire_value_json).collect()))
+                .collect(),
+        ),
+    }
+}
+
+pub fn check_channel(
+    answer: &Value,
+    challenge: &[u8],
+    unwrapped: &kv_crypto::Identity,
+) -> Result<Channel, ChannelError> {
+    let fields = check_answer(answer, challenge, unwrapped, "channel-v1")?;
+    let protected = fields.get("mode").and_then(Value::as_str) == Some("protected");
+    let owner_key_id = fields
+        .get("owner_key_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    if protected {
+        let seed = kv_approvals::owner::OwnerSeed::from_slice(&unwrapped.owner_seed[..])
+            .map_err(|error| ChannelError::Message(error.to_string()))?;
+        let expected = kv_approvals::owner::owner_key_id(
+            &kv_approvals::owner::owner_public_key(&seed),
+            &unwrapped.local_approval_id,
+        );
+        let local = fields
+            .get("local_approval_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let location = fields
+            .get("location")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if owner_key_id != expected
+            || local != hex::encode(unwrapped.local_approval_id)
+            || location != hex::encode(&unwrapped.location)
+        {
+            return Err(ChannelError::Message(
+                "the daemon serves another vault (its identity differs from this key file)".into(),
+            ));
+        }
+    }
+    let providers = fields
+        .get("providers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let pair = item.as_array()?;
+            Some((
+                pair.first()?.as_str()?.to_owned(),
+                pair.get(1)?.as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    Ok(Channel {
+        session_nonce: fields
+            .get("session_nonce")
+            .and_then(Value::as_str)
+            .and_then(|value| hex::decode(value).ok())
+            .unwrap_or_default(),
+        protected,
+        owner_key_id,
+        daemon_version: fields
+            .get("daemon_version")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        providers,
+    })
+}
+
+pub fn open_channel(
+    root: impl AsRef<Path>,
+    unwrapped: &kv_crypto::Identity,
+    providers: bool,
+) -> Result<Channel, ChannelError> {
+    let mut challenge = vec![0_u8; kv_approvals::wire::NONCE_LEN];
+    getrandom::getrandom(&mut challenge)
+        .map_err(|_| ChannelError::Message("operating-system randomness unavailable".into()))?;
+    let mut fields = Map::new();
+    fields.insert("challenge".into(), Value::String(hex::encode(&challenge)));
+    fields.insert("providers".into(), Value::Bool(providers));
+    let answer = agent_request(root, "owner_channel", &fields).map_err(|_| {
+        ChannelError::Message("no daemon answered; start it with 'kv unlock' and try again".into())
+    })?;
+    check_channel(&answer, &challenge, unwrapped)
+}
+
 #[derive(Debug, Error)]
 pub enum ProtocolError {
     #[error("{0}")]

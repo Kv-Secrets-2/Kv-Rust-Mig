@@ -289,6 +289,331 @@ fn bad_token_client_request(root: &Path) -> Value {
     kv_proto::agent_request(root, "status", &fields).unwrap()
 }
 
+fn python_agent_request(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    home: &Path,
+    cmd: &str,
+    fields: &Value,
+) -> Value {
+    run_python(
+        python,
+        "import json,sys\nfrom kv import agent\nfields=json.loads(sys.argv[3])\nprint(json.dumps(agent.agent_request(sys.argv[2],project_root=sys.argv[1],**fields)))",
+        root,
+        home,
+        &[cmd, &fields.to_string()],
+    )
+}
+
+fn owner_error_shape(answer: &Value, identity: &kv_crypto::Identity, challenge: &[u8]) -> Value {
+    let (kind, fields, tag) = kv_approvals::wire::from_json(answer).expect("signed owner reply");
+    assert_eq!(kind, kv_approvals::wire::MessageKind::ErrorV1);
+    let key = kv_crypto::derive_labeled_key(&identity.master_key, b"kv-approval:daemon-auth", &[]);
+    assert!(kv_approvals::wire::verify(
+        key.as_ref(),
+        kind,
+        &fields,
+        &tag
+    ));
+    let reply_challenge = match fields.get("challenge").expect("reply challenge") {
+        kv_approvals::wire::FieldValue::Nonce(value) => value,
+        _ => panic!("reply challenge is not a nonce"),
+    };
+    assert_eq!(reply_challenge, challenge);
+    let code = match fields.get("code").expect("error code") {
+        kv_approvals::wire::FieldValue::Text(value)
+        | kv_approvals::wire::FieldValue::Enum(value) => value.clone(),
+        _ => panic!("reply code is not text"),
+    };
+    let session_nonce = match fields.get("session_nonce").expect("session nonce") {
+        kv_approvals::wire::FieldValue::Nonce(value) => value.clone(),
+        _ => panic!("session nonce is not a nonce"),
+    };
+    json!({"kind":kind.name(),"code":code,"challenge":reply_challenge,"session_nonce":session_nonce})
+}
+
+fn collect_owner_error_shapes(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    home: &Path,
+    identity: &kv_crypto::Identity,
+    python_client: bool,
+) -> Vec<Value> {
+    let mut cases = Vec::new();
+    for challenge in [
+        "not-hex".to_owned(),
+        "a".repeat(63),
+        "a".repeat(65),
+        " ".repeat(64),
+    ] {
+        let expected = vec![0_u8; kv_approvals::wire::NONCE_LEN];
+        let fields = json!({"challenge":challenge});
+        let answer = if python_client {
+            python_agent_request(python, root, home, "owner_channel", &fields)
+        } else {
+            let fields = fields.as_object().unwrap().clone();
+            kv_proto::agent_request(root, "owner_channel", &fields).unwrap()
+        };
+        cases.push(owner_error_shape(&answer, identity, &expected));
+    }
+
+    let challenge = "ab".repeat(kv_approvals::wire::NONCE_LEN);
+    let challenge_bytes = challenge
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect::<Vec<_>>();
+    let fields = json!({"challenge":challenge});
+    let answer = if python_client {
+        python_agent_request(python, root, home, "owner_grant_register", &fields)
+    } else {
+        kv_proto::agent_request(
+            root,
+            "owner_grant_register",
+            &fields.as_object().unwrap().clone(),
+        )
+        .unwrap()
+    };
+    cases.push(owner_error_shape(&answer, identity, &challenge_bytes));
+
+    let config_path = root.join(".secrets/config.json");
+    let original_config = fs::read(&config_path).unwrap();
+    let mut changed_config: Value = serde_json::from_slice(&original_config).unwrap();
+    changed_config
+        .as_object_mut()
+        .unwrap()
+        .entry("providers")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "stage4b-parity-probe".into(),
+            json!({"origin":"https://example.invalid","secret":"PARITY_PROBE"}),
+        );
+    fs::write(&config_path, serde_json::to_vec(&changed_config).unwrap()).unwrap();
+    let challenge = "cd".repeat(kv_approvals::wire::NONCE_LEN);
+    let challenge_bytes = challenge
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect::<Vec<_>>();
+    let fields = json!({"challenge":challenge});
+    let answer = if python_client {
+        python_agent_request(python, root, home, "owner_channel", &fields)
+    } else {
+        kv_proto::agent_request(root, "owner_channel", &fields.as_object().unwrap().clone())
+            .unwrap()
+    };
+    cases.push(owner_error_shape(&answer, identity, &challenge_bytes));
+    fs::write(config_path, original_config).unwrap();
+    cases
+}
+
+fn exercise_hard_lock(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    moved: &Path,
+    home: &Path,
+    python_client: bool,
+) -> (Value, Value, Value) {
+    fs::rename(root, moved).unwrap();
+    let normal = if python_client {
+        python_agent_request(python, root, home, "list", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "list", &Map::new()).unwrap()
+    };
+    let status = if python_client {
+        python_agent_request(python, root, home, "status", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "status", &Map::new()).unwrap()
+    };
+    fs::rename(moved, root).unwrap();
+    let restored = if python_client {
+        python_agent_request(python, root, home, "list", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "list", &Map::new()).unwrap()
+    };
+    (normal, status, restored)
+}
+
+#[derive(Clone, Copy)]
+enum ApprovalKeyMutation {
+    Replace,
+    Change,
+    Delete,
+    NonRegular,
+}
+
+impl ApprovalKeyMutation {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Replace => "the approval signing key was replaced",
+            Self::Change => "the approval signing key changed",
+            Self::Delete => "the approval signing key is gone",
+            Self::NonRegular => "the approval signing key cannot be read or is not a regular file",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Replace => "replace",
+            Self::Change => "change",
+            Self::Delete => "delete",
+            Self::NonRegular => "non-regular",
+        }
+    }
+}
+
+fn remove_approval_signing_key(root: &Path) {
+    let path = root.join(".secrets/approval_signing_key");
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).unwrap(),
+        Ok(_) => fs::remove_file(path).unwrap(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("inspect approval signing key path: {error}"),
+    }
+}
+
+fn mutate_approval_signing_key(root: &Path, mutation: ApprovalKeyMutation) {
+    let path = root.join(".secrets/approval_signing_key");
+    match mutation {
+        ApprovalKeyMutation::Replace => {
+            let replacement = path.with_file_name("approval_signing_key.replacement");
+            fs::write(&replacement, b"replacement-key\n").unwrap();
+            fs::remove_file(&path).unwrap();
+            fs::rename(replacement, path).unwrap();
+        }
+        ApprovalKeyMutation::Change => fs::write(path, b"changed-key\n").unwrap(),
+        ApprovalKeyMutation::Delete => fs::remove_file(path).unwrap(),
+        ApprovalKeyMutation::NonRegular => {
+            fs::remove_file(&path).unwrap();
+            fs::create_dir(path).unwrap();
+        }
+    }
+}
+
+fn approval_key_hard_lock(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    home: &Path,
+    passphrase: &str,
+    mutation: ApprovalKeyMutation,
+    python_daemon: bool,
+    log: &Path,
+) -> Value {
+    remove_approval_signing_key(root);
+    let socket_path = kv_proto::agent_socket_path(Some(root)).unwrap();
+    let mut daemon = if python_daemon {
+        spawn_python_daemon(python, root, home, passphrase, log)
+    } else {
+        spawn_rust_daemon(root, home, passphrase, log)
+    };
+    daemon.wait_for_socket(&socket_path, log);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let key_path = root.join(".secrets/approval_signing_key");
+        assert_eq!(
+            fs::metadata(&key_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let key_file = kv_crypto::Zeroizing::new(fs::read(key_path).unwrap());
+        assert!(kv_approvals::artifacts::parse_signing_key(&key_file).is_ok());
+    }
+
+    mutate_approval_signing_key(root, mutation);
+    let normal = if python_daemon {
+        python_agent_request(python, root, home, "list", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "list", &Map::new()).unwrap()
+    };
+    assert_eq!(normal["error_code"], "vault_hard_locked");
+    assert!(
+        normal["error"]
+            .as_str()
+            .unwrap()
+            .contains(mutation.reason()),
+        "hard-lock reason for {}: {}",
+        mutation.name(),
+        normal["error"]
+    );
+    let status = if python_daemon {
+        python_agent_request(python, root, home, "status", &json!({}))
+    } else {
+        kv_proto::agent_request(root, "status", &Map::new()).unwrap()
+    };
+    assert_eq!(status["hard_locked"], true);
+    if python_daemon {
+        assert_eq!(
+            python_agent_request(python, root, home, "stop", &json!({}))["stopping"],
+            true
+        );
+    } else {
+        assert_eq!(
+            kv_proto::agent_request(root, "stop", &Map::new()).unwrap()["stopping"],
+            true
+        );
+    }
+    assert!(daemon.wait().success());
+    normal
+}
+
+fn generated_json(seed: usize, depth: usize) -> Value {
+    match seed % 9 {
+        0 => Value::Null,
+        1 => Value::Bool(seed.is_multiple_of(2)),
+        2 => json!(seed as i64 - 32),
+        3 => json!(format!("owner-case-{seed}-λ")),
+        4 if depth > 0 => Value::Array(
+            (0..3)
+                .map(|offset| generated_json(seed / 3 + offset + 1, depth - 1))
+                .collect(),
+        ),
+        5 if depth > 0 => {
+            let mut object = Map::new();
+            object.insert("nested".into(), generated_json(seed + 2, depth - 1));
+            object.insert(format!("key-{seed}"), generated_json(seed + 5, depth - 1));
+            Value::Object(object)
+        }
+        6 => json!(format!("{:064x}", seed)),
+        7 => json!(vec![seed as u8; seed % 17]),
+        _ => json!(seed as f64 / 3.0),
+    }
+}
+
+fn assert_owner_json_property(socket_path: &Path, identity: &kv_crypto::Identity) {
+    let key = kv_crypto::derive_labeled_key(&identity.master_key, b"kv-approval:daemon-auth", &[]);
+    for seed in 0_usize..128 {
+        let mut request = Map::new();
+        request.insert(
+            "cmd".into(),
+            Value::String(if seed.is_multiple_of(2) {
+                "owner_channel".into()
+            } else {
+                "owner_grant_register".into()
+            }),
+        );
+        request.insert("challenge".into(), generated_json(seed, 3));
+        request.insert("providers".into(), generated_json(seed + 7, 2));
+        request.insert(format!("extra-{seed}"), generated_json(seed + 11, 3));
+        let bytes = serde_json::to_vec(&Value::Object(request)).unwrap();
+        let answer = raw_socket_request(socket_path, &bytes);
+        if answer.is_empty() {
+            continue;
+        }
+        let answer: Value = serde_json::from_slice(&answer).expect("owner reply JSON");
+        let (kind, fields, tag) =
+            kv_approvals::wire::from_json(&answer).expect("owner reply is signed");
+        assert!(kv_approvals::wire::verify(
+            key.as_ref(),
+            kind,
+            &fields,
+            &tag
+        ));
+    }
+}
+
 fn raw_socket_request(socket_path: &Path, request: &[u8]) -> Vec<u8> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
@@ -318,6 +643,90 @@ fn rebind_fixture_key(python: &std::ffi::OsStr, root: &Path, home: &Path, passph
         home,
         &[passphrase],
     );
+}
+
+fn python_open_channel(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    home: &Path,
+    passphrase: &str,
+    providers: bool,
+) -> Value {
+    run_python(
+        python,
+        "import json,os,sys\nfrom kv.approval_channel import open_channel\nfrom kv.crypto import unwrap_identity_key\nroot,passphrase,providers=sys.argv[1:]\nos.chdir(root)\nwith open(root+'/.secrets/key','rb') as f: blob=f.read()\nu=unwrap_identity_key(blob,passphrase)\nc=open_channel(u,providers=providers=='true')\nprint(json.dumps({'session_nonce':c.session_nonce.hex(),'protected':c.protected,'owner_key_id':c.owner_key_id,'daemon_version':c.daemon_version,'providers':c.providers}))",
+        root,
+        home,
+        &[passphrase, if providers { "true" } else { "false" }],
+    )
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn python_check_channel_error(
+    python: &std::ffi::OsStr,
+    root: &Path,
+    home: &Path,
+    passphrase: &str,
+    answer: &Value,
+    challenge: &[u8],
+    wrong_key: bool,
+) -> Value {
+    run_python(
+        python,
+        "import json,sys\nfrom kv.approval_channel import ChannelError,check_channel\nfrom kv.crypto import unwrap_identity_key\nroot,passphrase,answer,challenge,wrong=sys.argv[1:]\nwith open(root+'/.secrets/key','rb') as f: u=unwrap_identity_key(f.read(),passphrase)\nif wrong=='true': u.master_key=b'\\x5a'*32\ntry:\n check_channel(json.loads(answer),bytes.fromhex(challenge),u)\nexcept ChannelError as error:\n print(json.dumps(str(error)))\nelse:\n print(json.dumps('accepted'))",
+        root,
+        home,
+        &[
+            passphrase,
+            &answer.to_string(),
+            &hex_encode(challenge),
+            if wrong_key { "true" } else { "false" },
+        ],
+    )
+}
+
+fn signed_channel_with_location(
+    answer: &Value,
+    identity: &kv_crypto::Identity,
+    location: Vec<u8>,
+) -> Value {
+    let (kind, mut fields, _) = kv_approvals::wire::from_json(answer).unwrap();
+    fields.insert(
+        "location".into(),
+        kv_approvals::wire::FieldValue::Bytes(location),
+    );
+    let key = kv_crypto::derive_labeled_key(&identity.master_key, b"kv-approval:daemon-auth", &[]);
+    let tag = kv_approvals::wire::mac(key.as_ref(), kind, &fields).unwrap();
+    kv_approvals::wire::to_json(kind, &fields, &tag).unwrap()
+}
+
+fn assert_channel_matches_python(channel: &kv_proto::Channel, python: &Value) {
+    let nonce = python["session_nonce"]
+        .as_str()
+        .unwrap()
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(channel.session_nonce, nonce);
+    assert_eq!(channel.protected, python["protected"].as_bool().unwrap());
+    assert_eq!(
+        channel.owner_key_id,
+        python["owner_key_id"].as_str().unwrap()
+    );
+    assert_eq!(
+        channel.daemon_version,
+        python["daemon_version"].as_str().unwrap()
+    );
+    let providers = channel
+        .providers
+        .iter()
+        .map(|(name, snapshot)| json!([name, snapshot]))
+        .collect::<Vec<_>>();
+    assert_eq!(Value::Array(providers), python["providers"]);
 }
 
 #[test]
@@ -390,6 +799,90 @@ fn python_client_matches_rust_agent_and_stop_cleans_runtime_files() {
     assert!(
         socket_path.exists(),
         "Rust daemon did not create its socket"
+    );
+
+    let identity = keyfile::unwrap_v4(
+        &fs::read(root.join(".secrets/key")).unwrap(),
+        passphrase.as_bytes(),
+    )
+    .unwrap();
+    for providers in [false, true] {
+        let rust_channel = kv_proto::open_channel(&root, &identity, providers).unwrap();
+        let python_channel = python_open_channel(&python, &root, &home, &passphrase, providers);
+        assert_channel_matches_python(&rust_channel, &python_channel);
+    }
+    let challenge = [0x21; kv_approvals::wire::NONCE_LEN];
+    let mut fields = Map::new();
+    fields.insert("challenge".into(), Value::String(hex_encode(&challenge)));
+    let channel_answer = kv_proto::agent_request(&root, "owner_channel", &fields).unwrap();
+    let replay_challenge = [0x22; kv_approvals::wire::NONCE_LEN];
+    let replay_error = kv_proto::check_channel(&channel_answer, &replay_challenge, &identity)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        replay_error,
+        "the daemon's answer is for another challenge (a replay)"
+    );
+    assert_eq!(
+        python_check_channel_error(
+            &python,
+            &root,
+            &home,
+            &passphrase,
+            &channel_answer,
+            &replay_challenge,
+            false,
+        ),
+        json!(replay_error)
+    );
+
+    let mut wrong_identity = keyfile::unwrap_v4(
+        &fs::read(root.join(".secrets/key")).unwrap(),
+        passphrase.as_bytes(),
+    )
+    .unwrap();
+    wrong_identity.master_key = Key32::new([0x5a; 32]);
+    let wrong_key_error = kv_proto::check_channel(&channel_answer, &challenge, &wrong_identity)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        wrong_key_error,
+        "the daemon's answer is not signed with this vault's key"
+    );
+    assert_eq!(
+        python_check_channel_error(
+            &python,
+            &root,
+            &home,
+            &passphrase,
+            &channel_answer,
+            &challenge,
+            true,
+        ),
+        json!(wrong_key_error)
+    );
+
+    let mismatched_identity_answer =
+        signed_channel_with_location(&channel_answer, &identity, b"/another/vault".to_vec());
+    let mismatch_error =
+        kv_proto::check_channel(&mismatched_identity_answer, &challenge, &identity)
+            .unwrap_err()
+            .to_string();
+    assert_eq!(
+        mismatch_error,
+        "the daemon serves another vault (its identity differs from this key file)"
+    );
+    assert_eq!(
+        python_check_channel_error(
+            &python,
+            &root,
+            &home,
+            &passphrase,
+            &mismatched_identity_answer,
+            &challenge,
+            false,
+        ),
+        json!(mismatch_error)
     );
 
     let runtime = kv_proto::runtime_dir().unwrap();
@@ -498,6 +991,32 @@ fn agent_status_and_commands_match_in_both_directions() {
     let mut python_daemon = spawn_python_daemon(&python, &root, &home, &passphrase, &python_log);
     python_daemon.wait_for_socket(&socket_path, &python_log);
 
+    let identity = keyfile::unwrap_v4(
+        &fs::read(root.join(".secrets/key")).unwrap(),
+        passphrase.as_bytes(),
+    )
+    .unwrap();
+    for providers in [false, true] {
+        let rust_channel = kv_proto::open_channel(&root, &identity, providers).unwrap();
+        let python_channel = python_open_channel(&python, &root, &home, &passphrase, providers);
+        assert_channel_matches_python(&rust_channel, &python_channel);
+    }
+    let python_owner_errors = collect_owner_error_shapes(&python, &root, &home, &identity, true);
+    assert_eq!(
+        python_owner_errors
+            .iter()
+            .map(|reply| reply["code"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "bad_request",
+            "bad_request",
+            "bad_request",
+            "bad_request",
+            "bad_request",
+            "config_authority_changed"
+        ]
+    );
+
     let python_status_before = run_python(
         &python,
         "import json,sys\nfrom kv import agent\nprint(json.dumps(agent.agent_request('status',project_root=sys.argv[1])))",
@@ -562,6 +1081,7 @@ fn agent_status_and_commands_match_in_both_directions() {
         python_error_replies[2],
         br#"{"error": "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"}"#
     );
+    assert_owner_json_property(&socket_path, &identity);
 
     assert_eq!(
         kv_proto::agent_request(&root, "lock", &Map::new()).unwrap(),
@@ -585,6 +1105,38 @@ fn agent_status_and_commands_match_in_both_directions() {
     let rust_log = temp.0.join("rust-agent.log");
     let mut rust_daemon = spawn_rust_daemon(&root, &home, &passphrase, &rust_log);
     rust_daemon.wait_for_socket(&socket_path, &rust_log);
+
+    let identity = keyfile::unwrap_v4(
+        &fs::read(root.join(".secrets/key")).unwrap(),
+        passphrase.as_bytes(),
+    )
+    .unwrap();
+    for providers in [false, true] {
+        let rust_channel = kv_proto::open_channel(&root, &identity, providers).unwrap();
+        let python_channel = python_open_channel(&python, &root, &home, &passphrase, providers);
+        assert_channel_matches_python(&rust_channel, &python_channel);
+    }
+    let rust_owner_errors = collect_owner_error_shapes(&python, &root, &home, &identity, false);
+    for (index, (python_reply, rust_reply)) in python_owner_errors
+        .iter()
+        .zip(&rust_owner_errors)
+        .enumerate()
+    {
+        assert_ne!(python_reply["session_nonce"], rust_reply["session_nonce"]);
+        if index == 4 {
+            assert_eq!(python_reply["code"], "bad_request");
+            assert_eq!(rust_reply["code"], "unsupported");
+            continue;
+        }
+        let mut python_reply = python_reply.clone();
+        let mut rust_reply = rust_reply.clone();
+        python_reply
+            .as_object_mut()
+            .unwrap()
+            .remove("session_nonce");
+        rust_reply.as_object_mut().unwrap().remove("session_nonce");
+        assert_eq!(python_reply, rust_reply);
+    }
 
     let rust_status_before = kv_proto::agent_request(&root, "status", &Map::new()).unwrap();
     let python_client_status_before = run_python(
@@ -640,6 +1192,7 @@ fn agent_status_and_commands_match_in_both_directions() {
         .map(|request| raw_socket_request(&socket_path, request))
         .collect::<Vec<_>>();
     assert_eq!(rust_error_replies, python_error_replies);
+    assert_owner_json_property(&socket_path, &identity);
 
     let lock_and_signal = run_python(
         &python,
@@ -683,6 +1236,44 @@ print(json.dumps({"lock":locked,"stopped":stopped}))
     let rust_stop = kv_proto::agent_request(&root, "stop", &Map::new()).unwrap();
     assert_eq!(rust_stop, python_stop);
     assert!(rust_stop_daemon.wait().success());
+    assert!(!socket_path.exists());
+    assert!(!token_path.exists());
+    assert!(!pid_path.exists());
+
+    let moved_root = temp.0.join("vault-moved");
+    let python_hard_lock_log = temp.0.join("python-hard-lock.log");
+    let mut python_hard_lock_daemon =
+        spawn_python_daemon(&python, &root, &home, &passphrase, &python_hard_lock_log);
+    python_hard_lock_daemon.wait_for_socket(&socket_path, &python_hard_lock_log);
+    let python_hard_lock = exercise_hard_lock(&python, &root, &moved_root, &home, true);
+    assert_eq!(python_hard_lock.0["error_code"], "vault_hard_locked");
+    assert!(
+        python_hard_lock.0["error"]
+            .as_str()
+            .unwrap()
+            .contains("vault changed under the running daemon")
+    );
+    assert_eq!(python_hard_lock.1["hard_locked"], true);
+    assert_eq!(python_hard_lock.2, python_hard_lock.0);
+    assert_eq!(
+        python_agent_request(&python, &root, &home, "stop", &json!({}))["stopping"],
+        true
+    );
+    assert!(python_hard_lock_daemon.wait().success());
+
+    let rust_hard_lock_log = temp.0.join("rust-hard-lock.log");
+    let mut rust_hard_lock_daemon =
+        spawn_rust_daemon(&root, &home, &passphrase, &rust_hard_lock_log);
+    rust_hard_lock_daemon.wait_for_socket(&socket_path, &rust_hard_lock_log);
+    let rust_hard_lock = exercise_hard_lock(&python, &root, &moved_root, &home, false);
+    assert_eq!(rust_hard_lock.0, python_hard_lock.0);
+    assert_eq!(rust_hard_lock.1["hard_locked"], true);
+    assert_eq!(rust_hard_lock.2, rust_hard_lock.0);
+    assert_eq!(
+        kv_proto::agent_request(&root, "stop", &Map::new()).unwrap()["stopping"],
+        true
+    );
+    assert!(rust_hard_lock_daemon.wait().success());
     assert!(!socket_path.exists());
     assert!(!token_path.exists());
     assert!(!pid_path.exists());
@@ -827,4 +1418,149 @@ time.sleep(30)
         "Cannot start kv daemon: another kv service for this vault holds its pid file; run 'kv lock' first, or 'kv agent status' for details."
     );
     assert!(holder.0.try_wait().unwrap().is_none());
+}
+
+#[test]
+fn approval_signing_key_changes_hard_lock_with_python_reason_parity() {
+    let Some(python) = std::env::var_os("KV_PY_REF") else {
+        eprintln!("SKIP Stage 4b approval-key parity: set KV_PY_REF");
+        return;
+    };
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let temp = TestDir::new();
+    let home = temp.0.join("home");
+    fs::create_dir(&home).unwrap();
+    let _home_guard = HomeGuard::set(&home);
+    let root = temp.0.join("vault");
+    fs::create_dir(&root).unwrap();
+    copy_dir(
+        &fixture_root().join("vaults/basic/.secrets"),
+        &root.join(".secrets"),
+    );
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(root.join(".secrets/key"), fs::Permissions::from_mode(0o600)).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let home = fs::canonicalize(home).unwrap();
+    let (master, passphrase) = fixture_master_key();
+    run_python(
+        &python,
+        "import json,sys\nfrom kv import vault_origin\nprint(json.dumps(vault_origin.record_created(sys.argv[1])))",
+        &root,
+        &home,
+        &[],
+    );
+    rebind_fixture_key(&python, &root, &home, &passphrase);
+    kv_store::config_authority::approve_config_unattended(&root, &master).unwrap();
+
+    let python_log = temp.0.join("python-approval-key-change.log");
+    let python_change = approval_key_hard_lock(
+        &python,
+        &root,
+        &home,
+        &passphrase,
+        ApprovalKeyMutation::Change,
+        true,
+        &python_log,
+    );
+    assert!(
+        python_change["error"]
+            .as_str()
+            .unwrap()
+            .contains(ApprovalKeyMutation::Change.reason())
+    );
+    let rust_log = temp.0.join("rust-approval-key-change.log");
+    let rust_change = approval_key_hard_lock(
+        &python,
+        &root,
+        &home,
+        &passphrase,
+        ApprovalKeyMutation::Change,
+        false,
+        &rust_log,
+    );
+    assert_eq!(rust_change, python_change);
+
+    for mutation in [
+        ApprovalKeyMutation::Replace,
+        ApprovalKeyMutation::Delete,
+        ApprovalKeyMutation::NonRegular,
+    ] {
+        let log = temp
+            .0
+            .join(format!("rust-approval-key-{}.log", mutation.name()));
+        let response =
+            approval_key_hard_lock(&python, &root, &home, &passphrase, mutation, false, &log);
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .contains(mutation.reason())
+        );
+    }
+}
+
+#[test]
+fn owner_authority_internal_failures_are_signed_internal() {
+    let Some(python) = std::env::var_os("KV_PY_REF") else {
+        eprintln!("SKIP Stage 4b owner authority error classification: set KV_PY_REF");
+        return;
+    };
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let temp = TestDir::new();
+    let home = temp.0.join("home");
+    fs::create_dir(&home).unwrap();
+    let _home_guard = HomeGuard::set(&home);
+    let root = temp.0.join("vault");
+    fs::create_dir(&root).unwrap();
+    copy_dir(
+        &fixture_root().join("vaults/basic/.secrets"),
+        &root.join(".secrets"),
+    );
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(root.join(".secrets/key"), fs::Permissions::from_mode(0o600)).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let home = fs::canonicalize(home).unwrap();
+    let (master, passphrase) = fixture_master_key();
+    run_python(
+        &python,
+        "import json,sys\nfrom kv import vault_origin\nprint(json.dumps(vault_origin.record_created(sys.argv[1])))",
+        &root,
+        &home,
+        &[],
+    );
+    rebind_fixture_key(&python, &root, &home, &passphrase);
+    kv_store::config_authority::approve_config_unattended(&root, &master).unwrap();
+
+    let socket_path = kv_proto::agent_socket_path(Some(&root)).unwrap();
+    let log = temp.0.join("rust-owner-authority-error.log");
+    let mut daemon = spawn_rust_daemon(&root, &home, &passphrase, &log);
+    daemon.wait_for_socket(&socket_path, &log);
+    let identity = keyfile::unwrap_v4(
+        &fs::read(root.join(".secrets/key")).unwrap(),
+        passphrase.as_bytes(),
+    )
+    .unwrap();
+    let config_path = root.join(".secrets/config.json");
+    let saved_config = temp.0.join("config.json.saved");
+    fs::rename(&config_path, &saved_config).unwrap();
+    fs::create_dir(&config_path).unwrap();
+
+    let challenge = [0x37; kv_approvals::wire::NONCE_LEN];
+    let fields = [(
+        "challenge".to_owned(),
+        Value::String(hex_encode(&challenge)),
+    )]
+    .into_iter()
+    .collect::<Map<_, _>>();
+    let answer = kv_proto::agent_request(&root, "owner_channel", &fields).unwrap();
+    let shape = owner_error_shape(&answer, &identity, &challenge);
+    assert_eq!(shape["code"], "internal");
+
+    fs::remove_dir(config_path).unwrap();
+    fs::rename(saved_config, root.join(".secrets/config.json")).unwrap();
+    assert_eq!(
+        kv_proto::agent_request(&root, "stop", &Map::new()).unwrap()["stopping"],
+        true
+    );
+    assert!(daemon.wait().success());
 }
