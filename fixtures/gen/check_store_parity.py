@@ -8,6 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from kv import backup
+from kv import config as kv_config
 from kv.store import CopyChangedError, DrawerUpgradeBackend
 from kv import vault_origin
 
@@ -208,6 +209,65 @@ def stage2c_parity(python_root, rust_root, master_key, spec):
     }, ensure_ascii=False, separators=(",", ":")))
 
 
+def config_ignore_parity(root, cases):
+    for case in cases:
+        secrets = root / case["name"] / ".secrets"
+        secrets.mkdir(parents=True, exist_ok=True)
+        path = secrets / ".gitignore"
+        path.write_bytes(case["existing"].encode("utf-8"))
+        kv_config.update_vault_ignores(
+            secrets,
+            case["rules"],
+            writer_tail=case["writer_tail"],
+            header=case["header"],
+        )
+    print("PASS config ignore parity")
+
+
+def config_writer_parity(root, value):
+    secrets = root / ".secrets"
+    secrets.mkdir(parents=True, exist_ok=True)
+    (secrets / "config.json").write_text(
+        json.dumps(value, indent=2) + "\n", encoding="utf-8"
+    )
+    print("PASS config writer parity")
+
+
+def stage3a_lifecycle(root, master_key, operations):
+    backend = DrawerUpgradeBackend(root, lambda: master_key)
+    results = []
+    for operation in operations:
+        kind = operation["op"]
+        if kind == "add":
+            result = kv_config.add_environment(root, operation["name"])
+        elif kind == "default":
+            kv_config.set_default_env(root, operation["name"])
+            result = None
+        elif kind == "rename":
+            backend.rename_env(operation["old"], operation["new"])
+            result = None
+        elif kind == "delete":
+            entry = backend.delete_env(operation["name"])
+            result = {
+                "name": entry["name"],
+                "deleted_at": "TIME",
+                "purge_after": "TIME",
+            }
+        elif kind == "restore":
+            backend.restore_env(operation["name"])
+            result = None
+        elif kind == "purge":
+            result = backend.purge_env(operation["name"])
+        else:
+            raise ValueError(f"unknown Stage 3a operation {kind}")
+        results.append(result)
+    print(json.dumps({
+        "returns": results,
+        "environments": kv_config.list_environments(root),
+        "default_env": kv_config.get_default_env(root),
+    }, ensure_ascii=False, separators=(",", ":")))
+
+
 def main():
     python_root = Path(sys.argv[1])
     rust_root = Path(sys.argv[2])
@@ -215,6 +275,15 @@ def main():
     operations = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
     envs = ("dev", "prod")
     vault_origin.require_local = lambda _root: None
+    if isinstance(operations, dict) and "config_ignores" in operations:
+        config_ignore_parity(python_root, operations["config_ignores"])
+        return
+    if isinstance(operations, dict) and "config_writer" in operations:
+        config_writer_parity(python_root, operations["config_writer"])
+        return
+    if isinstance(operations, dict) and "stage3a_lifecycle" in operations:
+        stage3a_lifecycle(python_root, master_key, operations["stage3a_lifecycle"])
+        return
     if isinstance(operations, dict) and operations.get("stage2c"):
         stage2c_parity(python_root, rust_root, master_key, operations)
         return
