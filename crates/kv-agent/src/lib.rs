@@ -344,6 +344,11 @@ type ApprovalKeyPin = (Option<ApprovalKeyFileId>, Option<[u8; 32]>);
 type ApprovalKeyFile = (Zeroizing<Vec<u8>>, ApprovalKeyFileId);
 
 #[cfg(unix)]
+fn file_id_component<T: TryInto<u64>>(value: T) -> Option<u64> {
+    value.try_into().ok()
+}
+
+#[cfg(unix)]
 enum ApprovalKeyReadError {
     Io(std::io::Error),
     NotRegular,
@@ -483,8 +488,12 @@ fn read_approval_signing_key(
         statat(folder, APPROVAL_KEY_RELATIVE, AtFlags::SYMLINK_NOFOLLOW).map_err(|error| {
             ApprovalKeyReadError::Io(std::io::Error::from_raw_os_error(error.raw_os_error()))
         })?;
+    let named_file_id = (
+        file_id_component(named.st_dev),
+        file_id_component(named.st_ino),
+    );
     if (named.st_mode & 0o170000) != 0o100000
-        || (named.st_dev, named.st_ino) != (metadata.dev(), metadata.ino())
+        || named_file_id != (Some(metadata.dev()), Some(metadata.ino()))
     {
         return Err(ApprovalKeyReadError::NotRegular);
     }
