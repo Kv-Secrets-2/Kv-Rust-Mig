@@ -21,7 +21,6 @@ use rcgen::{
 use serde_json::{Map, Value, json};
 use url::Url;
 
-const PYTHONPATH: &str = "/home/ubuntu/repos/kv-secrets";
 const API_SECRET: &str = "stage5a-test-secret-value";
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
@@ -121,7 +120,6 @@ fn fixture_rebind(python: &std::ffi::OsStr, root: &Path, home: &Path, passphrase
         .arg(root)
         .arg(passphrase)
         .env("HOME", home)
-        .env("PYTHONPATH", PYTHONPATH)
         .output()
         .expect("rebind fixture vault");
     assert!(
@@ -137,7 +135,6 @@ fn fixture_record_created(python: &std::ffi::OsStr, root: &Path, home: &Path) {
         .arg("from kv.vault_origin import record_created; import sys; record_created(sys.argv[1])")
         .arg(root)
         .env("HOME", home)
-        .env("PYTHONPATH", PYTHONPATH)
         .output()
         .expect("record fixture vault origin");
     assert!(
@@ -249,6 +246,7 @@ impl HttpsServer {
 
         const SERVER: &str = r#"
 import http.server, json, ssl, sys
+import time
 cert, key, observed = sys.argv[1:4]
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -271,6 +269,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             status, body = 200, b"x" * (4 * 1024 * 1024 + 200)
             self.send_response(status)
             self.send_header("Content-Type", "text/plain")
+        elif self.path == "/api/slow":
+            time.sleep(3)
+            status, body = 200, b'{"slow":true}'
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+        elif self.path == "/api/dropped":
+            body = b'{"partial":true,"padding":"' + b"y" * 100 + b'"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body) + 4096))
+            self.end_headers()
+            self.close_connection = True
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         else:
             status, body = 200, json.dumps({"echo":self.headers.get("Authorization"),"ok":True}).encode()
             self.send_response(status)
@@ -297,7 +312,6 @@ server.serve_forever()
             .arg(&server_certificate_path)
             .arg(&key_path)
             .arg(&observed_path)
-            .env("PYTHONPATH", PYTHONPATH)
             .stdout(Stdio::piped())
             .stderr(Stdio::from(stderr))
             .spawn()
@@ -420,7 +434,6 @@ run_agent(store, get_default_env(root))
         .arg(root)
         .arg(passphrase)
         .env("HOME", home)
-        .env("PYTHONPATH", PYTHONPATH)
         .env("SSL_CERT_FILE", certificate)
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr))
@@ -442,7 +455,6 @@ fn python_api_request(
         .arg(root)
         .arg(fields.to_string())
         .env("HOME", home)
-        .env("PYTHONPATH", PYTHONPATH)
         .env("SSL_CERT_FILE", certificate)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -468,7 +480,6 @@ fn python_control_request(
         .arg(root)
         .arg(command)
         .env("HOME", home)
-        .env("PYTHONPATH", PYTHONPATH)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -498,6 +509,10 @@ fn api_cases() -> Vec<(String, Value)> {
         (
             "oversized response is truncated".into(),
             json!({"provider":"stage5-local","path":"/api/large","method":"GET"}),
+        ),
+        (
+            "connection dropped before the body is complete".into(),
+            json!({"provider":"stage5-local","path":"/api/dropped","method":"GET"}),
         ),
         (
             "denied path".into(),
@@ -627,6 +642,28 @@ fn api_broker_matches_python_over_local_https_and_refusals_do_not_send() {
         true,
     );
     let rust_audit = api_events(&rust_home);
+    // The secret cache lock covers the lookup only: `status` answers while a call is in flight.
+    let slow_root = rust_root.clone();
+    let slow = thread::spawn(move || {
+        rust_api_request(
+            &slow_root,
+            &json!({"provider":"stage5-local","path":"/api/slow","method":"GET"}),
+        )
+    });
+    thread::sleep(Duration::from_millis(500));
+    let started = Instant::now();
+    let status = kv_proto::agent_request(&rust_root, "status", &Map::new())
+        .expect("status during slow call");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "status waited on the in-flight API call: {status}"
+    );
+    assert!(
+        status.get("error").is_none(),
+        "status failed during slow call: {status}"
+    );
+    let slow_reply = slow.join().expect("slow API call thread");
+    assert_eq!(slow_reply["status"], 200, "{slow_reply}");
     rust_daemon.stop();
 
     let python_root = temp.0.join("python-vault");
@@ -670,14 +707,15 @@ fn api_broker_matches_python_over_local_https_and_refusals_do_not_send() {
         "Python daemon did not stop"
     );
 
-    assert_eq!(rust_results.len(), 9);
-    assert_eq!(python_results.len(), 9);
+    let case_count = api_cases().len();
+    assert_eq!(rust_results.len(), case_count);
+    assert_eq!(python_results.len(), case_count);
     for ((label, rust), (python_label, python_answer)) in rust_results.iter().zip(&python_results) {
         assert_eq!(label, python_label);
         assert_api_responses_equal(python_answer, rust, label);
     }
-    assert_eq!(rust_audit.len(), 9);
-    assert_eq!(python_audit.len(), 9);
+    assert_eq!(rust_audit.len(), case_count);
+    assert_eq!(python_audit.len(), case_count);
     for (rust, python) in rust_audit.iter().zip(&python_audit) {
         let mut rust_keys = rust.as_object().unwrap().keys().collect::<Vec<_>>();
         let mut python_keys = python.as_object().unwrap().keys().collect::<Vec<_>>();
@@ -703,7 +741,11 @@ fn api_broker_matches_python_over_local_https_and_refusals_do_not_send() {
     );
 
     let observed = server.observed();
-    assert_eq!(observed.len(), 8, "refused API requests reached the server");
+    assert_eq!(
+        observed.len(),
+        11,
+        "refused API requests reached the server"
+    );
     for request in observed {
         assert_eq!(request["method"], "GET");
         assert_eq!(

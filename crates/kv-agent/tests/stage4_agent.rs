@@ -149,7 +149,6 @@ fn run_python(
         .arg(code)
         .arg(root)
         .env("HOME", home)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     for arg in args {
@@ -256,7 +255,6 @@ run_agent(store,get_default_env(root))
             .arg(root)
             .arg(passphrase)
             .env("HOME", home)
-            .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr))
             .spawn()
