@@ -1,6 +1,6 @@
 # Kv-Rust-Mig — kv-secrets Rust migration plan
 
-Status: draft for owner approval. No code is ported until this plan is approved.
+Status: approved by the owner.
 Reference implementation: `Kv-Secrets-2/kv-secrets` branch `release/0.4.0-candidate` (Python, version 0.4.0).
 0.4.0 ships in Python from that repo; this repo is the Rust track (target: 0.5).
 
@@ -13,12 +13,19 @@ Reference implementation: `Kv-Secrets-2/kv-secrets` branch `release/0.4.0-candid
 
 ## Hard requirement: drop-in compatibility
 
-The Rust `kv` reads and writes the **same `.secrets/` files** as Python 0.4.0, byte for byte:
-key files (KVW v1–v4, scrypt settings, owner identity), drawer index/records (`.kvi`/`.kvs`),
-older env-bundle `.enc` files, `config.json`, TOTP blobs, backups, `run_grants.json`, approval
-signatures (Ed25519) and request records. Users can switch binaries either way on the same vault.
+The Rust `kv` reads and writes the **current** 0.4.0 `.secrets/` formats byte for byte — what
+`kv init` makes today: v4 key files (scrypt setting, owner identity, folder binding), drawer storage
+(`.kvi` index / `.kvs` records), TOTP v3, recovery-key wrap, backups, `config.json`, `run_grants.json`,
+Ed25519 approval signatures and request records. A vault made by Python 0.4.0 opens in Rust and the reverse.
 The daemon control protocol and MCP tool surface (10 tools, 4 profiles) stay wire-compatible,
 so editors configured by `kv setup` keep working.
+
+**No old vaults, no migration (owner decision):** Rust does not read or write env-bundle `.enc` files,
+plaintext keys / `KV_MASTER_KEY`, v1–v3 key files or TOTP v1/v2; it refuses them as unsupported.
+There is no `upgrade-security`, `migrate-drawers`, `backup-drawers` or `rollback-drawers`.
+
+Byte-compat detail: Python writes JSON with `json.dumps(..., sort_keys=True, ensure_ascii=False)`
+(separators `", "` / `": "`); Rust must serialize the same bytes wherever a file or MAC depends on them.
 
 ## What the Python code is (measured)
 
@@ -37,7 +44,7 @@ Cargo workspace, one release binary:
 | Crate | Replaces | Notes |
 |---|---|---|
 | `kv-crypto` | crypto.py, key_config, owner_key, old_key | RustCrypto (`chacha20poly1305`, `aes-gcm`, `blake2`, `scrypt`, `pbkdf2`, `sha2`, `hmac`), `ed25519-dalek`; `zeroize`/`secrecy` everywhere |
-| `kv-store` | store.py, vaultfs, fssec, file_lock, structure, migration, backup, drawer_integrity, env_recovery | atomic writes, storage lock, drawer + env-bundle backends |
+| `kv-store` | store.py (drawer backend only), vaultfs, fssec, file_lock, structure, backup, drawer_integrity, env_recovery | atomic writes, storage lock, drawer + env-bundle backends |
 | `kv-config` | config.py, config_authority, setup_toml, trust, vault_origin, vault_registry | `serde_json`, `toml_edit` |
 | `kv-approvals` | approval_*.py, approvals, grants, owner_approval, saved_passes, policy_requests, request_records, runtime_anchor | signed artifacts, verifier |
 | `kv-proto` | control_proto, client, cap_client wire, approval_wire | framed canonical JSON + MAC handshake; fuzzed |
@@ -71,8 +78,8 @@ pure-Python shim package (`kv-cap-client` on PyPI) speaking the same socket prot
 | # | Stage | Gate |
 |---|---|---|
 | 0 | Workspace, CI (fmt, clippy -D warnings, test, deny, audit), fixture generator against Python 0.4.0 | CI green; fixtures committed |
-| 1 | `kv-crypto` + key file formats v1–v4, TOTP | all key/TOTP fixtures decrypt; Rust-written keys open in Python |
-| 2 | `kv-store`: drawer + env-bundle read/write, locks, migration, backup | round-trip both ways; integrity checker matches Python |
+| 1 | `kv-crypto` + v4 key files, TOTP v3, recovery key, backup codes | all key/TOTP fixtures decrypt; Rust-written keys open in Python |
+| 2 | `kv-store`: drawer read/write, locks, backup | round-trip both ways; integrity checker matches Python |
 | 3 | `kv-config` + `kv-approvals`: config, signing, verification, grants, permits | every signed fixture verifies; tampered fixtures refused identically |
 | 4 | `kv-proto` + `kv-agent` core: unlock/lock/status/list/envs, owner terminal | Python client ↔ Rust daemon and Rust client ↔ Python daemon both work |
 | 5 | `kv-broker`: kv_api, providers, HTTP policy, permits, cap_api, POST wallets | broker black-box tests pass on Rust |
@@ -85,12 +92,12 @@ pure-Python shim package (`kv-cap-client` on PyPI) speaking the same socket prot
 Rough size: 6–12 engineer-months, i.e. on the order of 25–50 Devin sessions; stages 4–8 are the bulk.
 Stages 1–3 can start immediately after approval; 4+ depend on them.
 
-## Proposed scope cuts (owner to confirm)
+## Scope cuts (owner confirmed)
 
 - **Remote/cloud commands** (`signup`, `login`, `push`, `pull`, `team`, `token`, drawer sync remote):
   the server is not deployed; leave them out of 0.5 and add later.
 - **Parked tools** `kv_query` / `kv_ssh`: parked on v3/v4 vaults already; not ported in 0.5.
-- **Old vaults** (plaintext key, v1/v2 wrapped keys): Rust reads them only to upgrade them (`kv upgrade-security`), never writes them.
+- **Old vaults and migration**: not supported at all (see above).
 
 ## Conventions
 
