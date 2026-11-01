@@ -1,0 +1,26 @@
+[package]
+name = "kv-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kv-store = { path = "../kv-store" }
+kv-proto = { path = "../kv-proto" }
+indexmap = "2"
+serde_json = { version = "1", features = ["preserve_order"] }
+hex = "0.4"
+base64 = "0.22"
+getrandom = "0.2"
+unicode-general-category = "1.1"
+
+[dev-dependencies]
+kv-agent = { path = "../kv-agent" }
+kv-crypto = { path = "../kv-crypto" }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
+
+[lints]
+workspace = true
