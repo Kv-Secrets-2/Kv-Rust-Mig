@@ -1,0 +1,35 @@
+{
+  "malformed_tokens": [
+    {
+      "name": "wrong-prefix",
+      "python_outcome": "value_error:Non-base32 digit found",
+      "token": "notkvrecovery_H5TS-BDMI-W6MS-AYLX-57UN-EGGV-62RK-FMGJ-DIEH-7N64-TP6J-FQML-XTNQ"
+    },
+    {
+      "name": "wrong-length",
+      "python_outcome": "value_error:invalid recovery key length: expected 32 bytes, got 2",
+      "token": "kvrecovery_ABCD"
+    },
+    {
+      "name": "bad-characters",
+      "python_outcome": "value_error:Non-base32 digit found",
+      "token": "kvrecovery_!!!!"
+    }
+  ],
+  "wrapped_keys": [
+    {
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "master_key_name": "ascending",
+      "parsed_recovery_key_hex": "3f67208d88b799206177efe8d218d5f6a2a2b0c91a087fb7dc9bfc92c18bbcdb",
+      "token": "kvrecovery_H5TS-BDMI-W6MS-AYLX-57UN-EGGV-62RK-FMGJ-DIEH-7N64-TP6J-FQML-XTNQ",
+      "wrapped_base64": "S1ZSAexWeXyjAh01Cx_JHDQryCVZiRBOqGjqpwzXg9mn4e8pRdcoJ6kOdqeAKpwHGDtaWFCgy0gk0omcjeDSpQ=="
+    },
+    {
+      "master_key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "master_key_name": "all-ff",
+      "parsed_recovery_key_hex": "d412ffbe8fac79f4a3a1c1718a727e7ff64f8a8f5a371886430a9531751de8c8",
+      "token": "kvrecovery_2QJP-7PUP-VR47-JI5B-YFYY-U4T6-P73E-7CUP-LI3R-RBSD-BKKT-C5I5-5DEA",
+      "wrapped_base64": "S1ZSAd6MDpL8TD6Mk21R67cJqHRCNeKbKCrnvK5PPlq-UIjV79Skv5OYM0ls6bMMCz7Vg2z9MsWH7KT_MQgvhg=="
+    }
+  ]
+}
