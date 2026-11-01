@@ -1,0 +1,5021 @@
+{
+  "canonical_json": [
+    {
+      "input": null,
+      "input_repr": "None",
+      "ok": "null"
+    },
+    {
+      "input": true,
+      "input_repr": "True",
+      "ok": "true"
+    },
+    {
+      "input": false,
+      "input_repr": "False",
+      "ok": "false"
+    },
+    {
+      "input": 0,
+      "input_repr": "0",
+      "ok": "0"
+    },
+    {
+      "input": -1,
+      "input_repr": "-1",
+      "ok": "-1"
+    },
+    {
+      "input": 9223372036854775808,
+      "input_repr": "9223372036854775808",
+      "ok": "9223372036854775808"
+    },
+    {
+      "input": 1000000000000000000000000000000,
+      "input_repr": "1000000000000000000000000000000",
+      "ok": "1000000000000000000000000000000"
+    },
+    {
+      "input": "",
+      "input_repr": "''",
+      "ok": "\"\""
+    },
+    {
+      "input": "a\"b\\c\n\t\u0001",
+      "input_repr": "'a\"b\\\\c\\n\\t\\x01'",
+      "ok": "\"a\\\"b\\\\c\\n\\t\\u0001\""
+    },
+    {
+      "input": "é中🔑",
+      "input_repr": "'é中🔑'",
+      "ok": "\"\\u00e9\\u4e2d\\ud83d\\udd11\""
+    },
+    {
+      "input": [],
+      "input_repr": "[]",
+      "ok": "[]"
+    },
+    {
+      "input": {},
+      "input_repr": "{}",
+      "ok": "{}"
+    },
+    {
+      "input": [
+        1,
+        [
+          2,
+          [
+            3
+          ]
+        ]
+      ],
+      "input_repr": "[1, [2, [3]]]",
+      "ok": "[1,[2,[3]]]"
+    },
+    {
+      "input": {
+        "Z": 3,
+        "a": {
+          "c": true,
+          "d": [
+            null,
+            "x"
+          ]
+        },
+        "b": 1,
+        "é": 2
+      },
+      "input_repr": "{'b': 1, 'a': {'d': [None, 'x'], 'c': True}, 'é': 2, 'Z': 3}",
+      "ok": "{\"Z\":3,\"a\":{\"c\":true,\"d\":[null,\"x\"]},\"b\":1,\"\\u00e9\":2}"
+    },
+    {
+      "error": "$: float is not allowed in canonical JSON",
+      "input": null,
+      "input_repr": "1.5"
+    },
+    {
+      "error": "$.x[1]: float is not allowed in canonical JSON",
+      "input": {
+        "x": [
+          1,
+          2.0
+        ]
+      },
+      "input_repr": "{'x': [1, 2.0]}"
+    },
+    {
+      "error": "$: object keys must be strings",
+      "input": null,
+      "input_repr": "{1: 'int key'}"
+    }
+  ],
+  "frame": [
+    {
+      "in": "",
+      "out": "0000000000000000"
+    },
+    {
+      "in": "6b76",
+      "out": "00000000000000026b76"
+    },
+    {
+      "in": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "out": "000000000000012c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "grant_state": {
+    "approval_ref": [
+      "owner_approval_abababababababababababab",
+      "c9b97932118702bcbf77a2be2abfb30b5d5397ffce1c13d37b23b247287a6cae"
+    ],
+    "grant": {
+      "actor": {
+        "name": "agent",
+        "pid": 7
+      },
+      "admission_id": "adm_1",
+      "admitted_at_epoch": 1793500500,
+      "admitted_run_id": "run_9",
+      "calls_per_service": {
+        "api:github": 2,
+        "api:openai": 3
+      },
+      "capability_names": [
+        "api:openai",
+        "api:github"
+      ],
+      "command_fingerprint": "fp_abc",
+      "created_at_epoch": 1793500000,
+      "created_from_run_id": "run_42",
+      "expires_at_epoch": 1793503600,
+      "grant_id": "grant_0001",
+      "max_runs": 4,
+      "owner_approval": {
+        "payload": {
+          "actor": {
+            "name": "agent",
+            "pid": 7
+          },
+          "artifact_id": "owner_approval_abababababababababababab",
+          "calls_per_run": null,
+          "calls_per_service": {
+            "api:github": 2,
+            "api:openai": 3
+          },
+          "capability_names": [
+            "api:openai",
+            "api:github"
+          ],
+          "command_fingerprint": "fp_abc",
+          "created_at_epoch": 1793500000,
+          "created_from_run_id": "run_42",
+          "environment": "dev",
+          "expires_at_epoch": 1793503600,
+          "grant_id": "grant_0001",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "max_runs": 4,
+          "network": false,
+          "network_reason": null,
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "owner_wait_seconds": 120,
+          "post_wallet": [
+            {
+              "calls": 2,
+              "rule": "api:openai/chat"
+            }
+          ],
+          "provider_digests": {
+            "github": "4444444444444444444444444444444444444444444444444444444444444444",
+            "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+          "request_expires_at_epoch": 1793501000,
+          "request_id": "req_1",
+          "risk_card": {
+            "level": "medium",
+            "notes": [
+              "né"
+            ]
+          },
+          "script_kind": "python",
+          "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "secret_names": [
+            "OPENAI_API_KEY"
+          ],
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1",
+          "type": "kv_run_grant_approval",
+          "usage_mode": "reusable",
+          "version": 1,
+          "when_spent": "pause"
+        },
+        "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "owner_wait_seconds": 120,
+      "post_wallet": [
+        {
+          "calls": 2,
+          "rule": "api:openai/chat"
+        }
+      ],
+      "risk_card": {
+        "level": "medium",
+        "notes": [
+          "né"
+        ]
+      },
+      "script_kind": "python",
+      "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [
+        "OPENAI_API_KEY"
+      ],
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "status": "admitted",
+      "usage_mode": "reusable",
+      "when_spent": "pause"
+    },
+    "hmac_approval_ref": [
+      "approval_x",
+      "8888888888888888888888888888888888888888888888888888888888888888"
+    ],
+    "integrity": "6341fef813f24f1bd79bcf71bb983e33f3eed263ab837da8a53ec48a835a043c",
+    "payload": {
+      "admission_id": "adm_1",
+      "admitted_at_epoch": 1793500500,
+      "admitted_run_id": "run_9",
+      "approval_hash": "c9b97932118702bcbf77a2be2abfb30b5d5397ffce1c13d37b23b247287a6cae",
+      "artifact_id": "owner_approval_abababababababababababab",
+      "grant_id": "grant_0001",
+      "revoke_mode": null,
+      "revoke_reason": null,
+      "revoked_at": null,
+      "revoked_at_epoch": null,
+      "status": "admitted",
+      "type": "kv_run_grant_state_v1"
+    },
+    "payload_bytes": "7b2261646d697373696f6e5f6964223a2261646d5f31222c2261646d69747465645f61745f65706f6368223a313739333530303530302c2261646d69747465645f72756e5f6964223a2272756e5f39222c22617070726f76616c5f68617368223a2263396239373933323131383730326263626637376132626532616266623330623564353339376666636531633133643337623233623234373238376136636165222c2261727469666163745f6964223a226f776e65725f617070726f76616c5f616261626162616261626162616261626162616261626162222c226772616e745f6964223a226772616e745f30303031222c227265766f6b655f6d6f6465223a6e756c6c2c227265766f6b655f726561736f6e223a6e756c6c2c227265766f6b65645f6174223a6e756c6c2c227265766f6b65645f61745f65706f6368223a6e756c6c2c22737461747573223a2261646d6974746564222c2274797065223a226b765f72756e5f6772616e745f73746174655f7631227d"
+  },
+  "hmac_grant_artifact": {
+    "grant": {
+      "actor": {
+        "name": "agent",
+        "pid": 7
+      },
+      "calls_per_service": {
+        "api:github": 2,
+        "api:openai": 3
+      },
+      "capability_names": [
+        "api:openai",
+        "api:github"
+      ],
+      "command_fingerprint": "fp_abc",
+      "created_at_epoch": 1793500000,
+      "created_from_run_id": "run_42",
+      "expires_at_epoch": 1793503600,
+      "grant_id": "grant_0001",
+      "max_runs": 4,
+      "owner_wait_seconds": 120,
+      "risk_card": {
+        "level": "medium",
+        "notes": [
+          "né"
+        ]
+      },
+      "script_kind": "python",
+      "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [
+        "OPENAI_API_KEY"
+      ],
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "status": "approved",
+      "usage_mode": "reusable",
+      "when_spent": "pause"
+    },
+    "payload": {
+      "actor": {
+        "name": "agent",
+        "pid": 7
+      },
+      "artifact_id": "approval_cdcdcdcdcdcdcdcdcdcdcdcd",
+      "calls_per_service": {
+        "api:github": 2,
+        "api:openai": 3
+      },
+      "capability_names": [
+        "api:openai",
+        "api:github"
+      ],
+      "command_fingerprint": "fp_abc",
+      "created_at_epoch": 1793500000,
+      "created_from_run_id": "run_42",
+      "expires_at_epoch": 1793503600,
+      "grant_id": "grant_0001",
+      "max_runs": 4,
+      "owner_wait_seconds": 120,
+      "risk_card": {
+        "level": "medium",
+        "notes": [
+          "né"
+        ]
+      },
+      "script_kind": "python",
+      "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [
+        "OPENAI_API_KEY"
+      ],
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "type": "kv_run_grant_approval",
+      "usage_mode": "reusable",
+      "version": 1,
+      "when_spent": "pause"
+    },
+    "payload_bytes": "7b226163746f72223a7b226e616d65223a226167656e74222c22706964223a377d2c2261727469666163745f6964223a22617070726f76616c5f636463646364636463646364636463646364636463646364222c2263616c6c735f7065725f73657276696365223a7b226170693a676974687562223a322c226170693a6f70656e6169223a337d2c226361706162696c6974795f6e616d6573223a5b226170693a6f70656e6169222c226170693a676974687562225d2c22636f6d6d616e645f66696e6765727072696e74223a2266705f616263222c22637265617465645f61745f65706f6368223a313739333530303030302c22637265617465645f66726f6d5f72756e5f6964223a2272756e5f3432222c22657870697265735f61745f65706f6368223a313739333530333630302c226772616e745f6964223a226772616e745f30303031222c226d61785f72756e73223a342c226f776e65725f776169745f7365636f6e6473223a3132302c227269736b5f63617264223a7b226c6576656c223a226d656469756d222c226e6f746573223a5b226e5c7530306539225d7d2c227363726970745f6b696e64223a22707974686f6e222c227363726970745f7265665f68617368223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c227363726970745f736861323536223a2230303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c227365637265745f6e616d6573223a5b224f50454e41495f4150495f4b4559225d2c2273657373696f6e5f6e6f6e6365223a2263386339636163626363636463656366643064316432643364346435643664376438643964616462646364646465646665306531653265336534653565366537222c2274797065223a226b765f72756e5f6772616e745f617070726f76616c222c2275736167655f6d6f6465223a227265757361626c65222c2276657273696f6e223a312c227768656e5f7370656e74223a227061757365227d",
+    "payload_sha256": "504159dade230da698c1a356fe67788c2980b80f892328167cba70fb4026c761",
+    "signature": "6cc34ea0e8f04803d46922251cac788d56d0ffa4c01606a6a541d4377cded9ca"
+  },
+  "inputs": {
+    "answer_key": "5a5b5c5d5e5f606162636465666768696a6b6c6d6e6f70717273747576777879",
+    "daemon_key": "32333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f5051",
+    "hmac_key": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+    "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+    "other_seed": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7"
+  },
+  "other_owner_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+  "owner_grant": {
+    "grant": {
+      "actor": {
+        "name": "agent",
+        "pid": 7
+      },
+      "calls_per_service": {
+        "api:github": 2,
+        "api:openai": 3
+      },
+      "capability_names": [
+        "api:openai",
+        "api:github"
+      ],
+      "command_fingerprint": "fp_abc",
+      "created_at_epoch": 1793500000,
+      "created_from_run_id": "run_42",
+      "expires_at_epoch": 1793503600,
+      "grant_id": "grant_0001",
+      "max_runs": 4,
+      "owner_wait_seconds": 120,
+      "post_wallet": [
+        {
+          "calls": 2,
+          "rule": "api:openai/chat"
+        }
+      ],
+      "risk_card": {
+        "level": "medium",
+        "notes": [
+          "né"
+        ]
+      },
+      "script_kind": "python",
+      "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [
+        "OPENAI_API_KEY"
+      ],
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "status": "approved",
+      "usage_mode": "reusable",
+      "when_spent": "pause"
+    },
+    "message": "00000000000000116b762d6f776e65722d6772616e742d763100000000000005b57b226163746f72223a7b226e616d65223a226167656e74222c22706964223a377d2c2261727469666163745f6964223a226f776e65725f617070726f76616c5f616261626162616261626162616261626162616261626162222c2263616c6c735f7065725f72756e223a6e756c6c2c2263616c6c735f7065725f73657276696365223a7b226170693a676974687562223a322c226170693a6f70656e6169223a337d2c226361706162696c6974795f6e616d6573223a5b226170693a6f70656e6169222c226170693a676974687562225d2c22636f6d6d616e645f66696e6765727072696e74223a2266705f616263222c22637265617465645f61745f65706f6368223a313739333530303030302c22637265617465645f66726f6d5f72756e5f6964223a2272756e5f3432222c22656e7669726f6e6d656e74223a22646576222c22657870697265735f61745f65706f6368223a313739333530333630302c226772616e745f6964223a226772616e745f30303031222c226c6f63616c5f617070726f76616c5f6964223a223634363536363637363836393661366236633664366536663730373137323733222c226c6f636174696f6e223a2232663734366437303266366237363264363636393738373437353732363532643730373236663661363536333734222c226d61785f72756e73223a342c226e6574776f726b223a66616c73652c226e6574776f726b5f726561736f6e223a6e756c6c2c226f776e65725f6b65795f6964223a223438373430373864663734646337623664623764336162353962303865316131222c226f776e65725f776169745f7365636f6e6473223a3132302c22706f73745f77616c6c6574223a5b7b2263616c6c73223a322c2272756c65223a226170693a6f70656e61692f63686174227d5d2c2270726f76696465725f64696765737473223a7b22676974687562223a2234343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434222c226f70656e6169223a2233333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333227d2c22726571756573745f646967657374223a2232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232222c22726571756573745f657870697265735f61745f65706f6368223a313739333530313030302c22726571756573745f6964223a227265715f31222c227269736b5f63617264223a7b226c6576656c223a226d656469756d222c226e6f746573223a5b226e5c7530306539225d7d2c227363726970745f6b696e64223a22707974686f6e222c227363726970745f7265665f68617368223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c227363726970745f736861323536223a2230303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c227365637265745f6e616d6573223a5b224f50454e41495f4150495f4b4559225d2c2273657373696f6e5f6e6f6e6365223a2263386339636163626363636463656366643064316432643364346435643664376438643964616462646364646465646665306531653265336534653565366537222c227369676e6572223a226f776e65722d656432353531392d7631222c2274797065223a226b765f72756e5f6772616e745f617070726f76616c222c2275736167655f6d6f6465223a227265757361626c65222c2276657273696f6e223a312c227768656e5f7370656e74223a227061757365227d",
+    "payload": {
+      "actor": {
+        "name": "agent",
+        "pid": 7
+      },
+      "artifact_id": "owner_approval_abababababababababababab",
+      "calls_per_run": null,
+      "calls_per_service": {
+        "api:github": 2,
+        "api:openai": 3
+      },
+      "capability_names": [
+        "api:openai",
+        "api:github"
+      ],
+      "command_fingerprint": "fp_abc",
+      "created_at_epoch": 1793500000,
+      "created_from_run_id": "run_42",
+      "environment": "dev",
+      "expires_at_epoch": 1793503600,
+      "grant_id": "grant_0001",
+      "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+      "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+      "max_runs": 4,
+      "network": false,
+      "network_reason": null,
+      "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+      "owner_wait_seconds": 120,
+      "post_wallet": [
+        {
+          "calls": 2,
+          "rule": "api:openai/chat"
+        }
+      ],
+      "provider_digests": {
+        "github": "4444444444444444444444444444444444444444444444444444444444444444",
+        "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "request_expires_at_epoch": 1793501000,
+      "request_id": "req_1",
+      "risk_card": {
+        "level": "medium",
+        "notes": [
+          "né"
+        ]
+      },
+      "script_kind": "python",
+      "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [
+        "OPENAI_API_KEY"
+      ],
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "signer": "owner-ed25519-v1",
+      "type": "kv_run_grant_approval",
+      "usage_mode": "reusable",
+      "version": 1,
+      "when_spent": "pause"
+    },
+    "signed_grant": {
+      "actor": {
+        "name": "agent",
+        "pid": 7
+      },
+      "calls_per_service": {
+        "api:github": 2,
+        "api:openai": 3
+      },
+      "capability_names": [
+        "api:openai",
+        "api:github"
+      ],
+      "command_fingerprint": "fp_abc",
+      "created_at_epoch": 1793500000,
+      "created_from_run_id": "run_42",
+      "expires_at_epoch": 1793503600,
+      "grant_id": "grant_0001",
+      "max_runs": 4,
+      "owner_approval": {
+        "payload": {
+          "actor": {
+            "name": "agent",
+            "pid": 7
+          },
+          "artifact_id": "owner_approval_abababababababababababab",
+          "calls_per_run": null,
+          "calls_per_service": {
+            "api:github": 2,
+            "api:openai": 3
+          },
+          "capability_names": [
+            "api:openai",
+            "api:github"
+          ],
+          "command_fingerprint": "fp_abc",
+          "created_at_epoch": 1793500000,
+          "created_from_run_id": "run_42",
+          "environment": "dev",
+          "expires_at_epoch": 1793503600,
+          "grant_id": "grant_0001",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "max_runs": 4,
+          "network": false,
+          "network_reason": null,
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "owner_wait_seconds": 120,
+          "post_wallet": [
+            {
+              "calls": 2,
+              "rule": "api:openai/chat"
+            }
+          ],
+          "provider_digests": {
+            "github": "4444444444444444444444444444444444444444444444444444444444444444",
+            "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+          "request_expires_at_epoch": 1793501000,
+          "request_id": "req_1",
+          "risk_card": {
+            "level": "medium",
+            "notes": [
+              "né"
+            ]
+          },
+          "script_kind": "python",
+          "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "secret_names": [
+            "OPENAI_API_KEY"
+          ],
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1",
+          "type": "kv_run_grant_approval",
+          "usage_mode": "reusable",
+          "version": 1,
+          "when_spent": "pause"
+        },
+        "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "owner_wait_seconds": 120,
+      "post_wallet": [
+        {
+          "calls": 2,
+          "rule": "api:openai/chat"
+        }
+      ],
+      "risk_card": {
+        "level": "medium",
+        "notes": [
+          "né"
+        ]
+      },
+      "script_kind": "python",
+      "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [
+        "OPENAI_API_KEY"
+      ],
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "status": "approved",
+      "usage_mode": "reusable",
+      "when_spent": "pause"
+    }
+  },
+  "owner_grant_payload_errors": [
+    {
+      "error": "network must be true or false",
+      "name": "network_not_bool",
+      "override": {
+        "network": 0
+      }
+    },
+    {
+      "error": "max_runs must be a positive integer",
+      "name": "max_runs_zero",
+      "override": {
+        "max_runs": 0
+      }
+    },
+    {
+      "error": "$.calls_per_run: float is not allowed in canonical JSON",
+      "name": "float_value",
+      "override": {
+        "calls_per_run": 1.5
+      }
+    }
+  ],
+  "owner_grant_verify": [
+    {
+      "expected": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "artifact_id": "owner_approval_abababababababababababab",
+        "calls_per_run": null,
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "environment": "dev",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+        "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+        "max_runs": 4,
+        "network": false,
+        "network_reason": null,
+        "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "provider_digests": {
+          "github": "4444444444444444444444444444444444444444444444444444444444444444",
+          "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "request_expires_at_epoch": 1793501000,
+        "request_id": "req_1",
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1",
+        "type": "kv_run_grant_approval",
+        "usage_mode": "reusable",
+        "version": 1,
+        "when_spent": "pause"
+      },
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "valid"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "valid"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OTHER"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "grant_field_changed"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OTHER"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "grant_field_changed"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "041e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "signature_flipped"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "041e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "signature_flipped"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "signed_optional_removed"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "signed_optional_removed"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "reusable_max_runs_removed"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "reusable_max_runs_removed"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_rule": "x",
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "post_rule_present"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_rule": "x",
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "post_rule_present"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 2
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "wrong_version"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 2
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "wrong_version"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "approval_x",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "wrong_artifact_prefix"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "approval_x",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "wrong_artifact_prefix"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": [],
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "payload_not_object"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": [],
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "payload_not_object"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "zz",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "signature_not_hex"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "zz",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "approved",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "signature_not_hex"
+    },
+    {
+      "expected": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "artifact_id": "owner_approval_abababababababababababab",
+        "calls_per_run": null,
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "environment": "dev",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+        "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+        "max_runs": 4,
+        "network": false,
+        "network_reason": null,
+        "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "provider_digests": {
+          "github": "4444444444444444444444444444444444444444444444444444444444444444",
+          "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "request_expires_at_epoch": 1793501000,
+        "request_id": "req_1",
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1",
+        "type": "kv_run_grant_approval",
+        "usage_mode": "reusable",
+        "version": 1,
+        "when_spent": "pause"
+      },
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "revoked",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "owner",
+      "name": "status_changed_unsigned_field"
+    },
+    {
+      "expected": null,
+      "grant": {
+        "actor": {
+          "name": "agent",
+          "pid": 7
+        },
+        "calls_per_service": {
+          "api:github": 2,
+          "api:openai": 3
+        },
+        "capability_names": [
+          "api:openai",
+          "api:github"
+        ],
+        "command_fingerprint": "fp_abc",
+        "created_at_epoch": 1793500000,
+        "created_from_run_id": "run_42",
+        "expires_at_epoch": 1793503600,
+        "grant_id": "grant_0001",
+        "max_runs": 4,
+        "owner_approval": {
+          "payload": {
+            "actor": {
+              "name": "agent",
+              "pid": 7
+            },
+            "artifact_id": "owner_approval_abababababababababababab",
+            "calls_per_run": null,
+            "calls_per_service": {
+              "api:github": 2,
+              "api:openai": 3
+            },
+            "capability_names": [
+              "api:openai",
+              "api:github"
+            ],
+            "command_fingerprint": "fp_abc",
+            "created_at_epoch": 1793500000,
+            "created_from_run_id": "run_42",
+            "environment": "dev",
+            "expires_at_epoch": 1793503600,
+            "grant_id": "grant_0001",
+            "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+            "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+            "max_runs": 4,
+            "network": false,
+            "network_reason": null,
+            "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+            "owner_wait_seconds": 120,
+            "post_wallet": [
+              {
+                "calls": 2,
+                "rule": "api:openai/chat"
+              }
+            ],
+            "provider_digests": {
+              "github": "4444444444444444444444444444444444444444444444444444444444444444",
+              "openai": "3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "request_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "request_expires_at_epoch": 1793501000,
+            "request_id": "req_1",
+            "risk_card": {
+              "level": "medium",
+              "notes": [
+                "né"
+              ]
+            },
+            "script_kind": "python",
+            "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "secret_names": [
+              "OPENAI_API_KEY"
+            ],
+            "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+            "signer": "owner-ed25519-v1",
+            "type": "kv_run_grant_approval",
+            "usage_mode": "reusable",
+            "version": 1,
+            "when_spent": "pause"
+          },
+          "signature": "441e9f96fcfd9a8e879054e269ac24793aa4a6d2b4ad5b5d3ecbb17c5b153aff023861f9152569fac557213caf268fef651fc4743778bc60d99ada3bee55f008",
+          "signer": "owner-ed25519-v1",
+          "version": 1
+        },
+        "owner_wait_seconds": 120,
+        "post_wallet": [
+          {
+            "calls": 2,
+            "rule": "api:openai/chat"
+          }
+        ],
+        "risk_card": {
+          "level": "medium",
+          "notes": [
+            "né"
+          ]
+        },
+        "script_kind": "python",
+        "script_ref_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [
+          "OPENAI_API_KEY"
+        ],
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "status": "revoked",
+        "usage_mode": "reusable",
+        "when_spent": "pause"
+      },
+      "key": "other",
+      "name": "status_changed_unsigned_field"
+    }
+  ],
+  "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+  "owner_public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "pause_answer": {
+    "artifact": {
+      "payload": {
+        "add_calls": 3,
+        "add_seconds": 600,
+        "decision": "extend",
+        "ends_at_epoch": 1793502600,
+        "job_id": "job_1",
+        "pass_expires_at_epoch": 1793502000,
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1"
+      },
+      "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+      "signer": "owner-ed25519-v1",
+      "version": 1
+    },
+    "end_cases": [
+      {
+        "add_seconds": 60,
+        "end": 1060,
+        "now": 500,
+        "pass_expires_at_epoch": 1000
+      },
+      {
+        "add_seconds": 60,
+        "end": 2060,
+        "now": 2000,
+        "pass_expires_at_epoch": 1000
+      },
+      {
+        "add_seconds": 0,
+        "end": null,
+        "now": 0,
+        "pass_expires_at_epoch": 1000
+      },
+      {
+        "add_seconds": 30,
+        "end": 40,
+        "now": 10,
+        "pass_expires_at_epoch": null
+      }
+    ],
+    "facts": {
+      "job_id": "job_1",
+      "pass_expires_at_epoch": 1793502000,
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "signer": "owner-ed25519-v1"
+    },
+    "message": "00000000000000186b762d6f776e65722d70617573652d616e737765722d763100000000000000f37b226164645f63616c6c73223a332c226164645f7365636f6e6473223a3630302c226465636973696f6e223a22657874656e64222c22656e64735f61745f65706f6368223a313739333530323630302c226a6f625f6964223a226a6f625f31222c22706173735f657870697265735f61745f65706f6368223a313739333530323030302c2273657373696f6e5f6e6f6e6365223a2263386339636163626363636463656366643064316432643364346435643664376438643964616462646364646465646665306531653265336534653565366537222c227369676e6572223a226f776e65722d656432353531392d7631227d"
+  },
+  "pause_answer_verify": [
+    {
+      "artifact": {
+        "payload": {
+          "add_calls": 3,
+          "add_seconds": 600,
+          "decision": "extend",
+          "ends_at_epoch": 1793502600,
+          "job_id": "job_1",
+          "pass_expires_at_epoch": 1793502000,
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": {
+        "add_calls": 3,
+        "add_seconds": 600,
+        "decision": "extend",
+        "ends_at_epoch": 1793502600,
+        "job_id": "job_1",
+        "pass_expires_at_epoch": 1793502000,
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1"
+      },
+      "name": "valid",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "add_calls": 3,
+          "add_seconds": 600,
+          "decision": "extend",
+          "ends_at_epoch": 1793502600,
+          "job_id": "job_1",
+          "pass_expires_at_epoch": 1793502000,
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "valid",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "holder": "page",
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "right_as_answer",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "holder": "page",
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "right_as_answer",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "add_calls": 4,
+          "add_seconds": 600,
+          "decision": "extend",
+          "ends_at_epoch": 1793502600,
+          "job_id": "job_1",
+          "pass_expires_at_epoch": 1793502000,
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "payload_changed",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "add_calls": 4,
+          "add_seconds": 600,
+          "decision": "extend",
+          "ends_at_epoch": 1793502600,
+          "job_id": "job_1",
+          "pass_expires_at_epoch": 1793502000,
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "payload_changed",
+      "protected": false
+    }
+  ],
+  "pause_job_message": {
+    "fields": {
+      "job_id": "job_1",
+      "nonce": "66666666666666666666666666666666",
+      "right": "7777777777777777777777777777777777777777777777777777777777777777",
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "signed_at": 1793501234
+    },
+    "message": "000000000000000f6b762d70617573652d6a6f622d763100000000000000f27b226a6f625f6964223a226a6f625f31222c226e6f6e6365223a223636363636363636363636363636363636363636363636363636363636363636222c227269676874223a2237373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737222c2273657373696f6e5f6e6f6e6365223a2263386339636163626363636463656366643064316432643364346435643664376438643964616462646364646465646665306531653265336534653565366537222c227369676e65645f6174223a313739333530313233347d"
+  },
+  "pause_proof": {
+    "fields": {
+      "job_id": "job_1",
+      "n": 3
+    },
+    "kind": "paused",
+    "proof": "c6aa4e506063e54b79ad958a49aaa24ae919d66f85a4000ae787f60f9f13571a",
+    "proven_short_key": false,
+    "snapshot_fields": {
+      "digest": "3f60c6985d2a93ff9440aa0a20411ed23d5b5e3ec3e63fe7b827e778d3950045",
+      "nonce": "99999999999999999999999999999999"
+    },
+    "snapshot_reply": {
+      "calls_left": 2,
+      "job_id": "job_1",
+      "proof": "ignored",
+      "status": "paused"
+    }
+  },
+  "pause_right": {
+    "artifact": {
+      "payload": {
+        "expires_at_epoch": 1793503000,
+        "holder": "page",
+        "kind": "pause-right-v1",
+        "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+        "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+        "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+        "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1"
+      },
+      "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+      "signer": "owner-ed25519-v1",
+      "version": 1
+    },
+    "message": "00000000000000176b762d6f776e65722d70617573652d72696768742d763100000000000001b17b22657870697265735f61745f65706f6368223a313739333530333030302c22686f6c646572223a2270616765222c226b696e64223a2270617573652d72696768742d7631222c226c6f63616c5f617070726f76616c5f6964223a223634363536363637363836393661366236633664366536663730373137323733222c226c6f636174696f6e223a2232663734366437303266366237363264363636393738373437353732363532643730373236663661363536333734222c226f776e65725f6b65795f6964223a223438373430373864663734646337623664623764336162353962303865316131222c2272696768745f7075626c69635f6b6579223a2232396163626165313431626363616630623232653161393464333464306263373336316535323664306266653132633839373934626339333232393636646437222c2273657373696f6e5f6e6f6e6365223a2263386339636163626363636463656366643064316432643364346435643664376438643964616462646364646465646665306531653265336534653565366537222c227369676e6572223a226f776e65722d656432353531392d7631227d"
+  },
+  "pause_right_verify": [
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "holder": "page",
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": {
+        "expires_at_epoch": 1793503000,
+        "holder": "page",
+        "kind": "pause-right-v1",
+        "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+        "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+        "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+        "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1"
+      },
+      "name": "valid",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "holder": "page",
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "valid",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "holder": "page",
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1",
+          "x": 1
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "extra_payload_key",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "holder": "page",
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1",
+          "x": 1
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "extra_payload_key",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "missing_payload_key",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "expires_at_epoch": 1793503000,
+          "kind": "pause-right-v1",
+          "local_approval_id": "6465666768696a6b6c6d6e6f70717273",
+          "location": "2f746d702f6b762d666978747572652d70726f6a656374",
+          "owner_key_id": "4874078df74dc7b6db7d3ab59b08e1a1",
+          "right_public_key": "29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "da533e990bb4502fe4aa546358971b96819239a0d035ea208f0769d0cba0bc52900a147e5b7459033c333723818061f9d4b25a8cadee84782e38dc2081a81c0e",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "missing_payload_key",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "add_calls": 3,
+          "add_seconds": 600,
+          "decision": "extend",
+          "ends_at_epoch": 1793502600,
+          "job_id": "job_1",
+          "pass_expires_at_epoch": 1793502000,
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "answer_as_right",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "add_calls": 3,
+          "add_seconds": 600,
+          "decision": "extend",
+          "ends_at_epoch": 1793502600,
+          "job_id": "job_1",
+          "pass_expires_at_epoch": 1793502000,
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "6769f35beaa6492606e8cd0dfe955acd47221deedee2e728f3e4dbd7eb235734623a9a6ef59ac910298310e256ee3958b2705980e59bd12b582e35fc49562308",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "name": "answer_as_right",
+      "protected": false
+    }
+  ],
+  "pause_seal": {
+    "opens": "5a5b5c5d5e5f606162636465666768696a6b6c6d6e6f70717273747576777879",
+    "right_public_key": "abababababababababababababababababababababababababababababababab",
+    "seal_key": "5344bbac45764413e0426f73218353d652d4b0e7ef26e0f6354681e4c733b676",
+    "sealed": "a7df8a3ff0b099443ce87956342322919187a7b6ace137b1f58b8c356e4bfa682e1ed31aa97d2168d886650bf53bf78559c7cd1a7a3ce03cff5959e3",
+    "session_nonce": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "wrong_session_opens": null
+  },
+  "permit": {
+    "artifact": {
+      "payload": {
+        "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "expires_at_epoch": 1793501111,
+        "method": "POST",
+        "path": "/v1/x",
+        "permit_id": "permit_1",
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1"
+      },
+      "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+      "signer": "owner-ed25519-v1",
+      "version": 1
+    },
+    "facts": {
+      "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "expires_at_epoch": 1793501111,
+      "method": "POST",
+      "path": "/v1/x",
+      "permit_id": "permit_1",
+      "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+      "signer": "owner-ed25519-v1"
+    },
+    "message": "00000000000000126b762d6f776e65722d7065726d69742d763100000000000001157b22626f64795f736861323536223a2235353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535353535222c22657870697265735f61745f65706f6368223a313739333530313131312c226d6574686f64223a22504f5354222c2270617468223a222f76312f78222c227065726d69745f6964223a227065726d69745f31222c2273657373696f6e5f6e6f6e6365223a2263386339636163626363636463656366643064316432643364346435643664376438643964616462646364646465646665306531653265336534653565366537222c227369676e6572223a226f776e65722d656432353531392d7631227d"
+  },
+  "permit_verify": [
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": {
+        "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "expires_at_epoch": 1793501111,
+        "method": "POST",
+        "path": "/v1/x",
+        "permit_id": "permit_1",
+        "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+        "signer": "owner-ed25519-v1"
+      },
+      "key": "owner",
+      "name": "valid",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "valid",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "valid",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "valid",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "extra": 1,
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "extra_key",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "extra": 1,
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "extra_key",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "extra": 1,
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "extra_key",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "extra": 1,
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "extra_key",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "local-project-hmac-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "signer_mismatch",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "local-project-hmac-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "signer_mismatch",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "local-project-hmac-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "signer_mismatch",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "local-project-hmac-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "signer_mismatch",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/y",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "facts_changed",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/y",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "facts_changed",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/y",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "facts_changed",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/y",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "facts_changed",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "short_signature",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "short_signature",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "short_signature",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b",
+        "signer": "owner-ed25519-v1",
+        "version": 1
+      },
+      "expected": null,
+      "key": "other",
+      "name": "short_signature",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": true
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "version_bool",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": true
+      },
+      "expected": null,
+      "key": "other",
+      "name": "version_bool",
+      "protected": true
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": true
+      },
+      "expected": null,
+      "key": "owner",
+      "name": "version_bool",
+      "protected": false
+    },
+    {
+      "artifact": {
+        "payload": {
+          "body_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "expires_at_epoch": 1793501111,
+          "method": "POST",
+          "path": "/v1/x",
+          "permit_id": "permit_1",
+          "session_nonce": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+          "signer": "owner-ed25519-v1"
+        },
+        "signature": "e4aa5ef34e55fe33a8b64f600480505e1e00f6fd958ff6cf4fec46fcf30520e41233515f7b10b76cf9f365f048aa693e1afd02cad7920da09dded21d1ce98b0d",
+        "signer": "owner-ed25519-v1",
+        "version": true
+      },
+      "expected": null,
+      "key": "other",
+      "name": "version_bool",
+      "protected": false
+    }
+  ],
+  "provider_digest": {
+    "definition": {
+      "origin": "https://api.openai.com",
+      "rules": [
+        {
+          "id": "models",
+          "method": "GET",
+          "path": "/v1/models"
+        }
+      ],
+      "secret_name": "OPENAI_API_KEY"
+    },
+    "digest": "b671ec8b885650829efab664f9568ae64fd62a961db7d69456714792ba8eff95"
+  },
+  "request_digests": [
+    {
+      "digest": "803250108f101b111ac10c3f2f2116b07f55f02392e8d8f085d00170db1e3a08",
+      "name": "v1",
+      "request": {
+        "actor": {
+          "name": "a"
+        },
+        "approved_grant_id": "g",
+        "argv": [
+          "python3",
+          "app.py"
+        ],
+        "capability_names": [
+          "api:openai"
+        ],
+        "command_fingerprint": "fp",
+        "created_at": "x",
+        "created_at_epoch": 1,
+        "cwd": "/p",
+        "environment": "dev",
+        "expires_at_epoch": 3,
+        "max_calls": 5,
+        "network": false,
+        "network_reason": null,
+        "reason": "ré",
+        "request_id": "req_1",
+        "risk_card": {},
+        "risk_level": "low",
+        "script_kind": "python",
+        "script_ref_hash": null,
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [],
+        "source": "mcp",
+        "status": "pending",
+        "updated_at_epoch": 2
+      }
+    },
+    {
+      "digest": "a4c899345cc5c1752fdc3b1448ec7826c083feb1a275e470d2c0f605ddbd0e4a",
+      "name": "v2",
+      "request": {
+        "actor": {
+          "name": "a"
+        },
+        "approved_grant_id": "g",
+        "argv": [
+          "python3",
+          "app.py"
+        ],
+        "calls_per_service": {
+          "api:openai": 2
+        },
+        "capability_names": [
+          "api:openai"
+        ],
+        "command_fingerprint": "fp",
+        "created_at": "x",
+        "created_at_epoch": 1,
+        "cwd": "/p",
+        "environment": "dev",
+        "expires_at_epoch": 3,
+        "max_calls": 5,
+        "network": false,
+        "network_reason": null,
+        "reason": "ré",
+        "request_id": "req_1",
+        "risk_card": {},
+        "risk_level": "low",
+        "script_kind": "python",
+        "script_ref_hash": null,
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [],
+        "source": "mcp",
+        "status": "pending",
+        "updated_at_epoch": 2
+      }
+    },
+    {
+      "digest": "f29eae4d32772c3b5494655ce91fdd9d4ee77860f1983d2e4cb4a121f58a4b89",
+      "name": "v3",
+      "request": {
+        "actor": {
+          "name": "a"
+        },
+        "approved_grant_id": "g",
+        "argv": [
+          "python3",
+          "app.py"
+        ],
+        "capability_names": [
+          "api:openai"
+        ],
+        "command_fingerprint": "fp",
+        "created_at": "x",
+        "created_at_epoch": 1,
+        "cwd": "/p",
+        "environment": "dev",
+        "expires_at_epoch": 3,
+        "max_calls": 5,
+        "network": false,
+        "network_reason": null,
+        "reason": "ré",
+        "recommended_ttl_seconds": 900,
+        "request_id": "req_1",
+        "risk_card": {},
+        "risk_level": "low",
+        "script_kind": "python",
+        "script_ref_hash": null,
+        "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "secret_names": [],
+        "source": "mcp",
+        "status": "pending",
+        "updated_at_epoch": 2
+      }
+    }
+  ],
+  "request_integrity_payload": {
+    "payload": {
+      "actor": {
+        "name": "a"
+      },
+      "approved_grant_id": "g",
+      "argv": [
+        "python3",
+        "app.py"
+      ],
+      "capability_names": [
+        "api:openai"
+      ],
+      "command_fingerprint": "fp",
+      "created_at_epoch": 1,
+      "cwd": "/p",
+      "expires_at_epoch": 3,
+      "max_calls": 5,
+      "reason": "ré",
+      "request_id": "req_1",
+      "risk_card": {},
+      "risk_level": "low",
+      "script_kind": "python",
+      "script_ref_hash": null,
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [],
+      "source": "mcp",
+      "status": "pending",
+      "type": "kv_run_approval_request",
+      "updated_at_epoch": 2,
+      "version": 1
+    },
+    "payload_bytes": "7b226163746f72223a7b226e616d65223a2261227d2c22617070726f7665645f6772616e745f6964223a2267222c2261726776223a5b22707974686f6e33222c226170702e7079225d2c226361706162696c6974795f6e616d6573223a5b226170693a6f70656e6169225d2c22636f6d6d616e645f66696e6765727072696e74223a226670222c22637265617465645f61745f65706f6368223a312c22637764223a222f70222c22657870697265735f61745f65706f6368223a332c226d61785f63616c6c73223a352c22726561736f6e223a22725c7530306539222c22726571756573745f6964223a227265715f31222c227269736b5f63617264223a7b7d2c227269736b5f6c6576656c223a226c6f77222c227363726970745f6b696e64223a22707974686f6e222c227363726970745f7265665f68617368223a6e756c6c2c227363726970745f736861323536223a2230303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c227365637265745f6e616d6573223a5b5d2c22736f75726365223a226d6370222c22737461747573223a2270656e64696e67222c2274797065223a226b765f72756e5f617070726f76616c5f72657175657374222c22757064617465645f61745f65706f6368223a322c2276657273696f6e223a317d",
+    "request": {
+      "actor": {
+        "name": "a"
+      },
+      "approved_grant_id": "g",
+      "argv": [
+        "python3",
+        "app.py"
+      ],
+      "capability_names": [
+        "api:openai"
+      ],
+      "command_fingerprint": "fp",
+      "created_at": "x",
+      "created_at_epoch": 1,
+      "cwd": "/p",
+      "environment": "dev",
+      "expires_at_epoch": 3,
+      "max_calls": 5,
+      "network": false,
+      "network_reason": null,
+      "reason": "ré",
+      "request_id": "req_1",
+      "risk_card": {},
+      "risk_level": "low",
+      "script_kind": "python",
+      "script_ref_hash": null,
+      "script_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "secret_names": [],
+      "source": "mcp",
+      "status": "pending",
+      "updated_at_epoch": 2
+    }
+  },
+  "signing_key_file": {
+    "parsed": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "valid": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=\n"
+  },
+  "token_integrity": {
+    "bytes": "7b227265636f7264223a7b2263616c6c73223a332c226772616e745f6964223a226772616e745f30303031222c226e616d6573223a5b2261222c225c7530306539225d2c22746f6b656e5f6964223a22746f6b5f31227d2c2274797065223a2261646d69747465645f6361706162696c6974795f7631227d",
+    "integrity": "4cc66e63c121519a9c09de9c0bcf883686c4d84b111aecd0ebaae940e4af1b68",
+    "record": {
+      "calls": 3,
+      "grant_id": "grant_0001",
+      "names": [
+        "a",
+        "é"
+      ],
+      "token_id": "tok_1"
+    }
+  },
+  "wire_limits": {
+    "FRAME_LEN": 8,
+    "MAC_LEN": 32,
+    "MAX_FIELD_BYTES": 262144,
+    "MAX_LIST_ITEMS": 1000,
+    "NONCE_LEN": 32
+  },
+  "wire_messages": [
+    {
+      "encoding": "000000000000000a6368616e6e656c2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000970726f746563746564000000000000000974332dc3a9f09f949100000000000000040400ff0700000000000000040500ff07000000000000000974362dc3a9f09f9491000000000000000132000000000000000974372dc3a9f09f9491000000000000000974382dc3a9f09f9491000000000000000974382dc3a9f09f9491000000000000000974392dc3a9f09f9491",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "daemon_version": "t6-é🔑",
+        "local_approval_id": {
+          "hex": "0400ff07"
+        },
+        "location": {
+          "hex": "0500ff07"
+        },
+        "mode": "protected",
+        "owner_key_id": "t3-é🔑",
+        "providers": [
+          [
+            "t7-é🔑",
+            "t8-é🔑"
+          ],
+          [
+            "t8-é🔑",
+            "t9-é🔑"
+          ]
+        ],
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "f29959dce63454c1390426c686deaedd8069d5fb1380731c44a8b7db5904fd1c",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "mode",
+          [
+            "enum",
+            "protected",
+            "unprotected"
+          ]
+        ],
+        [
+          "owner_key_id",
+          "text"
+        ],
+        [
+          "local_approval_id",
+          "bytes"
+        ],
+        [
+          "location",
+          "bytes"
+        ],
+        [
+          "daemon_version",
+          "text"
+        ],
+        [
+          "providers",
+          [
+            "list",
+            [
+              "text",
+              "text"
+            ]
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "daemon_version": "t6-é🔑",
+          "local_approval_id": "0400ff07",
+          "location": "0500ff07",
+          "mode": "protected",
+          "owner_key_id": "t3-é🔑",
+          "providers": [
+            [
+              "t7-é🔑",
+              "t8-é🔑"
+            ],
+            [
+              "t8-é🔑",
+              "t9-é🔑"
+            ]
+          ],
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "f29959dce63454c1390426c686deaedd8069d5fb1380731c44a8b7db5904fd1c",
+        "type": "channel-v1"
+      },
+      "type": "channel-v1"
+    },
+    {
+      "encoding": "0000000000000011726571756573742d7265636f72642d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f9491000000000000000974342dc3a9f09f9491000000000000000566616c7365000000000000000974362dc3a9f09f9491",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "content_digest": "t3-é🔑",
+        "environment": "t4-é🔑",
+        "network": false,
+        "network_reason": "t6-é🔑",
+        "request_id": "t2-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "81b133a21344dd83556f0c52662b34be6d74e981841cabde42b2e2024a5ec51c",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "request_id",
+          "text"
+        ],
+        [
+          "content_digest",
+          "text"
+        ],
+        [
+          "environment",
+          "text"
+        ],
+        [
+          "network",
+          "bool"
+        ],
+        [
+          "network_reason",
+          "text"
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "content_digest": "t3-é🔑",
+          "environment": "t4-é🔑",
+          "network": false,
+          "network_reason": "t6-é🔑",
+          "request_id": "t2-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "81b133a21344dd83556f0c52662b34be6d74e981841cabde42b2e2024a5ec51c",
+        "type": "request-record-v1"
+      },
+      "type": "request-record-v1"
+    },
+    {
+      "encoding": "00000000000000156772616e742d72656769737465722d61636b2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f9491000000000000000974342dc3a9f09f949100000000000000096a6f622d656e646564",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "grant_id": "t2-é🔑",
+        "payload_digest": "t4-é🔑",
+        "request_id": "t3-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "status": "job-ended"
+      },
+      "mac": "486fbddf7400fafd907d718a2cf03c80d0fe454204a4f21c845e384b1a2fdab0",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "grant_id",
+          "text"
+        ],
+        [
+          "request_id",
+          "text"
+        ],
+        [
+          "payload_digest",
+          "text"
+        ],
+        [
+          "status",
+          [
+            "enum",
+            "registered",
+            "already-registered",
+            "job-ended"
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "grant_id": "t2-é🔑",
+          "payload_digest": "t4-é🔑",
+          "request_id": "t3-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+          "status": "job-ended"
+        },
+        "mac": "486fbddf7400fafd907d718a2cf03c80d0fe454204a4f21c845e384b1a2fdab0",
+        "type": "grant-register-ack-v1"
+      },
+      "type": "grant-register-ack-v1"
+    },
+    {
+      "encoding": "00000000000000117065726d69742d726571756573742d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f9491000000000000000974342dc3a9f09f9491000000000000000974352dc3a9f09f9491000000000000000974362dc3a9f09f9491",
+      "fields": {
+        "body_text": "t4-é🔑",
+        "caller_headers_json": "t5-é🔑",
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "facts_json": "t3-é🔑",
+        "request_id": "t2-é🔑",
+        "requester_json": "t6-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "79a00f41ea9391308833a79464d74e527b6d558b4b61877d1beaf26a09dba750",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "request_id",
+          "text"
+        ],
+        [
+          "facts_json",
+          "text"
+        ],
+        [
+          "body_text",
+          "text"
+        ],
+        [
+          "caller_headers_json",
+          "text"
+        ],
+        [
+          "requester_json",
+          "text"
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "body_text": "t4-é🔑",
+          "caller_headers_json": "t5-é🔑",
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "facts_json": "t3-é🔑",
+          "request_id": "t2-é🔑",
+          "requester_json": "t6-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "79a00f41ea9391308833a79464d74e527b6d558b4b61877d1beaf26a09dba750",
+        "type": "permit-request-v1"
+      },
+      "type": "permit-request-v1"
+    },
+    {
+      "encoding": "00000000000000167065726d69742d72656769737465722d61636b2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f9491000000000000000974342dc3a9f09f94910000000000000012616c72656164792d72656769737465726564",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "payload_digest": "t4-é🔑",
+        "permit_id": "t2-é🔑",
+        "request_id": "t3-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "status": "already-registered"
+      },
+      "mac": "de8c155669e11097f5526be9d4e496d7537fb7017a5522ae26a6178bc6312e01",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "permit_id",
+          "text"
+        ],
+        [
+          "request_id",
+          "text"
+        ],
+        [
+          "payload_digest",
+          "text"
+        ],
+        [
+          "status",
+          [
+            "enum",
+            "registered",
+            "already-registered"
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "payload_digest": "t4-é🔑",
+          "permit_id": "t2-é🔑",
+          "request_id": "t3-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+          "status": "already-registered"
+        },
+        "mac": "de8c155669e11097f5526be9d4e496d7537fb7017a5522ae26a6178bc6312e01",
+        "type": "permit-register-ack-v1"
+      },
+      "type": "permit-register-ack-v1"
+    },
+    {
+      "encoding": "000000000000001070617573652d726571756573742d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f9491",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "facts_json": "t3-é🔑",
+        "request_id": "t2-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "e9e7798555b376497b743d537646fc602b6f52048e577b586ed3deac1f381a62",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "request_id",
+          "text"
+        ],
+        [
+          "facts_json",
+          "text"
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "facts_json": "t3-é🔑",
+          "request_id": "t2-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "e9e7798555b376497b743d537646fc602b6f52048e577b586ed3deac1f381a62",
+        "type": "pause-request-v1"
+      },
+      "type": "pause-request-v1"
+    },
+    {
+      "encoding": "000000000000001370617573652d616e737765722d61636b2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f94910000000000000008657874656e646564",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "payload_digest": "t3-é🔑",
+        "request_id": "t2-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "status": "extended"
+      },
+      "mac": "bd730658270ffe7de2c64ed4c96a51f04fe3a46b9159292a5b0a95ba27c52cde",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "request_id",
+          "text"
+        ],
+        [
+          "payload_digest",
+          "text"
+        ],
+        [
+          "status",
+          [
+            "enum",
+            "extended",
+            "refused"
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "payload_digest": "t3-é🔑",
+          "request_id": "t2-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+          "status": "extended"
+        },
+        "mac": "bd730658270ffe7de2c64ed4c96a51f04fe3a46b9159292a5b0a95ba27c52cde",
+        "type": "pause-answer-ack-v1"
+      },
+      "type": "pause-answer-ack-v1"
+    },
+    {
+      "encoding": "000000000000000c687474702d72756c652d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491000000000000000974332dc3a9f09f9491000000000000000974342dc3a9f09f9491000000000000000974352dc3a9f09f9491",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "provider": "t2-é🔑",
+        "provider_json": "t4-é🔑",
+        "rule_id": "t3-é🔑",
+        "rule_json": "t5-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "d8aa39f264c9a586f292513c0b5bc276e612fa7d9cccce30eda99de5c6d18a1e",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "provider",
+          "text"
+        ],
+        [
+          "rule_id",
+          "text"
+        ],
+        [
+          "provider_json",
+          "text"
+        ],
+        [
+          "rule_json",
+          "text"
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "provider": "t2-é🔑",
+          "provider_json": "t4-é🔑",
+          "rule_id": "t3-é🔑",
+          "rule_json": "t5-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "d8aa39f264c9a586f292513c0b5bc276e612fa7d9cccce30eda99de5c6d18a1e",
+        "type": "http-rule-v1"
+      },
+      "type": "http-rule-v1"
+    },
+    {
+      "encoding": "000000000000000d7265766f6b652d61636b2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000970726f74656374656400000000000000056772616e74000000000000000974342dc3a9f09f9491000000000000000974352dc3a9f09f9491000000000000000132000000000000000974362dc3a9f09f949100000000000000200708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526000000000000000974382dc3a9f09f9491000000000000000974392dc3a9f09f9491000000000000000a7431302dc3a9f09f9491000000000000000974372dc3a9f09f9491000000000000002008090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627000000000000000974392dc3a9f09f9491000000000000000a7431302dc3a9f09f9491000000000000000a7431312dc3a9f09f949100000000000000077265766f6b6564",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "hits": [
+          [
+            "t6-é🔑",
+            {
+              "hex": "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526"
+            },
+            "t8-é🔑",
+            "t9-é🔑",
+            "t10-é🔑"
+          ],
+          [
+            "t7-é🔑",
+            {
+              "hex": "08090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627"
+            },
+            "t9-é🔑",
+            "t10-é🔑",
+            "t11-é🔑"
+          ]
+        ],
+        "mode": "protected",
+        "result": "revoked",
+        "revoke_mode": "t5-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "target_id": "t4-é🔑",
+        "target_kind": "grant"
+      },
+      "mac": "2906880f682fdbed90f427abb6c89bff2a4b01a1776581d53a198b0c3ff1f49b",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "mode",
+          [
+            "enum",
+            "protected",
+            "unprotected"
+          ]
+        ],
+        [
+          "target_kind",
+          [
+            "enum",
+            "request",
+            "grant"
+          ]
+        ],
+        [
+          "target_id",
+          "text"
+        ],
+        [
+          "revoke_mode",
+          "text"
+        ],
+        [
+          "hits",
+          [
+            "list",
+            [
+              "text",
+              "nonce",
+              "text",
+              "text",
+              "text"
+            ]
+          ]
+        ],
+        [
+          "result",
+          [
+            "enum",
+            "revoked"
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "hits": [
+            [
+              "t6-é🔑",
+              "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526",
+              "t8-é🔑",
+              "t9-é🔑",
+              "t10-é🔑"
+            ],
+            [
+              "t7-é🔑",
+              "08090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+              "t9-é🔑",
+              "t10-é🔑",
+              "t11-é🔑"
+            ]
+          ],
+          "mode": "protected",
+          "result": "revoked",
+          "revoke_mode": "t5-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+          "target_id": "t4-é🔑",
+          "target_kind": "grant"
+        },
+        "mac": "2906880f682fdbed90f427abb6c89bff2a4b01a1776581d53a198b0c3ff1f49b",
+        "type": "revoke-ack-v1"
+      },
+      "type": "revoke-ack-v1"
+    },
+    {
+      "encoding": "000000000000000d7265746972652d61636b2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000772657469726564",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "result": "retired",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "b7c5e1381b6880ab5fab4494ea3157b585ac14d1beab910fe9c7238a75110313",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "result",
+          [
+            "enum",
+            "retired"
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "result": "retired",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "b7c5e1381b6880ab5fab4494ea3157b585ac14d1beab910fe9c7238a75110313",
+        "type": "retire-ack-v1"
+      },
+      "type": "retire-ack-v1"
+    },
+    {
+      "encoding": "00000000000000086572726f722d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "code": "t2-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "09781eb693a0af46c04d234d25ca542287d0273bef375366801e62cf2112bdb7",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "code",
+          "text"
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "code": "t2-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "09781eb693a0af46c04d234d25ca542287d0273bef375366801e62cf2112bdb7",
+        "type": "error-v1"
+      },
+      "type": "error-v1"
+    },
+    {
+      "encoding": "000000000000000a656e642d6a6f622d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f9491",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "job_id": "t2-é🔑",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "6277a91ef44d7e4429747054269f56aed9ff7dc1f5c43ddc7c5389f70382e006",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "job_id",
+          "text"
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "job_id": "t2-é🔑",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "6277a91ef44d7e4429747054269f56aed9ff7dc1f5c43ddc7c5389f70382e006",
+        "type": "end-job-v1"
+      },
+      "type": "end-job-v1"
+    },
+    {
+      "encoding": "000000000000000e656e642d6a6f622d61636b2d76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000000000000200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20000000000000000974322dc3a9f09f94910000000000000005656e64656400000000000000096e6f742d7361766564",
+      "fields": {
+        "challenge": {
+          "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        },
+        "job_id": "t2-é🔑",
+        "record": "not-saved",
+        "result": "ended",
+        "session_nonce": {
+          "hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }
+      },
+      "mac": "f755914227653bb832a827a0fae3d61de67004dabddfa736758a2260577d5db0",
+      "schema": [
+        [
+          "challenge",
+          "nonce"
+        ],
+        [
+          "session_nonce",
+          "nonce"
+        ],
+        [
+          "job_id",
+          "text"
+        ],
+        [
+          "result",
+          [
+            "enum",
+            "ended",
+            "started",
+            "unknown"
+          ]
+        ],
+        [
+          "record",
+          [
+            "enum",
+            "removed",
+            "not-saved",
+            "kept"
+          ]
+        ]
+      ],
+      "to_json": {
+        "fields": {
+          "challenge": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "job_id": "t2-é🔑",
+          "record": "not-saved",
+          "result": "ended",
+          "session_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        "mac": "f755914227653bb832a827a0fae3d61de67004dabddfa736758a2260577d5db0",
+        "type": "end-job-ack-v1"
+      },
+      "type": "end-job-ack-v1"
+    }
+  ]
+}
