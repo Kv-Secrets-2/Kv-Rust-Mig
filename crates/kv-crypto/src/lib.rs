@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
 use blake2::Blake2bMac;
-use blake2::digest::{Mac as BlakeMac, consts::U32};
+use blake2::digest::{
+    Mac as BlakeMac,
+    consts::{U16, U32},
+};
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::ZeroizeOnDrop;
+pub use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CryptoError {
@@ -91,6 +95,17 @@ fn keyed_blake2b_32(key: &[u8], message: &[u8]) -> Zeroizing<[u8; 32]> {
     mac.update(message);
     let mut digest = mac.finalize().into_bytes();
     let mut output = Zeroizing::new([0u8; 32]);
+    output.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    output
+}
+
+pub fn keyed_blake2b_128(key: &Key32, msg: &[u8]) -> [u8; 16] {
+    let mut mac = <Blake2bMac<U16> as BlakeMac>::new_from_slice(key.as_bytes())
+        .expect("BLAKE2b accepts a 32-byte key");
+    mac.update(msg);
+    let mut digest = mac.finalize().into_bytes();
+    let mut output = [0u8; 16];
     output.copy_from_slice(&digest);
     digest.as_mut_slice().zeroize();
     output
@@ -807,4 +822,21 @@ pub fn import_key(token: &str) -> Result<Key32, CryptoError> {
     let mut bytes = Zeroizing::new([0u8; 32]);
     bytes.copy_from_slice(&decoded);
     Ok(Key32::from_zeroizing(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Key32, keyed_blake2b_128};
+
+    #[test]
+    fn keyed_blake2b_128_matches_python_hashlib_vector() {
+        let key = Key32::new(std::array::from_fn(|index| index as u8));
+        assert_eq!(
+            keyed_blake2b_128(&key, b"dev"),
+            [
+                0xec, 0xe2, 0xe1, 0x9c, 0xd5, 0x74, 0x6d, 0xb8, 0x71, 0xe3, 0x30, 0x86, 0x79, 0xca,
+                0x9f, 0x52,
+            ]
+        );
+    }
 }
