@@ -1,0 +1,18 @@
+[package]
+name = "kv-broker"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = "0.22"
+kv-crypto = { path = "../kv-crypto" }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ureq = { version = "2", default-features = false, features = ["tls", "native-certs"] }
+url = "2"
+
+[lints]
+workspace = true

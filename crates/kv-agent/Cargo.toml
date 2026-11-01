@@ -10,6 +10,7 @@ base64 = "0.22"
 getrandom = "0.2"
 kv-crypto = { path = "../kv-crypto" }
 kv-approvals = { path = "../kv-approvals" }
+kv-broker = { path = "../kv-broker" }
 kv-proto = { path = "../kv-proto" }
 kv-store = { path = "../kv-store" }
 libc = "0.2"
@@ -18,6 +19,11 @@ signal-hook = "0.3"
 sha2 = "0.10"
 subtle = "2"
 thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+
+[dev-dependencies]
+rcgen = "0.13"
+url = "2.5"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "net", "process"] }
