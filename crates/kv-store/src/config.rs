@@ -855,6 +855,12 @@ pub struct Vault {
 }
 
 impl Vault {
+    pub fn open(root: impl Into<PathBuf>, store: crate::DrawerStore) -> Self {
+        let root = root.into();
+        let approvals = crate::approval_refs::FileApprovalRefs::new(root.clone());
+        Self::new(root, store, approvals)
+    }
+
     pub fn new(
         root: impl Into<PathBuf>,
         store: crate::DrawerStore,

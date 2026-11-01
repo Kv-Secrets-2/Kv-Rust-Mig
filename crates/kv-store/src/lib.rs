@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 
+pub mod approval_refs;
 pub mod backup;
 pub mod config;
 pub mod envname;

@@ -98,6 +98,14 @@ pub(crate) fn read_regular_limit(
     what: &str,
     limit: usize,
 ) -> Result<Vec<u8>, StoreError> {
+    read_regular_limit_with_metadata(path, what, limit).map(|(contents, _)| contents)
+}
+
+pub(crate) fn read_regular_limit_with_metadata(
+    path: &Path,
+    what: &str,
+    limit: usize,
+) -> Result<(Vec<u8>, fs::Metadata), StoreError> {
     let named_before = fs::symlink_metadata(path)?;
     if is_indirect(&named_before) {
         return Err(StoreError::Structure(format!(
@@ -179,7 +187,7 @@ pub(crate) fn read_regular_limit(
             len: contents.len(),
         });
     }
-    Ok(contents)
+    Ok((contents, opened))
 }
 
 pub(crate) fn clear_env_tree(secrets_dir: &Path, env_id: &str) -> Result<(), StoreError> {

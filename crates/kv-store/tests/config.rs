@@ -170,7 +170,6 @@ fn python_config_writer_and_gitignore_merge_match_rust_byte_for_byte() {
         .arg(&rust_root)
         .arg("00")
         .arg(&writer_spec)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python config writer");
     assert!(
@@ -232,7 +231,6 @@ fn python_config_writer_and_gitignore_merge_match_rust_byte_for_byte() {
         .arg(&rust_root)
         .arg("00")
         .arg(&ignore_spec)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python ignore merger");
     assert!(
@@ -360,7 +358,6 @@ fn python_and_rust_config_aware_environment_lifecycle_match() {
         .arg(&rust_root)
         .arg(hex(master.as_bytes()))
         .arg(&operation_path)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python Stage 3a parity script");
     assert!(
