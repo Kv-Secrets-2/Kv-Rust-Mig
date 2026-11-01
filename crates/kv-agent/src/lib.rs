@@ -16,11 +16,17 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+use kv_approvals::owner::{OwnerSeed, owner_key_id, owner_public_key};
+use kv_approvals::wire::{self, FieldValue, MessageFields, MessageKind};
 use kv_crypto::{Key32, Zeroizing, derive_labeled_key, keyfile};
 use kv_store::DrawerStore;
 #[cfg(unix)]
 use kv_store::config_authority;
 use serde_json::{Value, json};
+#[cfg(unix)]
+use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -120,6 +126,28 @@ pub struct TrustContext {
     pub grant_state_key: Key32,
     pub token_key: Key32,
     pub protected: bool,
+    pub owner_key_id: String,
+    pub local_approval_id: Vec<u8>,
+    pub location: Vec<u8>,
+    pub version: String,
+    #[cfg(unix)]
+    pin: Arc<TrustPin>,
+}
+
+#[cfg(unix)]
+struct TrustPin {
+    state: std::sync::Mutex<PinState>,
+}
+
+#[cfg(unix)]
+struct PinState {
+    root: std::path::PathBuf,
+    folder_id: (u64, u64),
+    folder: File,
+    key_id: Option<(u64, u64)>,
+    key_digest: Option<[u8; 32]>,
+    latched: Option<String>,
+    closed: bool,
 }
 
 impl TrustContext {
@@ -128,8 +156,26 @@ impl TrustContext {
         passphrase: Option<&[u8]>,
         master_key: &Key32,
     ) -> Result<Self, AgentError> {
-        let key_path = root.as_ref().join(".secrets").join("key");
+        let root = root.as_ref();
+        #[cfg(unix)]
+        let root_path = fs::canonicalize(root)?;
+        #[cfg(unix)]
+        let folder = File::open(&root_path)?;
+        #[cfg(unix)]
+        let folder_metadata = folder.metadata()?;
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        let key_path = root.join(".secrets").join("key");
         let blob = fs::read(key_path)?;
+        #[cfg(unix)]
+        let key_metadata = fs::symlink_metadata(root.join(".secrets").join("key"))?;
+        #[cfg(unix)]
+        let key_id = (key_metadata.dev(), key_metadata.ino());
+        #[cfg(unix)]
+        let key_digest: [u8; 32] = Sha256::digest(&blob).into();
+        let mut owner_id = String::new();
+        let mut local_approval_id = Vec::new();
+        let mut location = root.to_string_lossy().as_bytes().to_vec();
         let protected = match passphrase {
             Some(passphrase) => {
                 let identity = keyfile::unwrap_v4(&blob, passphrase)
@@ -139,6 +185,14 @@ impl TrustContext {
                         "the key file changed while unlocking; try again".into(),
                     ));
                 }
+                let seed = OwnerSeed::from_slice(&identity.owner_seed[..])
+                    .map_err(|error| AgentError(error.to_string()))?;
+                let public = owner_public_key(&seed);
+                owner_id = owner_key_id(&public, &identity.local_approval_id);
+                local_approval_id = identity.local_approval_id.to_vec();
+                if !identity.location.is_empty() {
+                    location = identity.location.clone();
+                }
                 true
             }
             None => false,
@@ -146,13 +200,111 @@ impl TrustContext {
         let mut nonce = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(&mut nonce[..])
             .map_err(|_| AgentError("operating-system randomness unavailable".into()))?;
-        Ok(Self {
+        let output = Self {
             session_nonce: nonce,
             daemon_auth_key: derive_labeled_key(master_key, b"kv-approval:daemon-auth", &[]),
             grant_state_key: derive_labeled_key(master_key, b"kv-approval:grant-state", &[]),
             token_key: derive_labeled_key(master_key, b"kv-approval:token", &[]),
             protected,
-        })
+            owner_key_id: owner_id,
+            local_approval_id,
+            location,
+            version: "0.4.0".to_owned(),
+            #[cfg(unix)]
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: root_path,
+                    folder_id: (folder_metadata.dev(), folder_metadata.ino()),
+                    folder,
+                    key_id: Some(key_id),
+                    key_digest: Some(key_digest),
+                    latched: None,
+                    closed: false,
+                }),
+            }),
+        };
+        Ok(output)
+    }
+
+    #[cfg(unix)]
+    pub fn observe(&self) -> Result<(), AgentError> {
+        let mut state = self
+            .pin
+            .state
+            .lock()
+            .map_err(|_| AgentError("the vault could not be checked (LockPoisoned)".into()))?;
+        if let Some(reason) = &state.latched {
+            return Err(AgentError(reason.clone()));
+        }
+        let reason = if state.closed {
+            Some("the vault folder pin is closed".to_owned())
+        } else {
+            let metadata = match fs::symlink_metadata(&state.root) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Self::latch_locked(&mut state, "the vault folder is gone");
+                }
+                Err(_) => {
+                    return Self::latch_locked(&mut state, "the vault folder cannot be checked");
+                }
+            };
+            if metadata.file_type().is_symlink() {
+                Some("the vault path now contains a link".to_owned())
+            } else if (metadata.dev(), metadata.ino()) != state.folder_id {
+                Some("the vault folder was replaced or moved".to_owned())
+            } else if state.folder.metadata().map(|m| m.nlink()).unwrap_or(0) == 0 {
+                Some("the vault folder was deleted".to_owned())
+            } else {
+                let key_path = state.root.join(".secrets").join("key");
+                match (fs::symlink_metadata(&key_path), fs::read(&key_path)) {
+                    (Err(error), _) if error.kind() == std::io::ErrorKind::NotFound => {
+                        Some("the key file is gone".to_owned())
+                    }
+                    (Err(_), _) => Some("the key file cannot be read".to_owned()),
+                    (Ok(metadata), Ok(blob)) => {
+                        if Some((metadata.dev(), metadata.ino())) != state.key_id {
+                            Some("the key file was replaced".to_owned())
+                        } else if Some(Sha256::digest(&blob).into()) != state.key_digest {
+                            Some("the key file changed".to_owned())
+                        } else {
+                            None
+                        }
+                    }
+                    (Ok(_), Err(_)) => Some("the key file cannot be read".to_owned()),
+                }
+            }
+        };
+        if let Some(reason) = reason {
+            return Self::latch_locked(&mut state, &reason);
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn latch_locked(state: &mut PinState, reason: &str) -> Result<(), AgentError> {
+        let message = state.latched.get_or_insert_with(|| {
+            format!(
+                "vault changed under the running daemon ({reason}); kv refuses all requests. Stop the daemon and unlock again."
+            )
+        });
+        Err(AgentError(message.clone()))
+    }
+
+    #[cfg(unix)]
+    pub fn hard_locked(&self) -> Option<String> {
+        self.pin
+            .state
+            .lock()
+            .ok()
+            .and_then(|state| state.latched.clone())
+    }
+
+    /// Retire the held folder pin. Work-window waiting is deferred until stage 6.
+    #[cfg(unix)]
+    pub fn close(&self) {
+        if let Ok(mut state) = self.pin.state.lock() {
+            state.closed = true;
+        }
     }
 }
 
@@ -349,7 +501,17 @@ fn handle_connection(
         return Ok(());
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
-        eprintln!("owner endpoint {cmd}: Stage 4b endpoint is not implemented");
+        let _ = serve_owner_endpoint(stream, cmd, request, trust, root, approved, master_key);
+        return Ok(());
+    }
+    if cmd != "status"
+        && cmd != "stop"
+        && let Err(error) = trust.observe()
+    {
+        kv_proto::write_reply(
+            stream,
+            &json!({"error":error.to_string(),"error_code":"vault_hard_locked"}),
+        )?;
         return Ok(());
     }
     if !matches!(cmd, "status" | "stop" | "lock")
@@ -458,6 +620,163 @@ fn handle_connection(
 }
 
 #[cfg(unix)]
+fn owner_challenge(request: &serde_json::Map<String, Value>) -> Option<Vec<u8>> {
+    let text = request.get("challenge")?.as_str()?;
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..32)
+        .map(|index| u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok())
+        .collect::<Option<Vec<_>>>()
+}
+
+#[cfg(unix)]
+fn signed_owner(
+    trust: &TrustContext,
+    kind: MessageKind,
+    fields: MessageFields,
+) -> Result<Value, AgentError> {
+    let tag = wire::mac(trust.daemon_auth_key.as_ref(), kind, &fields)
+        .map_err(|error| AgentError(error.to_string()))?;
+    wire::to_json(kind, &fields, &tag).map_err(|error| AgentError(error.to_string()))
+}
+
+#[cfg(unix)]
+fn owner_error(trust: &TrustContext, challenge: Vec<u8>, code: &str) -> Result<Value, AgentError> {
+    let mut fields = MessageFields::new();
+    fields.insert("challenge".into(), FieldValue::Nonce(challenge));
+    fields.insert(
+        "session_nonce".into(),
+        FieldValue::Nonce(trust.session_nonce.to_vec()),
+    );
+    fields.insert("code".into(), FieldValue::Text(code.to_owned()));
+    signed_owner(trust, MessageKind::ErrorV1, fields)
+}
+
+#[cfg(unix)]
+fn serve_owner_endpoint(
+    stream: &mut std::os::unix::net::UnixStream,
+    cmd: &str,
+    request: &serde_json::Map<String, Value>,
+    trust: &TrustContext,
+    root: &Path,
+    approved: &Value,
+    master_key: &Key32,
+) -> Result<(), AgentError> {
+    let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
+    let hard_locked = owner_error(trust, challenge.clone(), "hard_locked");
+    let too_large = owner_error(trust, challenge.clone(), "response_too_large");
+    let (Ok(hard_locked), Ok(too_large)) = (hard_locked, too_large) else {
+        eprintln!("owner endpoint {cmd}: cannot sign an error; closing without an answer");
+        return Ok(());
+    };
+    let answer = (|| {
+        if owner_challenge(request).is_none() {
+            return owner_error(trust, challenge.clone(), "bad_request");
+        }
+        if trust.observe().is_err() {
+            return Ok(hard_locked.clone());
+        }
+        if config_authority::require_current(root, approved, master_key).is_err() {
+            return owner_error(trust, challenge.clone(), "config_authority_changed");
+        }
+        if cmd != "owner_channel" {
+            return owner_error(trust, challenge.clone(), "unsupported");
+        }
+        let mut fields = MessageFields::new();
+        fields.insert("challenge".into(), FieldValue::Nonce(challenge.clone()));
+        fields.insert(
+            "session_nonce".into(),
+            FieldValue::Nonce(trust.session_nonce.to_vec()),
+        );
+        fields.insert(
+            "mode".into(),
+            FieldValue::Enum(if trust.protected {
+                "protected".into()
+            } else {
+                "unprotected".into()
+            }),
+        );
+        fields.insert(
+            "owner_key_id".into(),
+            FieldValue::Text(trust.owner_key_id.clone()),
+        );
+        fields.insert(
+            "local_approval_id".into(),
+            FieldValue::Bytes(trust.local_approval_id.clone()),
+        );
+        fields.insert("location".into(), FieldValue::Bytes(trust.location.clone()));
+        fields.insert(
+            "daemon_version".into(),
+            FieldValue::Text(trust.version.clone()),
+        );
+        fields.insert("providers".into(), FieldValue::List(owner_providers(root)));
+        signed_owner(trust, MessageKind::ChannelV1, fields)
+    })();
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(_) => {
+            eprintln!("owner endpoint {cmd}: internal error (details withheld)");
+            match owner_error(trust, challenge, "internal") {
+                Ok(answer) => answer,
+                Err(_) => return Ok(()),
+            }
+        }
+    };
+    let raw = kv_store::pyjson::to_vec_python(&answer, false)
+        .map_err(|error| AgentError(error.to_string()))?;
+    let replacement = if raw.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+        too_large
+    } else {
+        answer
+    };
+    kv_proto::write_reply(stream, &replacement)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn owner_providers(root: &Path) -> Vec<Vec<FieldValue>> {
+    let mut providers: BTreeMap<String, Value> = BTreeMap::new();
+    providers.insert(
+        "anthropic".into(),
+        json!({"auth_type":"x-api-key","base_url":"https://api.anthropic.com","default_headers":{"Content-Type":"application/json","anthropic-version":"2023-06-01"},"secret_name":"ANTHROPIC_API_KEY"}),
+    );
+    providers.insert(
+        "github".into(),
+        json!({"auth_type":"bearer","base_url":"https://api.github.com","default_headers":{"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},"secret_name":"GITHUB_TOKEN"}),
+    );
+    providers.insert(
+        "google".into(),
+        json!({"auth_query_param":"key","auth_type":"query","base_url":"https://generativelanguage.googleapis.com","default_headers":{"Content-Type":"application/json"},"secret_name":"GOOGLE_API_KEY"}),
+    );
+    providers.insert(
+        "google-cloud".into(),
+        json!({"auth_query_param":"key","auth_type":"query","base_url":"https://www.googleapis.com","default_headers":{"Content-Type":"application/json"},"secret_name":"GOOGLE_CLOUD_API_KEY"}),
+    );
+    providers.insert(
+        "openai".into(),
+        json!({"auth_type":"bearer","base_url":"https://api.openai.com","default_headers":{"Content-Type":"application/json"},"secret_name":"OPENAI_API_KEY"}),
+    );
+    if let Ok(snapshot) = kv_store::config::load_config(root)
+        && let Some(custom) = snapshot.value.get("providers").and_then(Value::as_object)
+    {
+        for (name, value) in custom {
+            providers.insert(name.clone(), value.clone());
+        }
+    }
+    providers
+        .into_iter()
+        .filter_map(|(name, value)| {
+            let canonical = kv_approvals::canonical::canonical_json(&value).ok()?;
+            Some(vec![
+                FieldValue::Text(name.to_owned()),
+                FieldValue::Text(canonical),
+            ])
+        })
+        .collect()
+}
+
+#[cfg(unix)]
 fn read_request_with_timeout(
     stream: &mut std::os::unix::net::UnixStream,
     timeout: Duration,
@@ -543,7 +862,7 @@ fn status_response(
         "version":AGENT_VERSION,
         "enforcement":kv_proto::ENFORCEMENT_GENERATION,
         "session":if trust.protected {"protected"} else {"unprotected"},
-        "hard_locked":false,
+        "hard_locked":trust.hard_locked().is_some(),
         "runs":[]
     })
 }
@@ -806,6 +1125,21 @@ mod tests {
             grant_state_key: Key32::new([0; 32]),
             token_key: Key32::new([0; 32]),
             protected: false,
+            owner_key_id: String::new(),
+            local_approval_id: Vec::new(),
+            location: Vec::new(),
+            version: "0.4.0".into(),
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: std::path::PathBuf::from("."),
+                    folder_id: (0, 0),
+                    folder: File::open(".").unwrap(),
+                    key_id: None,
+                    key_digest: None,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
         };
         let approved = json!({});
         let token = Zeroizing::new(String::new());

@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 getrandom = "0.2"
 kv-crypto = { path = "../kv-crypto" }
+kv-approvals = { path = "../kv-approvals" }
 kv-proto = { path = "../kv-proto" }
 kv-store = { path = "../kv-store" }
 libc = "0.2"
