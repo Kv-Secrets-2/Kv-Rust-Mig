@@ -28,6 +28,10 @@ impl Key32 {
         Self(Zeroizing::new(bytes))
     }
 
+    fn from_zeroizing(bytes: Zeroizing<[u8; 32]>) -> Self {
+        Self(bytes)
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -81,12 +85,12 @@ fn randomness(output: &mut [u8]) -> Result<(), CryptoError> {
     getrandom::getrandom(output).map_err(|_| CryptoError::Randomness)
 }
 
-fn keyed_blake2b_32(key: &[u8], message: &[u8]) -> [u8; 32] {
+fn keyed_blake2b_32(key: &[u8], message: &[u8]) -> Zeroizing<[u8; 32]> {
     let mut mac =
         <Blake2bMac<U32> as BlakeMac>::new_from_slice(key).expect("BLAKE2b accepts a 32-byte key");
     mac.update(message);
     let mut digest = mac.finalize().into_bytes();
-    let mut output = [0u8; 32];
+    let mut output = Zeroizing::new([0u8; 32]);
     output.copy_from_slice(&digest);
     digest.as_mut_slice().zeroize();
     output
@@ -108,14 +112,14 @@ pub fn derive_labeled_key(master: &Key32, label: &[u8], parts: &[&[u8]]) -> Key3
         std::iter::once(label).chain(parts.iter().copied()),
     ));
     let mut digest = mac.finalize().into_bytes();
-    let mut output = [0u8; 32];
+    let mut output = Zeroizing::new([0u8; 32]);
     output.copy_from_slice(&digest);
     digest.as_mut_slice().zeroize();
-    Key32::new(output)
+    Key32::from_zeroizing(output)
 }
 
 pub fn derive_env_key(master: &Key32, env: &str) -> Key32 {
-    Key32::new(keyed_blake2b_32(master.as_bytes(), env.as_bytes()))
+    Key32::from_zeroizing(keyed_blake2b_32(master.as_bytes(), env.as_bytes()))
 }
 
 fn validate_setting(setting: (u8, u8, u8)) -> Result<(), CryptoError> {
@@ -333,17 +337,17 @@ pub mod keyfile {
                 "v4 key plaintext has the wrong length".into(),
             ));
         }
-        let mut master_key = [0u8; 32];
+        let mut master_key = Zeroizing::new([0u8; 32]);
         master_key.copy_from_slice(&plaintext[..32]);
-        let mut owner_seed = [0u8; 32];
+        let mut owner_seed = Zeroizing::new([0u8; 32]);
         owner_seed.copy_from_slice(&plaintext[32..64]);
-        let mut local_approval_id = [0u8; 16];
+        let mut local_approval_id = Zeroizing::new([0u8; 16]);
         local_approval_id.copy_from_slice(&plaintext[64..]);
-        Ok(Identity::new(
-            Key32::new(master_key),
+        Ok(Identity {
+            master_key: Key32::from_zeroizing(master_key),
             owner_seed,
-            local_approval_id,
-        ))
+            local_approval_id: *local_approval_id,
+        })
     }
 }
 
@@ -555,9 +559,9 @@ pub mod recovery {
                 decoded.len()
             )));
         }
-        let mut bytes = [0u8; 32];
+        let mut bytes = Zeroizing::new([0u8; 32]);
         bytes.copy_from_slice(&decoded);
-        Ok(Key32::new(bytes))
+        Ok(Key32::from_zeroizing(bytes))
     }
 
     pub fn wrap_master_key(
@@ -599,9 +603,9 @@ pub mod recovery {
                 "recovered master key has the wrong length".into(),
             ));
         }
-        let mut master_key = [0u8; 32];
+        let mut master_key = Zeroizing::new([0u8; 32]);
         master_key.copy_from_slice(&plaintext);
-        Ok(Key32::new(master_key))
+        Ok(Key32::from_zeroizing(master_key))
     }
 }
 
@@ -800,7 +804,7 @@ pub fn import_key(token: &str) -> Result<Key32, CryptoError> {
             "invalid master key text: non-canonical final character".into(),
         ));
     }
-    let mut bytes = [0u8; 32];
+    let mut bytes = Zeroizing::new([0u8; 32]);
     bytes.copy_from_slice(&decoded);
-    Ok(Key32::new(bytes))
+    Ok(Key32::from_zeroizing(bytes))
 }
