@@ -143,7 +143,7 @@ struct TrustPin {
 struct PinState {
     root: std::path::PathBuf,
     folder_id: (u64, u64),
-    folder: File,
+    folder: Option<File>,
     key_id: Option<(u64, u64)>,
     key_digest: Option<[u8; 32]>,
     latched: Option<String>,
@@ -215,7 +215,7 @@ impl TrustContext {
                 state: std::sync::Mutex::new(PinState {
                     root: root_path,
                     folder_id: (folder_metadata.dev(), folder_metadata.ino()),
-                    folder,
+                    folder: Some(folder),
                     key_id: Some(key_id),
                     key_digest: Some(key_digest),
                     latched: None,
@@ -252,7 +252,13 @@ impl TrustContext {
                 Some("the vault path now contains a link".to_owned())
             } else if (metadata.dev(), metadata.ino()) != state.folder_id {
                 Some("the vault folder was replaced or moved".to_owned())
-            } else if state.folder.metadata().map(|m| m.nlink()).unwrap_or(0) == 0 {
+            } else if state
+                .folder
+                .as_ref()
+                .and_then(|folder| folder.metadata().ok())
+                .map(|metadata| metadata.nlink() == 0)
+                .unwrap_or(true)
+            {
                 Some("the vault folder was deleted".to_owned())
             } else {
                 let key_path = state.root.join(".secrets").join("key");
@@ -304,6 +310,7 @@ impl TrustContext {
     pub fn close(&self) {
         if let Ok(mut state) = self.pin.state.lock() {
             state.closed = true;
+            state.folder.take();
         }
     }
 }
@@ -1108,6 +1115,41 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn closing_trust_context_retires_folder_descriptor() {
+        let context = TrustContext {
+            session_nonce: Zeroizing::new([0; 32]),
+            daemon_auth_key: Key32::new([0; 32]),
+            grant_state_key: Key32::new([0; 32]),
+            token_key: Key32::new([0; 32]),
+            protected: false,
+            owner_key_id: String::new(),
+            local_approval_id: Vec::new(),
+            location: Vec::new(),
+            version: "0.4.0".into(),
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: std::path::PathBuf::from("."),
+                    folder_id: (0, 0),
+                    folder: Some(File::open(".").unwrap()),
+                    key_id: None,
+                    key_digest: None,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
+        };
+        context.close();
+        let state = context.pin.state.lock().unwrap();
+        assert!(state.folder.is_none());
+        drop(state);
+        assert_eq!(
+            context.observe().unwrap_err().to_string(),
+            "vault changed under the running daemon (the vault folder pin is closed); kv refuses all requests. Stop the daemon and unlock again."
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn silent_connection_times_out_and_closes() {
         use std::io::Read;
         use std::os::unix::net::UnixStream;
@@ -1133,7 +1175,7 @@ mod tests {
                 state: std::sync::Mutex::new(PinState {
                     root: std::path::PathBuf::from("."),
                     folder_id: (0, 0),
-                    folder: File::open(".").unwrap(),
+                    folder: Some(File::open(".").unwrap()),
                     key_id: None,
                     key_digest: None,
                     latched: None,
