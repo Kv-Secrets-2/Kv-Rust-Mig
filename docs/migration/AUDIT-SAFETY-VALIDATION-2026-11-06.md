@@ -81,6 +81,9 @@ Initial documentation/dependency commands encountered the command sandbox's
 read-only temporary directory and network restrictions. Their supported-mode
 reruns passed; setup failures are not counted as product failures or successes.
 
-Native macOS ACL execution and GitHub Actions for this audit branch remain
-pending its pull request. Linux evidence does not certify those platforms,
+The parent IPC PR #16 at `2be1f69` subsequently passed all eleven GitHub checks,
+including native Linux/macOS/Windows and all four Python parity lanes:
+[CI run 42280696008](https://github.com/Kv-Secrets-2/Kv-Rust-Mig/actions/runs/42280696008).
+That parent result does not validate this new audit crate. Native macOS ACL
+execution and GitHub Actions for this audit branch remain pending its pull request. Linux evidence does not certify those platforms,
 branch protection, release artifacts, or the remainder of the migration.
