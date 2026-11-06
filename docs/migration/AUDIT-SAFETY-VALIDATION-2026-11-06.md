@@ -57,6 +57,17 @@ reply exclusions, response limits, and retirement replacements. The deliberately
 conservative missing-`lost` health exception retains a live reproduction of
 Python's `KeyError`; it is documented as a divergence, not exact parity.
 
+## Upstream transport-test integration
+
+Merge `fb9dc26` brings PR #16's later CI diagnostics and synchronized transport
+fixtures into this branch. Relative to the fully tested product commit, the
+only crate change is inside `kv-proto`'s test module; production transport bytes
+and all audit implementation files are unchanged. All 12 protocol tests passed
+again with the audit JSON feature configuration and required Python reference.
+A separate deliberate deadline-renewal mutation failed the synchronized test,
+then the restored source passed. Logs are `transport-integration.log` here and
+`transport-reset-deadline-mutation.log` under the IPC validation directory.
+
 ## Evidence and limits
 
 Reports and logs are retained under `/workspace/migration-audit-safety-validation/`.
