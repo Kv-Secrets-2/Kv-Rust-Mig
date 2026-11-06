@@ -83,5 +83,6 @@ idle clients, in-flight HTTPS wait/cutoff, signal cleanup, and a URL-safety chec
 that returns after retirement. Tests use private local sockets, a temporary
 HTTPS CA, independent process homes, and bounded child-process collection.
 
-The original audit remains historical evidence. Validation results for this
-slice are recorded separately when the full gate completes.
+The original audit remains historical evidence. See the
+[validation record](IPC-SHUTDOWN-VALIDATION-2026-11-06.md) for before/after
+reproductions, the four completed gates, and platform limits.
