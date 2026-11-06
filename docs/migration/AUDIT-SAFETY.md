@@ -6,11 +6,11 @@ at its ordinary reply boundary. The reference is Python 0.4.0 at
 `9a497d91a0f6e95b0949deaf8f5c431f9a4333c0`, principally `kv/audit.py`,
 `kv/fssec.py`, and the daemon's `_send` wrapper in `kv/agent.py`.
 
-Historical [F3/F4](implemented-path-findings.md) remain **source-confirmed** findings
-at baseline `3a9c3c7`: audit opens followed paths, and a local mutex did not serialize
-other processes. The new regression tests exercise the replacement implementation;
-they do not establish an executed reproduction against the old baseline. This
-record covers a focused migration slice, not a complete security audit.
+Historical [F3/F4](implemented-path-findings.md) identified linked audit writes
+and process-local serialization at baseline `3a9c3c7`. The symlink defect is now
+reproduced against the later unchanged IPC baseline; the old cross-process race
+remains source-confirmed. See the [validation record](AUDIT-SAFETY-VALIDATION-2026-11-06.md)
+for that distinction and the full gates. This is a focused migration slice.
 
 ## Compatibility and failure policy
 
@@ -76,7 +76,7 @@ Python accepts health records missing `lost`, then raises `KeyError('lost')` whi
 reading them. Rust deliberately treats that malformed shape as untrusted and
 reports an unknown count; later publication preserves `lost: null`. The live test
 `missing_lost_health_is_untrusted_despite_python_reference_exception` retains the
-Python reproduction and separately verifies this approved exception.
+Python reproduction and separately verifies this deliberate exception.
 
 ## Focused evidence and limits
 
@@ -88,8 +88,8 @@ floats, lock replacement, close failures, and marker failures. **11 daemon unit
 tests and one live daemon comparison** passed, covering the actual reply boundary,
 opt-in, response limits, signed/control exclusions, retirement, and an unchanged
 symlink sentinel while provider requests still succeed. Crate formatting and strict
-Clippy passed. The full workspace gate for this slice is pending; these focused
-results do not substitute for it. Native macOS ACL tests are included but were not
+Clippy passed. The full workspace gate subsequently passed 235 tests and all
+48 required comparisons on each of Python 3.10–3.13; see the validation record. Native macOS ACL tests are included but were not
 executed locally. See [PARITY.md](PARITY.md) for reference setup and inventory.
 
 This adds no new event coverage, Windows writer, audit/doctor CLI, permits, or
