@@ -97,7 +97,7 @@ fn copy_tree(source: &Path, target: &Path) {
 #[cfg(unix)]
 #[test]
 fn provenance_records_interoperate_with_python() {
-    let Some(python_path) = std::env::var_os("KV_PY_REF") else {
+    let Some(python_path) = kv_test_support::python_reference() else {
         return;
     };
     let _home_lock = HOME_LOCK.lock().unwrap();
@@ -164,7 +164,7 @@ sys.stdout.buffer.write(json.dumps(record,sort_keys=True).encode())
 #[cfg(unix)]
 #[test]
 fn config_authority_records_open_in_both_implementations() {
-    let Some(python_path) = std::env::var_os("KV_PY_REF") else {
+    let Some(python_path) = kv_test_support::python_reference() else {
         return;
     };
     let _home_lock = HOME_LOCK.lock().unwrap();
@@ -290,7 +290,7 @@ except Exception as error:
 #[cfg(unix)]
 #[test]
 fn unsafe_key_refusal_persists_exposed_provenance() {
-    let Some(python_path) = std::env::var_os("KV_PY_REF") else {
+    let Some(python_path) = kv_test_support::python_reference() else {
         return;
     };
     let _home_lock = HOME_LOCK.lock().unwrap();
@@ -344,7 +344,7 @@ except Exception as error:
 #[cfg(unix)]
 #[test]
 fn missing_moved_and_git_tracked_vaults_refuse_like_python() {
-    let Some(python_path) = std::env::var_os("KV_PY_REF") else {
+    let Some(python_path) = kv_test_support::python_reference() else {
         return;
     };
     let _home_lock = HOME_LOCK.lock().unwrap();

@@ -3,22 +3,19 @@
 #![cfg(unix)]
 //! Needs `KV_PY_REF` (the reference interpreter); skips without it.
 
+#[path = "../../../tests/support/harness.rs"]
+mod harness;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
+use std::time::Duration;
 
 struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new(label: &str) -> Self {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("kv-mcp-cli-{label}-{}-{nanos}", std::process::id()));
-        fs::create_dir_all(&path).unwrap();
-        Self(path.canonicalize().unwrap())
+    fn new() -> Self {
+        Self(harness::socket_temp_dir("mc", ""))
     }
 }
 
@@ -34,10 +31,9 @@ fn run(mut command: Command, cwd: &Path, home: &Path) -> Output {
         .env("HOME", home)
         .env_remove("KV_MASTER_KEY")
         .env_remove("KV_PASSPHRASE")
-        .env("PYTHONIOENCODING", "utf-8")
-        .stdin(Stdio::null())
-        .output()
-        .unwrap()
+        .env("PYTHONIOENCODING", "utf-8");
+    harness::output(command, &[], Duration::from_secs(180))
+        .unwrap_or_else(|error| panic!("MCP CLI subprocess: {error}"))
 }
 
 fn copy_dir(source: &Path, destination: &Path) {
@@ -54,12 +50,13 @@ fn copy_dir(source: &Path, destination: &Path) {
 }
 
 fn run_python(python: &std::ffi::OsStr, code: &str, home: &Path, args: &[&str]) {
-    let output = Command::new(python)
+    let mut command = Command::new(python);
+    command
         .args(["-I", "-c", code])
         .args(args)
-        .env("HOME", home)
-        .output()
-        .unwrap();
+        .env("HOME", home);
+    let output = harness::output(command, &[], Duration::from_secs(180))
+        .unwrap_or_else(|error| panic!("Python fixture setup: {error}"));
     assert!(
         output.status.success(),
         "{}",
@@ -112,6 +109,11 @@ fn compare_crash(python: &std::ffi::OsStr, cwd: &Path, home: &Path, label: &str)
     rust.arg("mcp-server");
     let expected = run(reference, cwd, home);
     let actual = run(rust, cwd, home);
+    assert_eq!(
+        expected.status.code(),
+        Some(1),
+        "{label}: Python startup error"
+    );
     let traceback = String::from_utf8_lossy(&expected.stderr);
     let last = traceback.lines().last().unwrap();
     let message = last.split_once(": ").unwrap().1;
@@ -138,6 +140,10 @@ fn compare(python: &std::ffi::OsStr, flags: &[&str], cwd: &Path, home: &Path, la
     rust.arg("mcp-server").args(flags);
     let expected = run(reference, cwd, home);
     let actual = run(rust, cwd, home);
+    assert!(
+        expected.status.code().is_some(),
+        "{label}: Python terminated by signal"
+    );
     assert_eq!(
         String::from_utf8_lossy(&actual.stderr),
         String::from_utf8_lossy(&expected.stderr),
@@ -157,16 +163,16 @@ fn compare(python: &std::ffi::OsStr, flags: &[&str], cwd: &Path, home: &Path, la
 
 #[test]
 fn mcp_server_command_line_matches_python() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 7 MCP CLI parity: set KV_PY_REF");
         return;
     };
-    let home = TempDir::new("home");
-    let empty = TempDir::new("empty");
-    let unapproved = TempDir::new("unapproved");
+    let home = TempDir::new();
+    let empty = TempDir::new();
+    let unapproved = TempDir::new();
     fs::create_dir(unapproved.0.join(".secrets")).unwrap();
     compare_crash(&python, &unapproved.0, &home.0, "unapproved vault");
-    let project = TempDir::new("project");
+    let project = TempDir::new();
     approved_vault(&python, &project.0, &home.0);
     let nested = project.0.join("a/b");
     fs::create_dir_all(&nested).unwrap();

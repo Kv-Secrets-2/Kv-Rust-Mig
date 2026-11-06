@@ -16,6 +16,7 @@ getrandom = "0.2"
 unicode-general-category = "1.1"
 
 [dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
 kv-agent = { path = "../kv-agent" }
 kv-crypto = { path = "../kv-crypto" }
 

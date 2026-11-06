@@ -7,7 +7,7 @@ use kv_broker::{
 use serde_json::{Value, json};
 
 fn python_results(code: &str, input: &Value) -> Value {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         panic!("KV_PY_REF must be set by the test caller");
     };
     let mut child = Command::new(python)
@@ -128,7 +128,7 @@ fn policy_cases() -> Vec<Value> {
 
 #[test]
 fn http_policy_matches_python_over_canonical_targets_and_malformed_rules() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP HTTP policy parity: set KV_PY_REF");
         return;
     };
@@ -174,7 +174,7 @@ print(json.dumps(results, separators=(",", ":")))
 
 #[test]
 fn provider_table_matches_python_snapshot() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP provider table parity: set KV_PY_REF");
         return;
     };
@@ -205,7 +205,7 @@ print(json.dumps({"table": table, "loaded": loaded}, separators=(",", ":")))
 
 #[test]
 fn redaction_matches_python_for_500_generated_cases() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP redaction parity: set KV_PY_REF");
         return;
     };
