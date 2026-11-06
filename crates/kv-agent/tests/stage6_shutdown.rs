@@ -284,7 +284,7 @@ impl Scenario {
             "token".into(),
             json!(fs::read_to_string(&self.token).unwrap().trim()),
         );
-        fields.insert("audit_warning".into(), json!(false));
+        fields.entry("audit_warning").or_insert(json!(false));
         let mut socket = UnixStream::connect(&self.socket).unwrap();
         socket.set_write_timeout(Some(REQUEST_BOUND)).unwrap();
         socket.set_read_timeout(Some(REQUEST_BOUND)).unwrap();
@@ -632,4 +632,83 @@ fn sigterm_with_idle_clients_cleans_runtime_within_bound_like_python() {
         scenario.assert_cleaned();
         drop((idle, partial));
     }
+}
+
+#[test]
+fn daemon_audit_refusal_warns_only_opted_in_replies_like_python() {
+    use std::os::unix::fs::symlink;
+
+    let Some(python) = kv_test_support::python_reference() else {
+        return;
+    };
+    let mut results = Vec::new();
+    for rust in [false, true] {
+        let scenario = Scenario::new(&python);
+        let mut daemon = scenario.start(&python, rust);
+        let log = scenario.home.join(".kv/audit.jsonl");
+        if log.exists() {
+            fs::remove_file(&log).unwrap();
+        }
+        let sentinel = scenario.temp.0.join("unrelated-file");
+        fs::write(&sentinel, "unchanged").unwrap();
+        fs::set_permissions(&sentinel, fs::Permissions::from_mode(0o644)).unwrap();
+        symlink(&sentinel, &log).unwrap();
+        let call = |warning| {
+            scenario.request(
+                "api",
+                json!({
+                    "provider":"shutdown-local", "path":"/api/probe", "method":"GET",
+                    "audit_warning":warning
+                }),
+            )
+        };
+
+        let first = call(false);
+        assert_eq!(
+            first["status"], 200,
+            "audit failure changed provider result: {first}"
+        );
+        assert!(first.get("audit_warning").is_none());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"unchanged");
+        assert_eq!(
+            fs::metadata(&sentinel).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let mut warnings = Vec::new();
+        for flag in [
+            json!(false),
+            json!("true"),
+            json!(1),
+            json!(true),
+            json!(true),
+        ] {
+            let answer = scenario.request("status", json!({"audit_warning":flag}));
+            warnings.push(answer.get("audit_warning").cloned().unwrap_or(Value::Null));
+        }
+        assert_eq!(&warnings[..3], &[Value::Null, Value::Null, Value::Null]);
+        assert!(warnings[3].as_str().is_some());
+        assert!(warnings[4].is_null());
+
+        fs::remove_file(&log).unwrap();
+        let recovered = call(true);
+        assert_eq!(recovered["status"], 200);
+        assert!(recovered.get("audit_warning").is_none());
+        fs::remove_file(&log).unwrap();
+        fs::create_dir(&log).unwrap();
+        let failed_again = call(true);
+        assert_eq!(failed_again["status"], 200);
+        assert_eq!(failed_again["audit_warning"], warnings[3]);
+        let health: Value =
+            serde_json::from_slice(&fs::read(scenario.home.join(".kv/audit-health.json")).unwrap())
+                .unwrap();
+        assert_eq!(health["state"], "refused");
+        assert_eq!(health["lost"], 2);
+        assert_eq!(health["reason"], "file_refused");
+        assert_eq!(scenario.observed().len(), 3);
+        scenario.request("stop", json!({}));
+        daemon.wait_success(CLEANUP_BOUND);
+        scenario.assert_cleaned();
+        results.push(json!({"warnings":warnings,"health":health,"warning_again":failed_again["audit_warning"]}));
+    }
+    assert_eq!(results[0], results[1]);
 }

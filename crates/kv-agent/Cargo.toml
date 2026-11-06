@@ -19,7 +19,6 @@ signal-hook = "0.3"
 sha2 = "0.10"
 subtle = "2"
 thiserror = "2"
-time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
@@ -27,6 +26,7 @@ rcgen = "0.13"
 url = "2.5"
 
 [target.'cfg(unix)'.dependencies]
+kv-audit = { path = "../kv-audit" }
 rustix = { version = "1", features = ["fs", "net", "process"] }
 
 [lints]

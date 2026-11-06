@@ -671,6 +671,7 @@ dependencies = [
  "base64",
  "getrandom",
  "kv-approvals",
+ "kv-audit",
  "kv-broker",
  "kv-crypto",
  "kv-proto",
@@ -684,7 +685,6 @@ dependencies = [
  "signal-hook",
  "subtle",
  "thiserror",
- "time",
  "url",
 ]
 
@@ -704,6 +704,19 @@ dependencies = [
  "sha2",
  "subtle",
  "thiserror",
+]
+
+[[package]]
+name = "kv-audit"
+version = "0.5.0-dev"
+dependencies = [
+ "kv-test-support",
+ "libc",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "time",
 ]
 
 [[package]]

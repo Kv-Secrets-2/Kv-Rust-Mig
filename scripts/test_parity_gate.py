@@ -57,7 +57,7 @@ class InventoryControls(unittest.TestCase):
 
     def test_committed_inventory_has_a_reviewed_floor(self):
         inventory = gate.load_inventory()
-        self.assertGreaterEqual(sum(map(len, inventory["targets"].values())), 35)
+        self.assertGreaterEqual(sum(map(len, inventory["targets"].values())), 48)
 
 
 class ReferenceControls(unittest.TestCase):
