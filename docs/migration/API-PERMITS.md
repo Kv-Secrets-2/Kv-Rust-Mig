@@ -67,6 +67,12 @@ recursion, and conservatively refuses deeper bodies that newer Python accepts.
 The live regression records this deliberate difference separately from exact
 card comparisons. This parser does not broaden daemon wire parsing.
 
+The facts helper retains Python 3.10's refusal of `https://[VF.example]/`.
+Python 3.13 accepts the uppercase IPvFuture spelling; one explicit differential
+case checks both outcomes and the complete Python facts. Rust's broker rejects
+both IPvFuture spellings during provider URL validation, before permit preview,
+so this helper difference does not change the daemon's accepted calls.
+
 Ordinary API audit events gain request/permit IDs and sanitized current-caller
 attribution. The original requester remains in the owner's review copy. Unknown
 permit IDs use a fixed audit label. Bodies, caller-header values and provider

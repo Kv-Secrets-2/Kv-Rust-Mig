@@ -465,7 +465,7 @@ for case in data['cases']:
         facts,body=v._permit_facts(ctx,environment=case['environment'],provider=case['provider'],provider_definition=case['definition'],method=case['method'],url=case['url'],header_names=case['header_names'],caller_headers=case['headers'],body_bytes=None if case['body_hex'] is None else bytes.fromhex(case['body_hex']),grant_id=None,run_id=None,now=case['now'])
         out.append({'facts':facts,'body':body})
     except v.AdmissionRefused as e: out.append({'error':str(e),'code':e.code})
-print(json.dumps(out))
+print(json.dumps({'python':list(sys.version_info[:2]),'cases':out}))
 "#;
         let mut command = Command::new(python);
         command.args(["-I", "-c", script]);
@@ -476,7 +476,13 @@ print(json.dumps(out))
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let reference: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let expected = reference["cases"].as_array().unwrap();
+        assert_eq!(expected.len(), cases.len());
+        let lowercase_future = cases
+            .iter()
+            .position(|case| case["url"] == "https://[vF.example]/")
+            .unwrap();
         let binding = binding(&provider);
         for (index, (case, expected)) in cases.iter().zip(expected).enumerate() {
             let names: Vec<String> = case["header_names"]
@@ -508,11 +514,29 @@ print(json.dumps(out))
                 Ok((facts, body)) => json!({"facts":facts,"body":body}),
                 Err(error) => json!({"error":error.message,"code":error.code}),
             };
-            assert_eq!(
-                actual, expected,
-                "permit facts case {index}, URL {}",
-                case["url"]
-            );
+            if reference["python"] == json!([3, 13]) && case["url"] == "https://[VF.example]/" {
+                // Python 3.13 newly accepts uppercase V in an IPvFuture host.
+                // Keep canonical 3.10 refusal and assert the complete 3.13 result
+                // explicitly. The production broker rejects both IPvFuture
+                // spellings as non-IPv6 bracketed hosts before permit preview.
+                assert_eq!(
+                    actual,
+                    json!({
+                        "error":"body or call cannot be shown in full safely",
+                        "code":"refused"
+                    })
+                );
+                let mut accepted = reference["cases"][lowercase_future].clone();
+                assert!(accepted["facts"].is_object());
+                accepted["facts"]["url"] = case["url"].clone();
+                assert_eq!(expected, &accepted, "Python 3.13 uppercase IPvFuture facts");
+            } else {
+                assert_eq!(
+                    &actual, expected,
+                    "permit facts case {index}, URL {}",
+                    case["url"]
+                );
+            }
         }
     }
 }

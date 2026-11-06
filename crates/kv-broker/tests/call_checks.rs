@@ -212,6 +212,25 @@ fn invalid_requests_and_final_url_safety_refusals_precede_callbacks() {
     fixture.assert_no_connection();
 
     let headers = json!({});
+    // urllib.parse changed uppercase IPvFuture handling in Python 3.13.
+    // These bracketed hosts cannot reach a permit preview: the broker's
+    // provider parser accepts bracketed IPv6 addresses only.
+    for origin in ["https://[VF.example]/", "https://[vF.example]/"] {
+        let mut provider = fixture.provider.clone();
+        provider["base_url"] = json!(origin);
+        let mut request = fixture.request(&body, &headers);
+        request.provider = &provider;
+        let refused = fixture.caller.preview(request.clone()).err().unwrap();
+        assert_eq!(refused["error_code"], "http_provider_invalid");
+        let result = fixture.caller.call_with_checks(
+            request,
+            |_| -> Result<(), Value> { panic!("invalid origin reached final check") },
+            |()| -> Result<(), Value> { panic!("invalid origin reached admission") },
+        );
+        assert_eq!(result, refused);
+        assert!(fixture.events.lock().unwrap().is_empty());
+        fixture.assert_no_connection();
+    }
     fixture
         .caller
         .preview(fixture.request(&body, &headers))
