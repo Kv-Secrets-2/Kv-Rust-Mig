@@ -1975,7 +1975,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn runtime_cleanup_preserves_replaced_links_and_never_reads_a_fifo() {
-        use rustix::fs::{CWD, FileType, Mode, mknodat};
         use std::os::unix::fs::symlink;
 
         let directory = std::env::temp_dir().join(format!("kv-cleanup-{}", token_hex(16).unwrap()));
@@ -1993,7 +1992,14 @@ mod tests {
         );
         assert_eq!(fs::read(&target).unwrap(), b"expected-token");
         fs::remove_file(&name).unwrap();
-        mknodat(CWD, &name, FileType::Fifo, Mode::RUSR | Mode::WUSR, 0).unwrap();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .args(["-m", "600"])
+                .arg(&name)
+                .status()
+                .unwrap()
+                .success()
+        );
         remove_if_matches(&name, "expected-token").unwrap();
         assert!(fs::symlink_metadata(&name).is_ok());
         fs::remove_file(&name).unwrap();
