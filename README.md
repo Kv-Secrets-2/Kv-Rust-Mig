@@ -14,4 +14,6 @@ See [the parity guide](docs/migration/PARITY.md) for reference setup, execution,
 and the comparison inventory.
 
 The migration is incomplete. See [the baseline audit](docs/migration/BASELINE-2026-11-06.md)
-for implemented coverage, remaining features, and known findings.
+for implemented coverage, remaining features, and known findings, and the
+[IPC/shutdown update](docs/migration/IPC-SHUTDOWN.md) for the subsequent timeout
+and daemon-lifecycle work.
