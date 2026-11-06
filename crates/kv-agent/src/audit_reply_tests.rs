@@ -228,6 +228,7 @@ fn trust_context() -> TrustContext {
         grant_state_key: Key32::new([0; 32]),
         token_key: Key32::new([0; 32]),
         protected: false,
+        owner_public_key: None,
         owner_key_id: String::new(),
         local_approval_id: Vec::new(),
         location: Vec::new(),
@@ -241,8 +242,8 @@ fn trust_context() -> TrustContext {
                 key_digest: None,
                 approval_key_id: None,
                 approval_key_digest: None,
-                latched: Some("fixture vault changed".into()),
-                closed: true,
+                latched: None,
+                closed: false,
             }),
         }),
     }
@@ -313,6 +314,7 @@ fn signed_owner_replies_keep_their_mac_and_leave_pending_warnings_alone() {
 fn retired_ordinary_reply_attaches_warning_to_the_hard_lock_replacement() {
     let fixture = FailedAudit::new();
     let trust = trust_context();
+    trust.pin.state.lock().unwrap().latched = Some("fixture vault changed".into());
     let lifecycle = Lifecycle::new();
     lifecycle.retire();
     let cache = Mutex::new(SecretCache::default());
@@ -339,6 +341,83 @@ fn retired_ordinary_reply_attaches_warning_to_the_hard_lock_replacement() {
     assert_no_warning(&fixture.audit);
 }
 
+#[test]
+fn permit_owner_answers_prepared_before_a_latch_send_only_signed_hard_lock() {
+    for kind in [
+        MessageKind::PermitRequestV1,
+        MessageKind::PermitRegisterAckV1,
+    ] {
+        let fixture = FailedAudit::new();
+        let trust = trust_context();
+        let lifecycle = Lifecycle::new();
+        let cache = Mutex::new(SecretCache::default());
+        let (mut client, mut server) = socket_pair();
+        let mut workers = WorkerTracker::new();
+        let connection = workers.register_connection(&server).unwrap();
+        let challenge = vec![1; wire::NONCE_LEN];
+        let mut fields = MessageFields::new();
+        fields.insert("challenge".into(), FieldValue::Nonce(challenge.clone()));
+        fields.insert(
+            "session_nonce".into(),
+            FieldValue::Nonce(trust.session_nonce.to_vec()),
+        );
+        fields.insert(
+            "request_id".into(),
+            FieldValue::Text("permit_request_fixture".into()),
+        );
+        if kind == MessageKind::PermitRequestV1 {
+            for (key, value) in [
+                ("facts_json", "{}"),
+                ("body_text", "private caller body"),
+                ("caller_headers_json", "{}"),
+                ("requester_json", "{}"),
+            ] {
+                fields.insert(key.into(), FieldValue::Text(value.into()));
+            }
+        } else {
+            fields.insert(
+                "permit_id".into(),
+                FieldValue::Text("permit_fixture".into()),
+            );
+            fields.insert(
+                "payload_digest".into(),
+                FieldValue::Text("fixture-digest".into()),
+            );
+            fields.insert("status".into(), FieldValue::Enum("registered".into()));
+        }
+        let prepared = signed_owner(&trust, kind, fields).unwrap();
+        let hard_lock = owner_error(&trust, challenge, "hard_locked").unwrap();
+        // Deterministically latch after preparation and before reply admission,
+        // while the lifecycle remains Running: retirement cannot mask this race.
+        trust.pin.state.lock().unwrap().latched = Some("fixture vault changed".into());
+        assert_eq!(lifecycle.phase(), Phase::Running);
+        let replies = Replies {
+            lifecycle: &lifecycle,
+            connection: &connection,
+            trust: &trust,
+            cache: &cache,
+            cmd: "owner_permit_request",
+            audit: &fixture.audit,
+            audit_warning: true,
+        };
+        replies
+            .write_with_hard_lock(&mut server, &prepared, Some(&hard_lock))
+            .unwrap();
+        let received = read_socket_reply(&mut client, &server);
+        assert_eq!(received, hard_lock);
+        let (kind, fields, tag) = wire::from_json(&received).unwrap();
+        assert!(wire::verify(
+            trust.daemon_auth_key.as_ref(),
+            kind,
+            &fields,
+            &tag
+        ));
+        assert_eq!(lifecycle.committed_count(), 0);
+        consume_warning(&fixture.audit);
+        assert_no_warning(&fixture.audit);
+    }
+}
+
 fn dispatch(audit: &kv_audit::Audit, request: Value, retired: bool) -> Value {
     let (mut client, mut server) = socket_pair();
     client
@@ -351,6 +430,9 @@ fn dispatch(audit: &kv_audit::Audit, request: Value, retired: bool) -> Value {
     let mut workers = WorkerTracker::new();
     let connection = workers.register_connection(&server).unwrap();
     let approved = json!({});
+    let trust = trust_context();
+    let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+    let permits = permits::for_session(&trust, Arc::clone(&providers));
     handle_connection(
         &mut server,
         Path::new("."),
@@ -358,10 +440,11 @@ fn dispatch(audit: &kv_audit::Audit, request: Value, retired: bool) -> Value {
         &DrawerStore::open(".", Key32::new([0; 32])),
         &Mutex::new(SecretCache::default()),
         &Key32::new([0; 32]),
-        &trust_context(),
+        &trust,
         &approved,
         &Zeroizing::new("fixture-token".into()),
-        &kv_broker::build_provider_table(&approved).0,
+        &providers,
+        &permits,
         &kv_broker::load_http_policy_snapshot(&approved),
         &kv_broker::ApiCaller::new(),
         audit,

@@ -18,4 +18,6 @@ for implemented coverage, remaining features, and known findings, and the
 [IPC/shutdown update](docs/migration/IPC-SHUTDOWN.md) for the subsequent timeout
 and daemon-lifecycle work. The [audit safety update](docs/migration/AUDIT-SAFETY.md)
 describes the Unix audit writer, shared locking, loss accounting, warning delivery,
-and focused validation for the next slice.
+and focused validation for that slice. The [one-call permit update](docs/migration/API-PERMITS.md)
+describes ordinary API approval, exact request binding and one-send admission.
+Linux is the current migration focus.
