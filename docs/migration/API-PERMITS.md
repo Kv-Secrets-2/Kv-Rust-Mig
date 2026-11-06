@@ -86,8 +86,9 @@ approval against Rust, exact outbound requests, concurrent retries, altered
 facts and signatures, replay, failed preflight and transport, stop ordering,
 query masking, card refusal, audit attribution, restart, and the passphrase and
 protected-approval boundaries. Focused registry tests cover capacity, pruning,
-expiry and wall-clock rollback. See the slice's validation record for executed
-results; an inventory alone does not establish a passing run. The HTTPS recorder
+expiry and wall-clock rollback. The [validation record](API-PERMITS-VALIDATION-2026-11-06.md)
+records 288 tests and 66 required comparisons passing in each Linux Python
+3.10–3.13 lane, with the tested revisions identified. The HTTPS recorder
 uses a test CA and a safety seam that pins a public-shaped hostname to loopback;
 it does not establish complete production DNS or rebinding coverage.
 
