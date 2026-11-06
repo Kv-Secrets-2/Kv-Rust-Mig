@@ -1,9 +1,15 @@
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+#[cfg(unix)]
+mod unix_transport;
+#[cfg(unix)]
+pub use unix_transport::{connect_unix, read_complete_reply, write_all_until};
 
 pub const MAX_MSG: usize = 1024 * 1024;
 pub const MAX_AGENT_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
@@ -372,6 +378,14 @@ fn python_utf8_error(bytes: &[u8], error: std::str::Utf8Error) -> String {
     } else {
         "invalid start byte"
     };
+    if let Some(length) = error.error_len()
+        && length > 1
+    {
+        let end = position + length - 1;
+        return format!(
+            "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position {position}-{end}: {reason}"
+        );
+    }
     format!(
         "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x{byte:02x} in position {position}: {reason}"
     )
@@ -400,37 +414,26 @@ pub fn write_reply<W: Write>(writer: &mut W, response: &Value) -> Result<(), Pro
     Ok(())
 }
 
-#[cfg(unix)]
-fn exchange(root: &Path, request: &Value) -> Result<Value, ProtocolError> {
-    use std::os::unix::net::UnixStream;
-
-    let path = agent_socket_path(Some(root))?;
-    let mut socket = UnixStream::connect(path)?;
-    let payload = kv_store::pyjson::to_vec_python(request, false)
-        .map_err(|error| ProtocolError::Message(error.to_string()))?;
-    if payload.len() > MAX_MSG {
-        return Err(ProtocolError::RequestTooLarge);
-    }
-    socket.write_all(&payload)?;
-    socket.shutdown(std::net::Shutdown::Write)?;
-    read_reply(&mut socket)
-}
-
-#[cfg(windows)]
-fn exchange(_root: &Path, _request: &Value) -> Result<Value, ProtocolError> {
-    Err(ProtocolError::Message(
-        "agent TCP transport is not yet supported on Windows".into(),
-    ))
-}
-
 pub fn agent_request(
     root: impl AsRef<Path>,
     cmd: &str,
     fields: &Map<String, Value>,
 ) -> Result<Value, ProtocolError> {
+    agent_request_with_timeout(root, cmd, fields, Some(Duration::from_secs(30)))
+}
+
+/// Python's `agent_request` timeout: each connect, whole send, and individual
+/// receive gets this allowance. `None` permits an unbounded operation. The
+/// separate enforcement preflight always uses its own five-second allowances.
+pub fn agent_request_with_timeout(
+    root: impl AsRef<Path>,
+    cmd: &str,
+    fields: &Map<String, Value>,
+    timeout: Option<Duration>,
+) -> Result<Value, ProtocolError> {
     #[cfg(windows)]
     {
-        let _ = (root, cmd, fields);
+        let _ = (root, cmd, fields, timeout);
         return Err(ProtocolError::Message(
             "agent TCP transport is not yet supported on Windows".into(),
         ));
@@ -438,8 +441,14 @@ pub fn agent_request(
     #[cfg(unix)]
     {
         let root = root.as_ref();
+        let path = agent_socket_path(Some(root))?;
         if !matches!(cmd, "status" | "lock" | "stop") {
-            let enforcement = exchange(root, &json!({"cmd":"enforcement"}))?;
+            let enforcement = unix_transport::exchange(
+                &path,
+                &json!({"cmd":"enforcement"}),
+                Some(Duration::from_secs(5)),
+                true,
+            )?;
             if enforcement
                 .get("enforcement")
                 .and_then(Value::as_u64)
@@ -458,25 +467,8 @@ pub fn agent_request(
             request.insert(name.clone(), value.clone());
         }
         request.entry("audit_warning").or_insert(Value::Bool(false));
-        exchange(root, &Value::Object(request))
+        unix_transport::exchange(&path, &Value::Object(request), timeout, false)
     }
-}
-
-#[cfg(unix)]
-fn read_reply<R: Read>(reader: &mut R) -> Result<Value, ProtocolError> {
-    let mut bytes = Vec::new();
-    let mut chunk = [0u8; 64 * 1024];
-    loop {
-        let read = reader.read(&mut chunk)?;
-        if read == 0 {
-            break;
-        }
-        if bytes.len().saturating_add(read) > MAX_AGENT_RESPONSE_BYTES {
-            return Err(ProtocolError::ResponseTooLarge);
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    serde_json::from_slice(&bytes).map_err(ProtocolError::Json)
 }
 
 #[cfg(test)]
@@ -503,6 +495,11 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+        );
+        let error = read_request(&mut &b"\xe2\x82x"[..]).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte"
         );
     }
 

@@ -48,6 +48,12 @@ fn from_protocol(error: kv_proto::ProtocolError) -> RequestError {
             RequestError::exception(pyerr::type_name(&error), pyerr::message(&error))
         }
         ProtocolError::Json(error) => RequestError::exception("JSONDecodeError", error.to_string()),
+        ProtocolError::InvalidUtf8(message) => RequestError::exception(
+            "UnicodeDecodeError",
+            message
+                .strip_prefix("UnicodeDecodeError: ")
+                .unwrap_or(&message),
+        ),
         ProtocolError::RequestTooLarge | ProtocolError::ResponseTooLarge => {
             RequestError::exception("MessageTooLargeError", error.to_string())
         }
@@ -78,7 +84,7 @@ pub fn request(
 
 #[cfg(unix)]
 mod status {
-    use std::io::{Read, Write};
+    use std::io::Read;
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     use std::path::Path;
     use std::time::{Duration, Instant};
@@ -148,40 +154,21 @@ mod status {
             return false;
         }
         let token = private_text(&token_path);
-        let Ok(mut socket) = std::os::unix::net::UnixStream::connect(&socket_path) else {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let Ok(mut socket) = kv_proto::connect_unix(&socket_path, Some(deadline)) else {
             return false;
         };
         let payload = serde_json::json!({"cmd": "status", "token": token});
         let Ok(payload) = kv_store::pyjson::to_vec_python(&payload, false) else {
             return false;
         };
-        let timeout = Some(Duration::from_secs(2));
-        if socket.set_write_timeout(timeout).is_err()
-            || socket.write_all(&payload).is_err()
-            || socket.shutdown(std::net::Shutdown::Write).is_err()
-        {
+        if kv_proto::write_all_until(&mut socket, &payload, Some(deadline)).is_err() {
             return false;
         }
         let deadline = Instant::now() + Duration::from_secs(2);
-        let mut reply = Vec::new();
-        let mut chunk = [0u8; 64 * 1024];
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() || socket.set_read_timeout(Some(remaining)).is_err() {
-                return false;
-            }
-            match socket.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(read) => {
-                    if reply.len() + read > kv_proto::MAX_AGENT_RESPONSE_BYTES {
-                        return false;
-                    }
-                    reply.extend_from_slice(&chunk[..read]);
-                }
-                Err(_) => return false,
-            }
-        }
-        let Ok(serde_json::Value::Object(reply)) = serde_json::from_slice(&reply) else {
+        let Ok(serde_json::Value::Object(reply)) =
+            kv_proto::read_complete_reply(&mut socket, deadline)
+        else {
             return false;
         };
         let reply = crate::pyval::PyValue::from_json(&serde_json::Value::Object(reply));
@@ -207,4 +194,20 @@ pub fn is_agent_running(root: &Path) -> bool {
 #[cfg(not(unix))]
 pub fn is_agent_running(_root: &Path) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_reply_utf8_preserves_python_exception_class_and_message() {
+        let message = "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte";
+        assert_eq!(
+            from_protocol(kv_proto::ProtocolError::InvalidUtf8(format!(
+                "UnicodeDecodeError: {message}"
+            ))),
+            RequestError::exception("UnicodeDecodeError", message),
+        );
+    }
 }

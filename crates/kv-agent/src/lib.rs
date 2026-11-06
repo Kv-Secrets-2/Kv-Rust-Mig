@@ -36,9 +36,12 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 #[cfg(unix)]
-const START_REFUSAL_PREFIX: &str = "Cannot start kv daemon:";
+mod lifecycle;
 #[cfg(unix)]
-const SHORT_STOP_WAIT_SECONDS: u64 = 10;
+use lifecycle::{ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker};
+
+#[cfg(unix)]
+const START_REFUSAL_PREFIX: &str = "Cannot start kv daemon:";
 #[cfg(unix)]
 const AGENT_VERSION: &str = "0.4.0";
 #[cfg(unix)]
@@ -48,30 +51,42 @@ const API_TIMEOUT: u64 = 120;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(API_TIMEOUT + 10);
 
 #[cfg(unix)]
-static STOP_SIGNAL_REQUESTED: LazyLock<Arc<AtomicBool>> =
-    LazyLock::new(|| Arc::new(AtomicBool::new(false)));
-
-#[cfg(unix)]
-struct StopSignalGuard(signal_hook::SigId);
+struct StopSignalGuard {
+    registrations: Vec<signal_hook::SigId>,
+    requested: Arc<AtomicBool>,
+}
 
 #[cfg(unix)]
 impl StopSignalGuard {
     fn install() -> Result<Self, AgentError> {
-        STOP_SIGNAL_REQUESTED.store(false, Ordering::Release);
-        let id = signal_hook::flag::register(
+        let mut guard = Self {
+            registrations: Vec::new(),
+            requested: Arc::new(AtomicBool::new(false)),
+        };
+        for signal in [
             signal_hook::consts::SIGTERM,
-            Arc::clone(&STOP_SIGNAL_REQUESTED),
-        )
-        .map_err(|error| AgentError(error.to_string()))?;
-        Ok(Self(id))
+            signal_hook::consts::SIGINT,
+            signal_hook::consts::SIGHUP,
+        ] {
+            guard.registrations.push(
+                signal_hook::flag::register(signal, Arc::clone(&guard.requested))
+                    .map_err(|error| AgentError(error.to_string()))?,
+            );
+        }
+        Ok(guard)
+    }
+
+    fn requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
     }
 }
 
 #[cfg(unix)]
 impl Drop for StopSignalGuard {
     fn drop(&mut self) {
-        signal_hook::low_level::unregister(self.0);
-        STOP_SIGNAL_REQUESTED.store(false, Ordering::Release);
+        for id in self.registrations.drain(..) {
+            signal_hook::low_level::unregister(id);
+        }
     }
 }
 
@@ -601,7 +616,8 @@ pub fn protect_process_memory() -> Value {
 }
 
 #[cfg(unix)]
-/// Serves the foreground daemon; in-flight work draining is deferred to Stage 6.
+/// Serves the foreground daemon and drains committed work within the owner's
+/// chosen stop budget. Unfinished workers retain their trust pins until they end.
 pub fn run_agent(
     root: impl AsRef<Path>,
     store: Arc<DrawerStore>,
@@ -654,20 +670,37 @@ pub fn run_agent_with_api_caller(
     listener.set_nonblocking(true)?;
     let socket_meta = fs::symlink_metadata(&socket_path)?;
     let socket_id = file_identity(&socket_meta);
-    let stopping = Arc::new(AtomicBool::new(false));
-    let _signal_guard = StopSignalGuard::install()?;
+    let lifecycle = Lifecycle::new();
+    let signal_guard = StopSignalGuard::install()?;
     let trust = Arc::new(trust);
     let master_key = Arc::new(master_key);
     let approved = Arc::new(approved.value);
     let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
     let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
-    let mut workers = Vec::new();
+    let mut workers = WorkerTracker::new();
+    let mut accept_error = None;
 
-    while !stopping.load(Ordering::Acquire) && !STOP_SIGNAL_REQUESTED.load(Ordering::Acquire) {
+    loop {
+        if signal_guard.requested() {
+            lifecycle.signal_stop();
+        }
+        lifecycle.expire_choice();
+        workers.reap_finished();
+        if matches!(lifecycle.phase(), Phase::Draining | Phase::Retired) {
+            break;
+        }
         match listener.accept() {
             Ok((mut connection, _)) => {
-                let stopping = Arc::clone(&stopping);
+                let connection_guard = match workers.register_connection(&connection) {
+                    Ok(guard) => guard,
+                    Err(error) => {
+                        accept_error = Some(AgentError(error.to_string()));
+                        lifecycle.signal_stop();
+                        break;
+                    }
+                };
+                let worker_lifecycle = Arc::clone(&lifecycle);
                 let cache = Arc::clone(&cache);
                 let trust = Arc::clone(&trust);
                 let master_key = Arc::clone(&master_key);
@@ -680,44 +713,89 @@ pub fn run_agent_with_api_caller(
                 let root = root.clone();
                 let root_text = root_text.clone();
                 let memory_hardening = memory_hardening.clone();
-                workers.push(thread::spawn(move || {
-                    let _ = handle_connection(
-                        &mut connection,
-                        &root,
-                        &root_text,
-                        &store,
-                        &cache,
-                        &master_key,
-                        &trust,
-                        &approved,
-                        &token,
-                        &providers,
-                        &http_policy,
-                        &api_caller,
-                        &stopping,
-                        &memory_hardening,
-                        CONNECTION_TIMEOUT,
-                    );
-                }));
+                let worker = thread::Builder::new()
+                    .name("kv-request".into())
+                    .spawn(move || {
+                        let _ = handle_connection(
+                            &mut connection,
+                            &root,
+                            &root_text,
+                            &store,
+                            &cache,
+                            &master_key,
+                            &trust,
+                            &approved,
+                            &token,
+                            &providers,
+                            &http_policy,
+                            &api_caller,
+                            &worker_lifecycle,
+                            &connection_guard,
+                            &memory_hardening,
+                            CONNECTION_TIMEOUT,
+                        );
+                    });
+                match worker {
+                    Ok(worker) => workers.track_worker(worker),
+                    Err(error) => {
+                        lifecycle.signal_stop();
+                        accept_error = Some(AgentError(error.to_string()));
+                        break;
+                    }
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(20));
             }
             Err(error) => {
-                stopping.store(true, Ordering::Release);
-                return Err(AgentError(error.to_string()));
+                lifecycle.signal_stop();
+                accept_error = Some(AgentError(error.to_string()));
+                break;
             }
         }
     }
-    stopping.store(true, Ordering::Release);
     drop(listener);
-    for worker in workers {
-        let _ = worker.join();
-    }
-    remove_if_matches(&token_path, token.as_str())?;
-    remove_if_matches(&pid_path, &pid.to_string())?;
+    // Clean every owned runtime name before draining, even when another cleanup
+    // fails. New daemon lifetimes must not inherit this one's listener or token.
+    let token_cleanup = remove_if_matches(&token_path, token.as_str());
+    let pid_cleanup = remove_if_matches(&pid_path, &pid.to_string());
     remove_socket_if_matches(&socket_path, socket_id);
     let _ = pid_file.flush();
+    drop(pid_file);
+    workers.shutdown_idle();
+    // Poll the shared deadline so a signal can shorten an owner's long wait.
+    // Stop handlers wait on the same state and never start a second budget.
+    let drain = loop {
+        if signal_guard.requested() {
+            lifecycle.signal_stop();
+        }
+        if let Some(outcome) = lifecycle.poll_drain(Duration::from_millis(20)) {
+            break outcome;
+        }
+        workers.reap_finished();
+    };
+    if drain.cut_off != 0 {
+        workers.shutdown_non_control();
+    }
+    lifecycle.retire();
+    // Give the stop answer and already-prepared retirement refusals a separate,
+    // bounded delivery allowance. No new data-bearing reply can be committed.
+    let answers_until = Instant::now() + Duration::from_secs(2);
+    while !workers.is_empty() && Instant::now() < answers_until {
+        workers.reap_finished();
+        thread::sleep(Duration::from_millis(10));
+    }
+    workers.shutdown_all();
+    workers.reap_finished();
+    // A synchronous resolver cannot be forcibly cancelled safely. Its worker
+    // remains retired, owns its keys/pin, and cannot commit another send/reply.
+    // The control reply reports the actual committed count at the cutoff.
+    let _ = workers.into_retired().reap_in_background();
+    token_cleanup?;
+    pid_cleanup?;
+    if let Some(error) = accept_error {
+        return Err(error);
+    }
     Ok(memory_hardening)
 }
 
@@ -748,31 +826,45 @@ fn handle_connection(
     providers: &kv_broker::ProviderTable,
     http_policy: &kv_broker::HttpPolicySnapshot,
     api_caller: &kv_broker::ApiCaller,
-    stopping: &AtomicBool,
+    lifecycle: &Arc<Lifecycle>,
+    connection: &ConnectionGuard,
     memory_hardening: &Value,
     request_timeout: Duration,
 ) -> Result<(), AgentError> {
+    let mut replies = Replies {
+        lifecycle,
+        connection,
+        trust,
+        cache,
+        cmd: "",
+    };
     let request = match read_request_with_timeout(stream, request_timeout) {
         Ok(Some(request)) => request,
         Ok(None) => return Ok(()),
         Err(error) => {
-            let _ = kv_proto::write_reply(stream, &request_error_response(&error));
+            let _ = replies.write(stream, &request_error_response(&error));
             return Ok(());
         }
     };
+    if !connection.mark_dispatching() {
+        return Ok(());
+    }
     let Some(request) = request.as_object() else {
-        kv_proto::write_reply(stream, &json!({"error":"request must be a JSON object"}))?;
+        replies.write(stream, &json!({"error":"request must be a JSON object"}))?;
         return Ok(());
     };
     let cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
+    replies.cmd = cmd;
     if cmd == "enforcement" {
+        connection.mark_control();
         kv_proto::write_reply(
             stream,
             &json!({"enforcement":kv_proto::ENFORCEMENT_GENERATION}),
         )?;
         return Ok(());
     }
-    if stopping.load(Ordering::Acquire) && cmd != "stop" {
+    if lifecycle.phase() != Phase::Running && cmd != "stop" {
+        connection.mark_control();
         kv_proto::write_reply(
             stream,
             &json!({
@@ -784,7 +876,7 @@ fn handle_connection(
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
         let _ = serve_owner_endpoint(
-            stream, cmd, request, trust, root, approved, master_key, providers,
+            stream, cmd, request, trust, root, approved, master_key, providers, &replies,
         );
         return Ok(());
     }
@@ -792,7 +884,7 @@ fn handle_connection(
         && cmd != "stop"
         && let Err(error) = trust.observe()
     {
-        kv_proto::write_reply(
+        replies.write(
             stream,
             &json!({"error":error.to_string(),"error_code":"vault_hard_locked"}),
         )?;
@@ -801,7 +893,7 @@ fn handle_connection(
     if !matches!(cmd, "status" | "stop" | "lock")
         && let Err(error) = config_authority::require_current(root, approved, master_key)
     {
-        kv_proto::write_reply(
+        replies.write(
             stream,
             &json!({
                 "error":error.to_string(),
@@ -812,17 +904,17 @@ fn handle_connection(
     }
     let supplied = request.get("token").and_then(Value::as_str).unwrap_or("");
     if supplied.len() > 128 || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
-        kv_proto::write_reply(stream, &json!({"error":"authentication required"}))?;
+        replies.write(stream, &json!({"error":"authentication required"}))?;
         return Ok(());
     }
     if cmd == "api"
         && let Err(error) = validate_api_request(request)
     {
-        kv_proto::write_reply(stream, &json!({"error":error}))?;
+        replies.write(stream, &json!({"error":error}))?;
         return Ok(());
     }
     if cmd.is_empty() || cmd.len() > 32 {
-        kv_proto::write_reply(stream, &json!({"error":"cmd must be a string"}))?;
+        replies.write(stream, &json!({"error":"cmd must be a string"}))?;
         return Ok(());
     }
     let known = [
@@ -847,13 +939,13 @@ fn handle_connection(
         "refuse_permit",
     ];
     if !known.contains(&cmd) {
-        kv_proto::write_reply(stream, &json!({"error":"unknown command"}))?;
+        replies.write(stream, &json!({"error":"unknown command"}))?;
         return Ok(());
     }
     if let Some(env) = request.get("env").and_then(Value::as_str)
         && kv_store::envname::validate_env_name(env).is_err()
     {
-        kv_proto::write_reply(stream, &json!({"error":"invalid environment name"}))?;
+        replies.write(stream, &json!({"error":"invalid environment name"}))?;
         return Ok(());
     }
     let response = match cmd {
@@ -908,6 +1000,8 @@ fn handle_connection(
                 providers,
                 http_policy,
                 api_caller,
+                lifecycle,
+                connection,
             );
             let _ = audit_api_call(
                 request,
@@ -918,26 +1012,109 @@ fn handle_connection(
             response
         }
         "stop" => {
-            if request
-                .get("choice")
-                .and_then(Value::as_str)
-                .is_some_and(|choice| choice != "now" && choice != "wait")
-            {
-                json!({"error":"choice must be 'wait' or 'now'"})
-            } else {
-                stopping.store(true, Ordering::Release);
-                json!({
-                    "stopping":true,
-                    "wait_seconds":SHORT_STOP_WAIT_SECONDS,
-                    "cut_off":0,
-                    "ended_runs":[]
-                })
-            }
+            let choice = match request.get("choice") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(choice)) if choice == "wait" => Some(StopChoice::Wait),
+                Some(Value::String(choice)) if choice == "now" => Some(StopChoice::Now),
+                _ => {
+                    replies.write(stream, &json!({"error":"choice must be 'wait' or 'now'"}))?;
+                    return Ok(());
+                }
+            };
+            // Register the reply as control before retirement can close idle
+            // sockets. Control answers contain no vault data or work authority.
+            connection.mark_control();
+            let response = match lifecycle.request_stop(choice) {
+                StopPlan::AwaitingChoice { in_flight } => {
+                    json!({"in_flight":in_flight,"awaiting_choice":true,"runs":[]})
+                }
+                StopPlan::AlreadyStopping { wait_seconds } => {
+                    json!({"stopping":true,"wait_seconds":wait_seconds,"runs":[]})
+                }
+                StopPlan::Drain { .. } => {
+                    let outcome = lifecycle.wait_for_drain();
+                    json!({"stopping":true,"wait_seconds":outcome.wait_seconds,
+                        "cut_off":outcome.cut_off,"ended_runs":[]})
+                }
+            };
+            kv_proto::write_reply(stream, &response)?;
+            return Ok(());
         }
         other => json!({"error":format!("{other} is not supported by this kv service yet")}),
     };
-    kv_proto::write_reply(stream, &response)?;
+    replies.write(stream, &response)?;
     Ok(())
+}
+
+/// Ordinary replies are committed work too. A stop and this final admission
+/// share the lifecycle lock, so preparing an answer never grants permission to
+/// send it after retirement. Enforcement and stop controls use a separate lane.
+#[cfg(unix)]
+struct Replies<'a> {
+    lifecycle: &'a Arc<Lifecycle>,
+    connection: &'a ConnectionGuard,
+    trust: &'a TrustContext,
+    cache: &'a Mutex<SecretCache>,
+    cmd: &'a str,
+}
+
+#[cfg(unix)]
+impl Replies<'_> {
+    fn write(
+        &self,
+        stream: &mut std::os::unix::net::UnixStream,
+        response: &Value,
+    ) -> Result<(), AgentError> {
+        self.write_with_hard_lock(stream, response, None)
+    }
+
+    fn write_with_hard_lock(
+        &self,
+        stream: &mut std::os::unix::net::UnixStream,
+        response: &Value,
+        signed_hard_lock: Option<&Value>,
+    ) -> Result<(), AgentError> {
+        if let Ok(_window) = self.lifecycle.try_commit_for(self.connection) {
+            kv_proto::write_reply(stream, response)?;
+            return Ok(());
+        }
+        // As in Python, never acknowledge a hard lock while earlier committed
+        // work remains. The foreground stop can close this socket sooner.
+        if self.lifecycle.wait_for_open_work(Duration::from_secs(135)) != 0 {
+            return Ok(());
+        }
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.environments.clear();
+        }
+        let replacement = if let Some(signed) = signed_hard_lock {
+            signed.clone()
+        } else if self.cmd == "status" {
+            let mut value = response.clone();
+            if let Some(object) = value.as_object_mut() {
+                object.insert("hard_locked".into(), json!(true));
+                for key in ["cached_secrets", "secrets", "cached_environments"] {
+                    object.insert(key.into(), json!(0));
+                }
+            }
+            value
+        } else {
+            let reason = self
+                .trust
+                .pin
+                .state
+                .lock()
+                .ok()
+                .and_then(|state| state.latched.clone())
+                .unwrap_or_else(|| "vault changed under the running daemon".into());
+            let mut value = json!({"error":reason,"error_code":"vault_hard_locked"});
+            if self.cmd == "run" {
+                value["exit_code"] = json!(1);
+            }
+            value
+        };
+        kv_proto::write_reply(stream, &replacement)?;
+        Ok(())
+    }
 }
 
 #[cfg(unix)]
@@ -985,6 +1162,7 @@ fn serve_owner_endpoint(
     approved: &Value,
     master_key: &Key32,
     providers: &kv_broker::ProviderTable,
+    replies: &Replies<'_>,
 ) -> Result<(), AgentError> {
     let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
     let hard_locked = owner_error(trust, challenge.clone(), "hard_locked");
@@ -1064,7 +1242,7 @@ fn serve_owner_endpoint(
     } else {
         answer
     };
-    kv_proto::write_reply(stream, &replacement)?;
+    replies.write_with_hard_lock(stream, &replacement, Some(&hard_locked))?;
     Ok(())
 }
 
@@ -1246,6 +1424,7 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
 }
 
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 fn api_call_response(
     request: &serde_json::Map<String, Value>,
     env: &str,
@@ -1254,6 +1433,8 @@ fn api_call_response(
     providers: &kv_broker::ProviderTable,
     policy: &kv_broker::HttpPolicySnapshot,
     caller: &kv_broker::ApiCaller,
+    lifecycle: &Arc<Lifecycle>,
+    connection: &ConnectionGuard,
 ) -> Value {
     let provider_name = request
         .get("provider")
@@ -1334,18 +1515,26 @@ fn api_call_response(
         Err(error) => return json!({"error":error.to_string()}),
     };
     let secrets_for_redact = kv_broker::redact_one_secret(secret_name, &secret_value);
-    let mut result = caller.call(kv_broker::ApiRequest {
-        provider_name,
-        provider,
-        secret_value: &secret_value,
-        path: path.as_str().unwrap_or("/"),
-        method: method.as_str().unwrap_or("GET"),
-        body: request.get("body").filter(|body| !body.is_null()),
-        extra_headers: &headers,
-        secrets_for_redact: &secrets_for_redact,
-        timeout: Duration::from_secs(API_TIMEOUT),
-        max_response_bytes: kv_broker::MAX_BROKER_RESPONSE_BYTES,
-    });
+    let mut result = caller.call_with_before_send(
+        kv_broker::ApiRequest {
+            provider_name,
+            provider,
+            secret_value: &secret_value,
+            path: path.as_str().unwrap_or("/"),
+            method: method.as_str().unwrap_or("GET"),
+            body: request.get("body").filter(|body| !body.is_null()),
+            extra_headers: &headers,
+            secrets_for_redact: &secrets_for_redact,
+            timeout: Duration::from_secs(API_TIMEOUT),
+            max_response_bytes: kv_broker::MAX_BROKER_RESPONSE_BYTES,
+        },
+        || {
+            lifecycle.try_commit_for(connection).map_err(|_| {
+                json!({"error":"the agent is stopping; new requests are refused",
+            "error_code":"agent_stopping"})
+            })
+        },
+    );
     if let Some(warning) = decision.get("warning").and_then(Value::as_str) {
         let current = result.get("warning").and_then(Value::as_str).unwrap_or("");
         result["warning"] = Value::String(if current.is_empty() {
@@ -1589,17 +1778,36 @@ fn file_identity(metadata: &fs::Metadata) -> (u64, u64) {
 
 #[cfg(unix)]
 fn remove_if_matches(path: &Path, expected: &str) -> Result<(), AgentError> {
+    use rustix::fs::{Mode, OFlags, open};
     use std::os::unix::fs::MetadataExt;
 
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
+    // A replaced FIFO or oversized file must not hold shutdown in a pathname
+    // read. Validate the opened inode before reading only the expected bytes.
+    let fd = match open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    ) {
+        Ok(fd) => fd,
+        Err(rustix::io::Errno::NOENT | rustix::io::Errno::LOOP) => return Ok(()),
+        Err(error) => return Err(AgentError(error.to_string())),
+    };
+    let mut file = File::from(fd);
+    let opened = file.metadata()?;
+    if !opened.is_file() || opened.uid() != rustix::process::getuid().as_raw() {
+        return Ok(());
+    }
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(expected.len() as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    let named = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
     };
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.is_file()
-        && !metadata.file_type().is_symlink()
-        && metadata.uid() == rustix::process::getuid().as_raw()
+    if named.is_file()
+        && file_identity(&opened) == file_identity(&named)
         && bytes == expected.as_bytes()
     {
         fs::remove_file(path)?;
@@ -1766,6 +1974,40 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn runtime_cleanup_preserves_replaced_links_and_never_reads_a_fifo() {
+        use rustix::fs::{CWD, FileType, Mode, mknodat};
+        use std::os::unix::fs::symlink;
+
+        let directory = std::env::temp_dir().join(format!("kv-cleanup-{}", token_hex(16).unwrap()));
+        fs::create_dir(&directory).unwrap();
+        let target = directory.join("target");
+        let name = directory.join("token");
+        fs::write(&target, "expected-token").unwrap();
+        symlink(&target, &name).unwrap();
+        remove_if_matches(&name, "expected-token").unwrap();
+        assert!(
+            fs::symlink_metadata(&name)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"expected-token");
+        fs::remove_file(&name).unwrap();
+        mknodat(CWD, &name, FileType::Fifo, Mode::RUSR | Mode::WUSR, 0).unwrap();
+        remove_if_matches(&name, "expected-token").unwrap();
+        assert!(fs::symlink_metadata(&name).is_ok());
+        fs::remove_file(&name).unwrap();
+        fs::write(&name, "replacement-token").unwrap();
+        remove_if_matches(&name, "expected-token").unwrap();
+        assert_eq!(fs::read(&name).unwrap(), b"replacement-token");
+        fs::write(&name, "expected-token").unwrap();
+        remove_if_matches(&name, "expected-token").unwrap();
+        assert!(!name.exists());
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn silent_connection_times_out_and_closes() {
         use std::io::Read;
         use std::os::unix::net::UnixStream;
@@ -1806,7 +2048,9 @@ mod tests {
         let providers = kv_broker::build_provider_table(&approved).0;
         let http_policy = kv_broker::load_http_policy_snapshot(&approved);
         let api_caller = kv_broker::ApiCaller::new();
-        let stopping = AtomicBool::new(false);
+        let lifecycle = Lifecycle::new();
+        let mut workers = WorkerTracker::new();
+        let connection = workers.register_connection(&server).unwrap();
         let memory_hardening = json!({});
         let timeout = Duration::from_millis(100);
         let started = Instant::now();
@@ -1824,7 +2068,8 @@ mod tests {
                 &providers,
                 &http_policy,
                 &api_caller,
-                &stopping,
+                &lifecycle,
+                &connection,
                 &memory_hardening,
                 timeout,
             )
