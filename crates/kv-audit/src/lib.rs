@@ -19,6 +19,8 @@ mod python_json;
 mod runtime;
 
 #[cfg(unix)]
+pub use codec::{label_text, requester_fields};
+#[cfg(unix)]
 pub use runtime::{Audit, WarningLease};
 
 use serde::{Deserialize, Serialize};

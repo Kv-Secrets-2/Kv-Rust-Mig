@@ -21,6 +21,8 @@ use base64::Engine as _;
 #[cfg(unix)]
 use base64::engine::general_purpose::URL_SAFE;
 use kv_approvals::owner::{OwnerSeed, owner_key_id, owner_public_key};
+#[cfg(unix)]
+use kv_approvals::permit_session::SessionPermits;
 use kv_approvals::wire::{self, FieldValue, MessageFields, MessageKind};
 use kv_crypto::{Key32, Zeroizing, derive_labeled_key, keyfile};
 use kv_store::DrawerStore;
@@ -40,7 +42,11 @@ mod audit_reply_tests;
 #[cfg(unix)]
 mod lifecycle;
 #[cfg(unix)]
-use lifecycle::{ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker};
+mod permits;
+#[cfg(unix)]
+use lifecycle::{
+    CommitError, ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker,
+};
 
 #[cfg(unix)]
 const START_REFUSAL_PREFIX: &str = "Cannot start kv daemon:";
@@ -167,6 +173,7 @@ pub struct TrustContext {
     pub grant_state_key: Key32,
     pub token_key: Key32,
     pub protected: bool,
+    pub owner_public_key: Option<[u8; 32]>,
     pub owner_key_id: String,
     pub local_approval_id: Vec<u8>,
     pub location: Vec<u8>,
@@ -217,6 +224,7 @@ impl TrustContext {
         #[cfg(unix)]
         let key_digest: [u8; 32] = Sha256::digest(&blob).into();
         let mut owner_id = String::new();
+        let mut owner_public = None;
         let mut local_approval_id = Vec::new();
         let mut location = root.to_string_lossy().as_bytes().to_vec();
         let protected = match passphrase {
@@ -232,6 +240,7 @@ impl TrustContext {
                     .map_err(|error| AgentError(error.to_string()))?;
                 let public = owner_public_key(&seed);
                 owner_id = owner_key_id(&public, &identity.local_approval_id);
+                owner_public = Some(public);
                 local_approval_id = identity.local_approval_id.to_vec();
                 if !identity.location.is_empty() {
                     location = identity.location.clone();
@@ -251,6 +260,7 @@ impl TrustContext {
             grant_state_key: derive_labeled_key(master_key, b"kv-approval:grant-state", &[]),
             token_key: derive_labeled_key(master_key, b"kv-approval:token", &[]),
             protected,
+            owner_public_key: owner_public,
             owner_key_id: owner_id,
             local_approval_id,
             location,
@@ -275,6 +285,13 @@ impl TrustContext {
 
     #[cfg(unix)]
     pub fn observe(&self) -> Result<(), AgentError> {
+        self.observe_held().map(drop)
+    }
+
+    /// Keep the checked pin locked through permit debit and publication of the
+    /// committed work window. The lifecycle gate drops this guard before HTTP.
+    #[cfg(unix)]
+    fn observe_held(&self) -> Result<std::sync::MutexGuard<'_, PinState>, AgentError> {
         let mut state = self
             .pin
             .state
@@ -288,7 +305,7 @@ impl TrustContext {
         } else {
             let metadata = match fs::symlink_metadata(&state.root) {
                 Ok(metadata) => metadata,
-                Err(_) => return Self::latch_locked(&mut state, "the vault folder is gone"),
+                Err(_) => return Err(Self::latch_locked(&mut state, "the vault folder is gone")),
             };
             if metadata.file_type().is_symlink() {
                 Some("the vault path now contains a link".to_owned())
@@ -298,13 +315,13 @@ impl TrustContext {
                 match state.folder.as_ref() {
                     Some(folder) => match folder.metadata() {
                         Err(error) => {
-                            return Self::latch_locked(
+                            return Err(Self::latch_locked(
                                 &mut state,
                                 &format!(
                                     "the vault could not be checked ({})",
                                     python_io_exception_name(&error)
                                 ),
-                            );
+                            ));
                         }
                         Ok(metadata) if metadata.nlink() == 0 => {
                             Some("the vault folder was deleted".to_owned())
@@ -335,19 +352,19 @@ impl TrustContext {
             }
         };
         if let Some(reason) = reason {
-            return Self::latch_locked(&mut state, &reason);
+            return Err(Self::latch_locked(&mut state, &reason));
         }
-        Ok(())
+        Ok(state)
     }
 
     #[cfg(unix)]
-    fn latch_locked(state: &mut PinState, reason: &str) -> Result<(), AgentError> {
+    fn latch_locked(state: &mut PinState, reason: &str) -> AgentError {
         let message = state.latched.get_or_insert_with(|| {
             format!(
                 "vault changed under the running daemon ({reason}); kv refuses all requests. Stop the daemon and unlock again."
             )
         });
-        Err(AgentError(message.clone()))
+        AgentError(message.clone())
     }
 
     #[cfg(unix)]
@@ -678,6 +695,7 @@ pub fn run_agent_with_api_caller(
     let master_key = Arc::new(master_key);
     let approved = Arc::new(approved.value);
     let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+    let permits = permits::for_session(&trust, Arc::clone(&providers));
     let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
     let audit = kv_audit::Audit::new(kv_proto::runtime_dir()?);
@@ -711,6 +729,7 @@ pub fn run_agent_with_api_caller(
                 let store = Arc::clone(&store);
                 let token = Arc::clone(&token);
                 let providers = Arc::clone(&providers);
+                let permits = Arc::clone(&permits);
                 let http_policy = Arc::clone(&http_policy);
                 let api_caller = Arc::clone(&api_caller);
                 let audit = audit.clone();
@@ -731,6 +750,7 @@ pub fn run_agent_with_api_caller(
                             &approved,
                             &token,
                             &providers,
+                            &permits,
                             &http_policy,
                             &api_caller,
                             &audit,
@@ -829,6 +849,7 @@ fn handle_connection(
     approved: &Value,
     token: &Zeroizing<String>,
     providers: &kv_broker::ProviderTable,
+    permits: &SessionPermits,
     http_policy: &kv_broker::HttpPolicySnapshot,
     api_caller: &kv_broker::ApiCaller,
     audit: &kv_audit::Audit,
@@ -885,7 +906,7 @@ fn handle_connection(
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
         let _ = serve_owner_endpoint(
-            stream, cmd, request, trust, root, approved, master_key, providers, &replies,
+            stream, cmd, request, trust, root, approved, master_key, providers, permits, &replies,
         );
         return Ok(());
     }
@@ -994,6 +1015,10 @@ fn handle_connection(
             json!({"environments":environments,"invalid_environments":[]})
         }
         "lock" => json!({"locking":true,"ended":true}),
+        "permit_requests" => json!({
+            "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
+            "pauses": [],
+        }),
         "api" => {
             let api_started = std::time::Instant::now();
             let env = request
@@ -1009,6 +1034,9 @@ fn handle_connection(
                 providers,
                 http_policy,
                 api_caller,
+                trust,
+                permits,
+                audit,
                 lifecycle,
                 connection,
             );
@@ -1020,6 +1048,7 @@ fn handle_connection(
                 env,
                 &response,
                 api_started.elapsed().as_millis() as u64,
+                permits,
             );
             response
         }
@@ -1088,7 +1117,19 @@ impl Replies<'_> {
         response: &Value,
         signed_hard_lock: Option<&Value>,
     ) -> Result<(), AgentError> {
-        if let Ok(_window) = self.lifecycle.try_commit_for(self.connection) {
+        if let Ok(_window) = self
+            .lifecycle
+            .try_commit_for_with_charge(self.connection, || {
+                // A different worker may have latched the pin after this answer
+                // was prepared. Check that state under the same admission gate,
+                // retaining the pin until the reply's committed window is visible.
+                let pin = self.trust.pin.state.lock().map_err(|_| ())?;
+                if pin.latched.is_some() || pin.closed {
+                    return Err(());
+                }
+                Ok(pin)
+            })
+        {
             write_audited_reply(
                 stream,
                 response,
@@ -1228,6 +1269,7 @@ fn serve_owner_endpoint(
     approved: &Value,
     master_key: &Key32,
     providers: &kv_broker::ProviderTable,
+    permits: &SessionPermits,
     replies: &Replies<'_>,
 ) -> Result<(), AgentError> {
     let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
@@ -1253,8 +1295,21 @@ fn serve_owner_endpoint(
                 return Err(AgentError("owner authority check failed".into()));
             }
         }
-        if cmd != "owner_channel" {
-            return owner_error(trust, challenge.clone(), "unsupported");
+        match cmd {
+            "owner_permit_request" => {
+                return permits::owner_request(trust, permits, challenge.clone(), request);
+            }
+            "owner_permit_register" => {
+                return permits::owner_register(
+                    trust,
+                    permits,
+                    challenge.clone(),
+                    request,
+                    approved,
+                );
+            }
+            "owner_channel" => {}
+            _ => return owner_error(trust, challenge.clone(), "unsupported"),
         }
         let mut fields = MessageFields::new();
         fields.insert("challenge".into(), FieldValue::Nonce(challenge.clone()));
@@ -1444,11 +1499,14 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
         }
         Ok(Some(value))
     }
-    string_field(request, "provider", 128, true, false)?;
-    string_field(request, "path", 4096, true, false)?;
     if request.contains_key("permit_id") {
         string_field(request, "permit_id", 128, true, false)?;
     }
+    if request.contains_key("reason") {
+        string_field(request, "reason", 512, false, true)?;
+    }
+    string_field(request, "provider", 128, true, false)?;
+    string_field(request, "path", 4096, true, false)?;
     let method = string_field(request, "method", 16, false, false)?.unwrap_or("GET");
     if !["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
         .contains(&method.to_ascii_uppercase().as_str())
@@ -1499,6 +1557,9 @@ fn api_call_response(
     providers: &kv_broker::ProviderTable,
     policy: &kv_broker::HttpPolicySnapshot,
     caller: &kv_broker::ApiCaller,
+    trust: &TrustContext,
+    permits: &SessionPermits,
+    audit: &kv_audit::Audit,
     lifecycle: &Arc<Lifecycle>,
     connection: &ConnectionGuard,
 ) -> Value {
@@ -1545,27 +1606,22 @@ fn api_call_response(
     );
     let per_call =
         decision.get("error_code").and_then(Value::as_str) == Some("http_approval_required");
-    if !decision
-        .get("allowed")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    if !per_call
+        && !decision
+            .get("allowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     {
-        if per_call && let Some(permit) = request.get("permit_id").and_then(Value::as_str) {
-            if !permit.starts_with("permit_") {
-                return json!({"error":"invalid permit id","error_code":"permit_invalid"});
-            }
-            return json!({
-                "error":"permit request is missing or expired",
-                "error_code":"permit_invalid"
-            });
-        }
         return strip_allowed(decision);
     }
-    if request.contains_key("permit_id") {
+    if request.contains_key("permit_id") && !per_call {
         return json!({
             "error":"this call does not match a one-call permit",
             "error_code":"permit_invalid"
         });
+    }
+    if per_call && let Err(error) = permits.precheck(request.get("permit_id")) {
+        return permits::precheck_error(error);
     }
     let secret_name = provider
         .get("secret_name")
@@ -1581,26 +1637,85 @@ fn api_call_response(
         Err(error) => return json!({"error":error.to_string()}),
     };
     let secrets_for_redact = kv_broker::redact_one_secret(secret_name, &secret_value);
-    let mut result = caller.call_with_before_send(
-        kv_broker::ApiRequest {
-            provider_name,
-            provider,
-            secret_value: &secret_value,
-            path: path.as_str().unwrap_or("/"),
-            method: method.as_str().unwrap_or("GET"),
-            body: request.get("body").filter(|body| !body.is_null()),
-            extra_headers: &headers,
-            secrets_for_redact: &secrets_for_redact,
-            timeout: Duration::from_secs(API_TIMEOUT),
-            max_response_bytes: kv_broker::MAX_BROKER_RESPONSE_BYTES,
+    let api_request = kv_broker::ApiRequest {
+        provider_name,
+        provider,
+        secret_value: &secret_value,
+        path: path.as_str().unwrap_or("/"),
+        method: method.as_str().unwrap_or("GET"),
+        body: request.get("body").filter(|body| !body.is_null()),
+        extra_headers: &headers,
+        secrets_for_redact: &secrets_for_redact,
+        timeout: Duration::from_secs(API_TIMEOUT),
+        max_response_bytes: kv_broker::MAX_BROKER_RESPONSE_BYTES,
+    };
+    let permit_id = if per_call {
+        match permits::prepare(
+            trust,
+            permits,
+            audit,
+            request,
+            env,
+            caller,
+            api_request.clone(),
+            decision.get("policy_rule"),
+        ) {
+            Ok(id) => Some(id),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
+    let empty_headers = serde_json::Map::new();
+    let caller_headers = headers.as_object().unwrap_or(&empty_headers);
+    let callback_refused = std::cell::Cell::new(false);
+    let mut result = caller.call_with_checks(
+        api_request,
+        |preview| {
+            let checked = permit_id
+                .map(|id| {
+                    permits
+                        .match_call(
+                            id,
+                            permits::call_facts(
+                                env,
+                                provider_name,
+                                provider,
+                                caller_headers,
+                                preview,
+                            ),
+                        )
+                        .map_err(permits::invalid_error)
+                })
+                .transpose();
+            callback_refused.set(checked.is_err());
+            checked
         },
-        || {
-            lifecycle.try_commit_for(connection).map_err(|_| {
-                json!({"error":"the agent is stopping; new requests are refused",
-            "error_code":"agent_stopping"})
-            })
+        |matched| {
+            let committed = lifecycle
+                .try_commit_for_with_charge(connection, || {
+                    let pin = trust.observe_held().map_err(permits::hard_lock_error)?;
+                    if let Some(matched) = matched {
+                        permits.spend(&matched).map_err(permits::invalid_error)?;
+                    }
+                    Ok(pin)
+                })
+                .map_err(|error| match error {
+                    CommitError::Stopping => json!({
+                        "error":"the agent is stopping; new requests are refused",
+                        "error_code":"agent_stopping",
+                    }),
+                    CommitError::Charge(refusal) => refusal,
+                });
+            callback_refused.set(committed.is_err());
+            committed
         },
     );
+    // Python's matching/admission exceptions bypass policy-warning attachment;
+    // a transport result (including an HTTP failure) still receives the warning.
+    if callback_refused.get() {
+        return result;
+    }
     if let Some(warning) = decision.get("warning").and_then(Value::as_str) {
         let current = result.get("warning").and_then(Value::as_str).unwrap_or("");
         result["warning"] = Value::String(if current.is_empty() {
@@ -1627,6 +1742,7 @@ fn audit_api_call(
     env: &str,
     response: &Value,
     duration_ms: u64,
+    permits: &SessionPermits,
 ) -> Result<(), kv_audit::LossReason> {
     let mut entry = serde_json::Map::new();
     entry.insert(
@@ -1693,6 +1809,7 @@ fn audit_api_call(
             }
         }
     }
+    entry.extend(permits::audit_fields(permits, request, response));
     audit.emit("api_call", entry)
 }
 
@@ -1944,6 +2061,82 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn checked_trust_pin_stays_held_until_admission_releases_it() {
+        struct Directory(std::path::PathBuf);
+        impl Drop for Directory {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let directory =
+            Directory(std::env::temp_dir().join(format!("kv-pin-{}", token_hex(16).unwrap())));
+        fs::create_dir(&directory.0).unwrap();
+        fs::create_dir(directory.0.join(".secrets")).unwrap();
+        let key_path = directory.0.join(".secrets/key");
+        let blob = b"synthetic pinned key bytes";
+        fs::write(&key_path, blob).unwrap();
+        let folder = File::open(&directory.0).unwrap();
+        let folder_metadata = folder.metadata().unwrap();
+        let key_metadata = fs::metadata(&key_path).unwrap();
+        let trust = Arc::new(TrustContext {
+            session_nonce: Zeroizing::new([0; 32]),
+            daemon_auth_key: Key32::new([0; 32]),
+            grant_state_key: Key32::new([0; 32]),
+            token_key: Key32::new([0; 32]),
+            protected: false,
+            owner_public_key: None,
+            owner_key_id: String::new(),
+            local_approval_id: Vec::new(),
+            location: Vec::new(),
+            version: "0.4.0".into(),
+            pin: Arc::new(TrustPin {
+                state: Mutex::new(PinState {
+                    root: directory.0.clone(),
+                    folder_id: (folder_metadata.dev(), folder_metadata.ino()),
+                    folder: Some(folder),
+                    key_id: Some((key_metadata.dev(), key_metadata.ino())),
+                    key_digest: Some(Sha256::digest(blob).into()),
+                    approval_key_id: None,
+                    approval_key_digest: None,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
+        });
+        // The ordinary observer still releases the mutex before returning.
+        trust.observe().unwrap();
+        assert!(trust.pin.state.try_lock().is_ok());
+        let checked = trust.observe_held().unwrap();
+        assert!(matches!(
+            trust.pin.state.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ));
+        fs::write(&key_path, b"synthetic changed key bytes").unwrap();
+        let (started, ready) = std::sync::mpsc::channel();
+        let (finished, observed) = std::sync::mpsc::channel();
+        let observer_trust = Arc::clone(&trust);
+        let observer = thread::spawn(move || {
+            started.send(()).unwrap();
+            finished.send(observer_trust.observe()).unwrap();
+        });
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            observed.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        assert!(checked.latched.is_none());
+        drop(checked);
+        let error = observed
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("the key file changed"));
+        observer.join().unwrap();
+        assert!(trust.hard_locked().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn closing_trust_context_retires_folder_descriptor() {
         let context = TrustContext {
             session_nonce: Zeroizing::new([0; 32]),
@@ -1951,6 +2144,7 @@ mod tests {
             grant_state_key: Key32::new([0; 32]),
             token_key: Key32::new([0; 32]),
             protected: false,
+            owner_public_key: None,
             owner_key_id: String::new(),
             local_approval_id: Vec::new(),
             location: Vec::new(),
@@ -2038,6 +2232,7 @@ mod tests {
             grant_state_key: Key32::new([0; 32]),
             token_key: Key32::new([0; 32]),
             protected: false,
+            owner_public_key: None,
             owner_key_id: String::new(),
             local_approval_id: Vec::new(),
             location: Vec::new(),
@@ -2058,7 +2253,8 @@ mod tests {
         };
         let approved = json!({});
         let token = Zeroizing::new(String::new());
-        let providers = kv_broker::build_provider_table(&approved).0;
+        let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+        let permits = permits::for_session(&trust, Arc::clone(&providers));
         let http_policy = kv_broker::load_http_policy_snapshot(&approved);
         let api_caller = kv_broker::ApiCaller::new();
         let audit = kv_audit::Audit::new(".");
@@ -2080,6 +2276,7 @@ mod tests {
                 &approved,
                 &token,
                 &providers,
+                &permits,
                 &http_policy,
                 &api_caller,
                 &audit,

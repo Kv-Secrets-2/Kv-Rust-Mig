@@ -10,7 +10,7 @@ caseless = "0.2.2"
 getrandom = "0.2"
 kv-crypto = { path = "../kv-crypto" }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order", "float_roundtrip"] }
 sha2 = "0.10"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing"] }

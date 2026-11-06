@@ -1,6 +1,7 @@
 // Generated below from canonical CPython 3.10's Unicode 13.0.0 str.isprintable.
-// This is used only by repr() of strings nested in a malformed non-string
-// previous hash. Ordinary record strings and string hashes retain all Unicode.
+// Used by repr() of strings nested in a malformed non-string previous hash,
+// and (excluding Zs) by requester reason escaping. Ordinary record strings and
+// string hashes retain all Unicode.
 const PYTHON_NONPRINTABLE: &[(u32, u32)] = &[
     (0x0, 0x1f),
     (0x7f, 0xa0),

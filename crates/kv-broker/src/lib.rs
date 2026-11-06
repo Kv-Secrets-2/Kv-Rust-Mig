@@ -3,7 +3,7 @@ mod policy;
 mod providers;
 mod redact;
 
-pub use caller::{ApiCaller, ApiRequest, UrlSafety};
+pub use caller::{ApiCaller, ApiPreview, ApiRequest, UrlSafety};
 pub use policy::{
     HttpPolicySnapshot, describe_http_policy_snapshot, evaluate_http_policy,
     evaluate_provider_http_request, http_headers_security_error, http_request_security_error,
