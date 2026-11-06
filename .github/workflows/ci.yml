@@ -45,6 +45,7 @@ jobs:
           cargo test --workspace --locked 2>&1 | tee "$RUNNER_TEMP/kv-native-tests.log"
         env:
           TMPDIR: ${{ runner.os == 'Windows' && runner.temp || '/var/tmp' }}
+          CARGO_TERM_COLOR: never
       - name: Report native failure identifiers
         if: failure()
         shell: bash
@@ -60,16 +61,22 @@ jobs:
               text = log.read_text(errors="replace")
               tracked = subprocess.check_output(["git", "ls-files", "-z", "crates"], text=True).split("\0")
               public_functions = set()
+              source_lines = {}
               for path in tracked:
                   if path.endswith(".rs"):
                       source = subprocess.check_output(["git", "show", "HEAD:" + path], text=True)
+                      source_lines[path] = len(source.splitlines())
                       public_functions.update(re.findall(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", source))
               failed = set(re.findall(r"^test ([A-Za-z_][A-Za-z0-9_:]*) \.\.\. FAILED$", text, re.MULTILINE))
               failed = sorted({name.rsplit("::", 1)[-1] for name in failed} & public_functions)
               codes = sorted(set(re.findall(r"^error\[(E[0-9]{4})\]", text, re.MULTILINE)))
-              # Publish only compiler codes and identifiers from committed source.
+              sites = set(re.findall(r"panicked at (crates/[A-Za-z0-9_/.-]+\.rs):([0-9]+):[0-9]+:", text))
+              sites = sorted((path, int(line)) for path, line in sites
+                             if path in source_lines and 1 <= int(line) <= source_lines[path])
+              kinds = sorted(set(re.findall(r"kind: (TimedOut|WouldBlock|Interrupted|InvalidInput|UnexpectedEof|BrokenPipe|ConnectionReset|NotConnected|Other)\b", text)))
+              # Publish only fixed error kinds and identifiers/locations from public source.
               # Never include raw log lines, paths, assertion values or environment data.
-              message = json.dumps({"compiler_codes": codes, "failed_tests": failed}, ensure_ascii=True)
+              message = json.dumps({"compiler_codes": codes, "failed_tests": failed, "panic_sites": sites, "io_error_kinds": kinds}, ensure_ascii=True)
               print("::error title=Native failure identifiers::" + message)
           PY
 
