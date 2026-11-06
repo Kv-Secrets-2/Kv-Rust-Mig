@@ -16,4 +16,6 @@ and the comparison inventory.
 The migration is incomplete. See [the baseline audit](docs/migration/BASELINE-2026-11-06.md)
 for implemented coverage, remaining features, and known findings, and the
 [IPC/shutdown update](docs/migration/IPC-SHUTDOWN.md) for the subsequent timeout
-and daemon-lifecycle work.
+and daemon-lifecycle work. The [audit safety update](docs/migration/AUDIT-SAFETY.md)
+describes the Unix audit writer, shared locking, loss accounting, warning delivery,
+and focused validation for the next slice.

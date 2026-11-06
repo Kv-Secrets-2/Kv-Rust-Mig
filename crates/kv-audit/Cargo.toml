@@ -1,0 +1,24 @@
+[package]
+name = "kv-audit"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order", "float_roundtrip"] }
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process", "try_close"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+
+[lints]
+workspace = true
