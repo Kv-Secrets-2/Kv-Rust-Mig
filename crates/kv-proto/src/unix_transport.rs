@@ -449,6 +449,18 @@ mod tests {
         (client, worker)
     }
 
+    fn wait_until_read(socket: &UnixStream, deadline: Instant) -> bool {
+        // Observe the reader's queue through a clone without stealing bytes.
+        // Every caller has already written a nonempty fragment synchronously.
+        while rustix::io::ioctl_fionread(socket).unwrap() != 0 {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        true
+    }
+
     #[test]
     fn silent_reply_and_complete_json_without_eof_keep_distinct_timeouts() {
         let (mut client, server) = UnixStream::pair().unwrap();
@@ -476,62 +488,95 @@ mod tests {
 
     #[test]
     fn ordinary_reads_reset_their_timeout_but_probe_reads_share_one_deadline() {
+        let budget = Duration::from_secs(2);
         for complete in [false, true] {
-            let chunks = vec![
-                (Duration::ZERO, b"{".to_vec()),
-                (Duration::from_millis(90), b"\"ok\":".to_vec()),
-                (Duration::from_millis(90), b"true}".to_vec()),
-            ];
-            let (mut client, worker) = scripted_pair(chunks, Duration::from_millis(90));
-            let start = Instant::now();
+            let (mut client, mut server) = UnixStream::pair().unwrap();
+            server
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            server.write_all(b"{").unwrap();
+            let observer = client.try_clone().unwrap();
+            let deadline = Instant::now() + budget;
+            let worker = thread::spawn(move || {
+                assert!(
+                    wait_until_read(&observer, Instant::now() + Duration::from_secs(5)),
+                    "reader did not consume the initial fragment"
+                );
+                // Start the producer's full budget only after a receive. Thus
+                // even an ordinary reader that starts late must renew its
+                // timeout to reach the final suffix. The probe must expire.
+                let finish_after = Instant::now() + budget;
+                let mut consumed_fragments = 1;
+                while Instant::now() < finish_after {
+                    server.write_all(b" ").unwrap();
+                    if !wait_until_read(&observer, finish_after) {
+                        break;
+                    }
+                    consumed_fragments += 1;
+                    thread::sleep(Duration::from_millis(10));
+                }
+                assert!(Instant::now() >= deadline);
+                server.write_all(b"\"ok\":true}").unwrap();
+                // Closing supplies EOF to the ordinary reader. The observer
+                // clone is dropped here too, including when the probe timed out.
+                consumed_fragments
+            });
             let result = if complete {
-                read_complete_reply(&mut client, start + Duration::from_millis(150))
+                read_complete_reply(&mut client, deadline)
             } else {
-                read_reply(
-                    &mut client,
-                    ReplyBudget::PerRead(Some(Duration::from_millis(150))),
-                )
+                read_reply(&mut client, ReplyBudget::PerRead(Some(budget)))
             };
+            // Join before inspecting the result so failed assertions never
+            // leave a producer alive. Its queue waits and writes are bounded.
+            let consumed_fragments = worker.join().unwrap();
+            assert!(consumed_fragments >= 2, "reader made no partial progress");
             if complete {
                 timeout(result.unwrap_err());
-                assert!(start.elapsed() < Duration::from_secs(1));
             } else {
                 assert_eq!(result.unwrap(), serde_json::json!({"ok":true}));
-                assert!(start.elapsed() >= Duration::from_millis(250));
             }
-            drop(client);
-            worker.join().unwrap();
         }
     }
 
     #[test]
     fn complete_reply_handles_fragmented_utf8_and_rejects_buffered_extra_data() {
-        let (mut client, worker) = scripted_pair(
-            vec![
-                (Duration::ZERO, b" \n{\"text\":\"\xc3".to_vec()),
-                (Duration::from_millis(20), b"\xa9\"} \t".to_vec()),
-            ],
-            Duration::from_millis(180),
-        );
-        assert_eq!(
-            read_complete_reply(&mut client, Instant::now() + Duration::from_millis(120)).unwrap(),
-            serde_json::json!({"text":"é"})
-        );
-        drop(client);
+        let prefix = b" \n{\"text\":\"\xc3";
+        // Deterministically exercise the incomplete UTF-8 parser boundary in
+        // addition to the socket delivery below: streams can coalesce writes.
+        assert!(complete_document(prefix, 2).unwrap().is_none());
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        server.write_all(prefix).unwrap();
+        let observer = client.try_clone().unwrap();
+        let mut producer = server.try_clone().unwrap();
+        producer
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let worker = thread::spawn(move || {
+            assert!(
+                wait_until_read(&observer, Instant::now() + Duration::from_secs(5)),
+                "reader did not consume the UTF-8 prefix"
+            );
+            producer.write_all(b"\xa9\"} \t").unwrap();
+        });
+        let result = read_complete_reply(&mut client, Instant::now() + Duration::from_secs(5));
         worker.join().unwrap();
+        assert_eq!(result.unwrap(), serde_json::json!({"text":"é"}));
+        // Keep the original server open until after the successful reply;
+        // framing must not rely on EOF or a producer's timed hold-open sleep.
+        drop(server);
 
         for bytes in [b"{}garbage".as_slice(), b"{}{}", b"{}\x0b"] {
             let (mut client, mut server) = UnixStream::pair().unwrap();
             server.write_all(bytes).unwrap();
             assert!(matches!(
-                read_complete_reply(&mut client, Instant::now() + Duration::from_millis(100)),
+                read_complete_reply(&mut client, Instant::now() + Duration::from_secs(5)),
                 Err(ProtocolError::Json(_))
             ));
         }
         let (mut client, mut server) = UnixStream::pair().unwrap();
         server.write_all(b"{\"text\":\"\xff\"}").unwrap();
         assert!(matches!(
-            read_complete_reply(&mut client, Instant::now() + Duration::from_millis(100)),
+            read_complete_reply(&mut client, Instant::now() + Duration::from_secs(5)),
             Err(ProtocolError::InvalidUtf8(_))
         ));
     }
