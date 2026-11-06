@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+#[path = "../../../tests/support/harness.rs"]
+mod harness;
+
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr};
@@ -28,18 +31,7 @@ struct TestDir(PathBuf);
 
 impl TestDir {
     fn new() -> Self {
-        let mut random = [0u8; 16];
-        getrandom::getrandom(&mut random).expect("test randomness");
-        let path = std::env::temp_dir().join(format!(
-            "kv-agent-stage5-api-{}-{}",
-            std::process::id(),
-            random
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        ));
-        fs::create_dir(&path).expect("create test directory");
-        Self(path)
+        Self(harness::socket_temp_dir("a5", "python-home"))
     }
 }
 
@@ -595,7 +587,7 @@ fn exercise_sequence(
 
 #[test]
 fn api_broker_matches_python_over_local_https_and_refusals_do_not_send() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 5a API end-to-end parity: set KV_PY_REF");
         return;
     };

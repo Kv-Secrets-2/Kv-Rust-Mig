@@ -22,6 +22,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
 rcgen = "0.13"
 url = "2.5"
 

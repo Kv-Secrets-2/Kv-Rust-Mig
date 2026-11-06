@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
+  "reference_version": "0.4.0",
+  "minimum_comparisons": 29,
+  "targets": {
+    "kv-agent/stage4_agent": [
+      "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
+      "agent_status_and_commands_match_in_both_directions",
+      "startup_refusals_match_and_held_pid_file_is_rejected",
+      "approval_signing_key_changes_hard_lock_with_python_reason_parity",
+      "owner_authority_internal_failures_are_signed_internal"
+    ],
+    "kv-agent/stage5_api": ["api_broker_matches_python_over_local_https_and_refusals_do_not_send"],
+    "kv-approvals/fixtures": ["rust_signed_owner_grant_and_permit_verify_in_python_when_configured"],
+    "kv-broker/kv_broker": ["caller::tests::url_safety_matches_python_for_ip_literals_and_localhost"],
+    "kv-broker/python_parity": [
+      "http_policy_matches_python_over_canonical_targets_and_malformed_rules",
+      "provider_table_matches_python_snapshot",
+      "redaction_matches_python_for_500_generated_cases"
+    ],
+    "kv-cli/stage7_mcp_cli": ["mcp_server_command_line_matches_python"],
+    "kv-crypto/kv_crypto": ["python_digits::tests::passphrase_strength_matches_python_reference_digit_corpus"],
+    "kv-mcp/stage7_mcp": ["transcripts_match_python_with_and_without_the_daemon", "key_kinds_and_fatal_frames_match_python"],
+    "kv-store/approval_refs_parity": [
+      "approval_stores_match_python_for_valid_invalid_and_conservative_inputs",
+      "python_string_rendering_matches_generated_json_values"
+    ],
+    "kv-store/config": [
+      "python_config_writer_and_gitignore_merge_match_rust_byte_for_byte",
+      "python_and_rust_config_aware_environment_lifecycle_match"
+    ],
+    "kv-store/config_parity": [
+      "python_and_rust_config_lifecycle_steps_match",
+      "python_and_rust_operations_interleave_on_one_vault_copy",
+      "rust_and_python_backup_restore_interoperate"
+    ],
+    "kv-store/python_parity": [
+      "python_and_rust_drawer_operations_have_matching_storage_and_cross_reads",
+      "python_and_rust_history_operations_have_matching_results_and_storage",
+      "python_and_rust_envtree_copy_checked_copy_and_backup_interoperate"
+    ],
+    "kv-store/stage4_vault_origin": [
+      "provenance_records_interoperate_with_python",
+      "config_authority_records_open_in_both_implementations",
+      "unsafe_key_refusal_persists_exposed_provenance",
+      "missing_moved_and_git_tracked_vaults_refuse_like_python"
+    ]
+  }
+}

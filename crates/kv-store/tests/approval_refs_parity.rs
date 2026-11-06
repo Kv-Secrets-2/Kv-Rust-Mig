@@ -13,7 +13,7 @@ use common::{TestDir, copy_fixture_secrets, fixture_master_key, fixture_root, ke
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 fn python() -> Option<std::ffi::OsString> {
-    std::env::var_os("KV_PY_REF")
+    kv_test_support::python_reference()
 }
 
 fn run_python(python: &std::ffi::OsStr, temp: &TestDir, root: &Path, command: Value) -> Value {

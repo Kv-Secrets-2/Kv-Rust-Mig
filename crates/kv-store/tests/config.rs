@@ -143,7 +143,7 @@ fn vault_environment_lifecycle_renames_default_reencrypts_restores_and_purges() 
 
 #[test]
 fn python_config_writer_and_gitignore_merge_match_rust_byte_for_byte() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Python config parity: set KV_PY_REF to the reference interpreter");
         return;
     };
@@ -272,7 +272,7 @@ fn python_config_writer_and_gitignore_merge_match_rust_byte_for_byte() {
 
 #[test]
 fn python_and_rust_config_aware_environment_lifecycle_match() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Python Stage 3a parity: set KV_PY_REF to the reference interpreter");
         return;
     };

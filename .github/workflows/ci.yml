@@ -26,10 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
-    name: test
+    name: native tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +39,73 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --workspace --locked
+        env:
+          TMPDIR: ${{ runner.os == 'Windows' && runner.temp || '/var/tmp' }}
+
+  parity:
+    name: parity (${{ matrix.python }}, ${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10.22"
+            mode: canonical
+          - python: "3.11"
+            mode: semantic
+          - python: "3.12"
+            mode: semantic
+          - python: "3.13"
+            mode: semantic
+    steps:
+      - name: Require reference read credential
+        env:
+          HAS_REFERENCE_TOKEN: ${{ secrets.KV_REFERENCE_READ_TOKEN != '' }}
+        run: |
+          if [ "$HAS_REFERENCE_TOKEN" != "true" ]; then
+            echo "::error::KV_REFERENCE_READ_TOKEN is unavailable. Configure the repository Actions secret; fork and Dependabot pull requests may not receive it. Validate reviewed changes on a trusted branch."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out the pinned Python reference
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Kv-Secrets-2/kv-secrets
+          ref: 9a497d91a0f6e95b0949deaf8f5c431f9a4333c0
+          path: .parity-reference
+          token: ${{ secrets.KV_REFERENCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Install and select the reference
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/kv-reference"
+          "$RUNNER_TEMP/kv-reference/bin/python" -m pip install ./.parity-reference cryptography==50.0.2
+          printf 'KV_PY_REF=%s\n' "$RUNNER_TEMP/kv-reference/bin/python" >> "$GITHUB_ENV"
+      - name: Check the gate's negative controls
+        run: python -I scripts/test_parity_gate.py
+      - name: Require executed Python comparisons and reverse crypto checks
+        env:
+          TMPDIR: /var/tmp
+        run: >-
+          python -I scripts/parity_gate.py
+          --reference-repo .parity-reference
+          --python-version '${{ matrix.python }}'
+          --mode '${{ matrix.mode }}'
+          --output '${{ runner.temp }}/parity-results'
+      - name: Retain the inventory and failure evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: parity-${{ matrix.python }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/parity-results
+          if-no-files-found: error
 
   deny:
     name: deny

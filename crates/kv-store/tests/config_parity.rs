@@ -334,7 +334,7 @@ fn compare_step(
 
 #[test]
 fn python_and_rust_config_lifecycle_steps_match() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP config lifecycle parity: set KV_PY_REF");
         return;
     };
@@ -382,7 +382,7 @@ fn python_and_rust_config_lifecycle_steps_match() {
 
 #[test]
 fn python_and_rust_operations_interleave_on_one_vault_copy() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP interleaved config parity: set KV_PY_REF");
         return;
     };
@@ -437,7 +437,7 @@ fn python_and_rust_operations_interleave_on_one_vault_copy() {
 
 #[test]
 fn rust_and_python_backup_restore_interoperate() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP backup parity: set KV_PY_REF");
         return;
     };
