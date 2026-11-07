@@ -508,7 +508,7 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
     };
     let parsed = parse_spec(spec, &rest[1..])?;
     let mut pos = parsed.positionals.into_iter();
-    let has = |flag: &str| parsed.flags.iter().any(|f| *f == flag);
+    let has = |flag: &str| parsed.flags.contains(&flag);
     Ok(Some(Command::Env(match action.as_str() {
         "create" => EnvAction::Create {
             name: pos.next().unwrap_or_default(),

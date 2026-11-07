@@ -363,6 +363,7 @@ fn matching_blocks(
     total
 }
 
+#[allow(clippy::needless_range_loop)] // index arithmetic mirrors difflib
 fn longest_match(
     a: &[char],
     b: &[char],
