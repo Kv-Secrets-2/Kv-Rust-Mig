@@ -795,6 +795,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kv-preflight"
+version = "0.5.0-dev"
+dependencies = [
+ "kv-hook",
+ "kv-sandbox",
+ "kv-test-support",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "kv-proto"
 version = "0.5.0-dev"
 dependencies = [
