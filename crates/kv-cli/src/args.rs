@@ -291,11 +291,15 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                         .any(|alias| alias == name)
             }) {
                 if let Some(value) = inline {
-                    let aliases: Vec<&str> = text
+                    let mut aliases: Vec<&str> = text
                         .trim_start()
                         .split(',')
                         .map(|s| s.trim().split(' ').next().unwrap_or(""))
+                        .filter(|alias| !alias.is_empty())
                         .collect();
+                    if aliases.is_empty() {
+                        aliases.push(flag);
+                    }
                     return Err(spec_error(
                         spec,
                         &format!(
@@ -912,6 +916,10 @@ mod tests {
                 .ends_with("kv ls: error: argument --reveal: ignored explicit argument 'true'\n")
         );
         assert!(usage_error(&["rm", "KEY", "--force="]).contains("ignored explicit argument ''"));
+        assert!(
+            usage_error(&["history", "forget", "KEY", "--all=true"])
+                .contains("error: argument --all: ignored explicit argument 'true'")
+        );
         assert!(matches!(
             parse(&args(&["rm", "KEY", "--force"])),
             Ok(Some(Command::Rm { force: true, .. }))

@@ -116,7 +116,10 @@ impl SecretCache {
         env: &str,
     ) -> Result<&BTreeMap<String, Zeroizing<String>>, AgentError> {
         let current = store.env_storage_marker(env);
-        let fresh = self.environments.contains_key(env)
+        // No marker (no index, or one that cannot be read) is never fresh: read again so
+        // an index that appears corrupt reports its error instead of a cached empty list.
+        let fresh = current.is_some()
+            && self.environments.contains_key(env)
             && self.markers.get(env).is_some_and(|seen| *seen == current);
         if !fresh {
             self.environments.remove(env);
