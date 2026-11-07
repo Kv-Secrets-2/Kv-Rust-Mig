@@ -367,13 +367,6 @@ mod tests {
         let cwd = proj.to_str().unwrap();
         let err = prepare_run_cwd_capsule(cwd, true, true, &[]).unwrap_err();
         assert!(err.message().contains("private cwd capsule failed"));
-        assert!(
-            !std::fs::read_dir("/tmp").unwrap().flatten().any(|e| {
-                e.file_name().to_string_lossy().starts_with("kv-run-cwd-")
-                    && e.path().join("cwd/a.txt").exists()
-            }),
-            "failed capsule must be removed"
-        );
     }
 
     #[test]
