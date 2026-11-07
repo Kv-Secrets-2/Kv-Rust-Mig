@@ -370,6 +370,7 @@ mod tests {
         assert!(err.message().contains("private cwd capsule failed"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn artifact_capsule_copies_and_checks_hash() {
         let tmp = tempfile::Builder::new()
