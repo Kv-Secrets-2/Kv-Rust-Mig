@@ -29,6 +29,16 @@ const REMEDY: &str = "run this command directly in your own console window witho
 pub const NOT_TEXT: &str =
     "The answer was not UTF-8 text; nothing was read. Type it again in a UTF-8 terminal.";
 
+impl std::fmt::Display for PromptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PromptError::Eof => f.write_str("EOF when reading a line"),
+            PromptError::Refused(msg) => f.write_str(msg),
+            PromptError::Io(e) => write!(f, "{e}"),
+        }
+    }
+}
+
 pub fn refusal() -> String {
     format!("Owner confirmation needs stdin and stdout on the controlling terminal; {REMEDY}")
 }

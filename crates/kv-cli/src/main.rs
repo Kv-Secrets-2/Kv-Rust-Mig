@@ -2,6 +2,7 @@
 //! build carries, plus the MCP server on stdio.
 
 mod args;
+mod envcmd;
 mod fsutil;
 mod help;
 mod init;
@@ -73,5 +74,6 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Rm { key, env, force } => secrets::cmd_rm(p, &key, env.as_deref(), force),
         Export { env, output } => secrets::cmd_export(p, env.as_deref(), output.as_deref()),
         Envs => secrets::cmd_envs(p),
+        Env(action) => envcmd::cmd_env(p, action),
     }
 }

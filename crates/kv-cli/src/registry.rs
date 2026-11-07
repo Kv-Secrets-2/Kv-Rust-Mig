@@ -106,3 +106,25 @@ fn sort_keys(value: Value) -> Value {
         other => other,
     }
 }
+
+/// `backup.last_backup_at(root)`: the vault's recorded last backup stamp, if well formed.
+pub fn last_backup_at(root: &Path) -> Option<String> {
+    let config = kv_store::config::load_config(root).ok()?.value;
+    let stamp = config.get("backup")?.get("last_backup_at")?.as_str()?;
+    let b = stamp.as_bytes();
+    let digits = |range: std::ops::Range<usize>| b[range].iter().all(u8::is_ascii_digit);
+    let ok = b.len() == 20
+        && digits(0..4)
+        && b[4] == b'-'
+        && digits(5..7)
+        && b[7] == b'-'
+        && digits(8..10)
+        && b[10] == b'T'
+        && digits(11..13)
+        && b[13] == b':'
+        && digits(14..16)
+        && b[16] == b':'
+        && digits(17..19)
+        && b[19] == b'Z';
+    ok.then(|| stamp.to_owned())
+}

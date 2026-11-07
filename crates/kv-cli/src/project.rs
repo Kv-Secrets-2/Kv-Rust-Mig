@@ -24,8 +24,11 @@ pub fn fail(p: &Palette, msg: &str) -> Exit {
 }
 
 /// `_quiet_error`: stderr, else stdout, never an error of its own.
+/// `_error(msg); sys.exit(1)`; an empty message is a bare `sys.exit(1)`.
 pub fn quiet_error(p: &Palette, msg: &str) -> Exit {
-    ui::error(p, msg);
+    if !msg.is_empty() {
+        ui::error(p, msg);
+    }
     Exit(1)
 }
 
@@ -281,9 +284,13 @@ pub fn audit_secret_event(_root: &Path, event: &str, env: &str, secret: &str) {
     let mut fields = Map::new();
     fields.insert("env".into(), Value::String(env.to_owned()));
     fields.insert("secret".into(), Value::String(secret.to_owned()));
-    let _ = kv_audit::Audit::new(match kv_proto::runtime_dir() {
-        Ok(dir) => dir,
-        Err(_) => return,
-    })
-    .emit(event, fields);
+    audit_event(event, fields);
+}
+
+/// `audit.emit(event, **fields)` into `~/.kv/audit.jsonl`; failures are ignored.
+pub fn audit_event(event: &str, fields: Map<String, Value>) {
+    let Ok(dir) = kv_proto::runtime_dir() else {
+        return;
+    };
+    let _ = kv_audit::Audit::new(dir).emit(event, fields);
 }

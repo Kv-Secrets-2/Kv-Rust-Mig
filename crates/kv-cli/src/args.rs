@@ -28,6 +28,7 @@ pub enum Command {
         output: Option<String>,
     },
     Envs,
+    Env(crate::envcmd::EnvAction),
 }
 
 impl Command {
@@ -290,8 +291,13 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
         parsed.positionals.push(arg.clone());
         i += 1;
     }
-    if parsed.positionals.len() < spec.positionals.len() {
-        let missing: Vec<&str> = spec.positionals[parsed.positionals.len()..].to_vec();
+    let required = spec
+        .positionals
+        .iter()
+        .filter(|name| !name.starts_with('?'))
+        .count();
+    if parsed.positionals.len() < required {
+        let missing: Vec<&str> = spec.positionals[parsed.positionals.len()..required].to_vec();
         return Err(spec_error(
             spec,
             &format!(
@@ -321,6 +327,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
             "unrecognized arguments: {}",
             argv.join(" ")
         )));
+    }
+    if first == "env" {
+        return parse_env(&argv[1..]);
     }
     let Some(spec) = SPECS.iter().find(|spec| spec.name == first.as_str()) else {
         return Err(ParseError::Unknown);
@@ -378,4 +387,170 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
         "envs" => Command::Envs,
         _ => Command::Version,
     }))
+}
+
+const ENV_USAGE: &str = "usage: kv env [-h]\n              {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n              ...\n";
+
+const ENV_HELP_TEXT: &str = "\npositional arguments:\n  {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n    create              Create a new environment\n    copy                Copy secrets between environments\n    repair-names        Preview recovery of invalid environment registrations\n    rename              Rename an environment, keeping its secrets and history\n    delete              Delete an environment (recoverable for a while)\n    restore             Bring a deleted environment back (no name: list them)\n    purge               Wipe a deleted environment now\n    default             Show or set the default environment\n    keep-deleted        Show or set how many days a deleted environment is\n                        kept\n\noptions:\n  -h, --help            show this help message and exit\n";
+
+const NAME_HELP: &str = "\npositional arguments:\n  name        Environment name\n\noptions:\n  -h, --help  show this help message and exit\n";
+
+const ENV_SPECS: &[Spec] = &[
+    Spec {
+        name: "env create",
+        usage: "usage: kv env create [-h] name\n",
+        help: NAME_HELP,
+        positionals: &["name"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "env copy",
+        usage: "usage: kv env copy [-h] [--replace | --keep-existing] [--create] src dst\n",
+        help: "\npositional arguments:\n  src              Source environment\n  dst              Destination environment\n\noptions:\n  -h, --help       show this help message and exit\n",
+        positionals: &["src", "dst"],
+        env: false,
+        flags: &[
+            (
+                "--replace",
+                "  --replace        Replace values DST already holds (drawer vaults keep them\n                   as history)\n",
+            ),
+            (
+                "--keep-existing",
+                "  --keep-existing  Copy only names DST lacks; keep DST's existing values\n",
+            ),
+            (
+                "--create",
+                "  --create         Create DST if it does not exist\n",
+            ),
+        ],
+        options: &[],
+    },
+    Spec {
+        name: "env rename",
+        usage: "usage: kv env rename [-h] old new\n",
+        help: "\npositional arguments:\n  old         Current name\n  new         New name\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["old", "new"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "env delete",
+        usage: "usage: kv env delete [-h] name\n",
+        help: NAME_HELP,
+        positionals: &["name"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "env restore",
+        usage: "usage: kv env restore [-h] [name]\n",
+        help: NAME_HELP,
+        positionals: &["?name"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "env purge",
+        usage: "usage: kv env purge [-h] name\n",
+        help: NAME_HELP,
+        positionals: &["name"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "env default",
+        usage: "usage: kv env default [-h] [name]\n",
+        help: NAME_HELP,
+        positionals: &["?name"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "env keep-deleted",
+        usage: "usage: kv env keep-deleted [-h] [days]\n",
+        help: "\npositional arguments:\n  days        Days (0-365)\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["?days"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+];
+
+/// `kv env ...`: argparse's sub-subparser. No action lists environments (`cmd_envs`);
+/// `repair-names` is recognised but not ported (legacy registrations never occur here).
+fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::envcmd::EnvAction;
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Envs));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!("{ENV_USAGE}{ENV_HELP_TEXT}")));
+    }
+    if action == "repair-names" {
+        return Err(ParseError::Usage(format!(
+            "{ENV_USAGE}kv env: error: repair-names is not available in this build: it repairs registrations left by pre-drawer releases\n"
+        )));
+    }
+    let Some(spec) = ENV_SPECS
+        .iter()
+        .find(|spec| spec.name.strip_prefix("env ") == Some(action.as_str()))
+    else {
+        return Err(ParseError::Usage(format!(
+            "{ENV_USAGE}kv env: error: argument env_action: invalid choice: '{action}' (choose from 'create', 'copy', 'repair-names', 'rename', 'delete', 'restore', 'purge', 'default', 'keep-deleted')\n"
+        )));
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let mut pos = parsed.positionals.into_iter();
+    let has = |flag: &str| parsed.flags.iter().any(|f| *f == flag);
+    Ok(Some(Command::Env(match action.as_str() {
+        "create" => EnvAction::Create {
+            name: pos.next().unwrap_or_default(),
+        },
+        "copy" => {
+            if has("--replace") && has("--keep-existing") {
+                let second = rest[1..]
+                    .iter()
+                    .filter(|a| *a == "--replace" || *a == "--keep-existing")
+                    .nth(1)
+                    .map(String::as_str)
+                    .unwrap_or("--keep-existing");
+                let first = if second == "--replace" {
+                    "--keep-existing"
+                } else {
+                    "--replace"
+                };
+                return Err(spec_error(
+                    spec,
+                    &format!("argument {second}: not allowed with argument {first}"),
+                ));
+            }
+            EnvAction::Copy {
+                src: pos.next().unwrap_or_default(),
+                dst: pos.next().unwrap_or_default(),
+                replace: has("--replace"),
+                keep_existing: has("--keep-existing"),
+                create: has("--create"),
+            }
+        }
+        "rename" => EnvAction::Rename {
+            old: pos.next().unwrap_or_default(),
+            new: pos.next().unwrap_or_default(),
+        },
+        "delete" => EnvAction::Delete {
+            name: pos.next().unwrap_or_default(),
+        },
+        "restore" => EnvAction::Restore { name: pos.next() },
+        "purge" => EnvAction::Purge {
+            name: pos.next().unwrap_or_default(),
+        },
+        "default" => EnvAction::Default { name: pos.next() },
+        _ => EnvAction::KeepDeleted { days: pos.next() },
+    })))
 }

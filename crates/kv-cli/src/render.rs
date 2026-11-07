@@ -25,3 +25,23 @@ fn escape_checked(value: &str) -> Option<String> {
 pub fn escape(value: &str) -> String {
     escape_checked(value).unwrap_or_else(|| VALUE_NOT_SHOWN.to_owned())
 }
+
+/// Python `str.isprintable()`: no character in categories Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs
+/// other than the ASCII space.
+pub fn is_printable(text: &str) -> bool {
+    use unicode_general_category::{GeneralCategory as G, get_general_category};
+    text.chars().all(|c| {
+        c == ' '
+            || !matches!(
+                get_general_category(c),
+                G::Control
+                    | G::Format
+                    | G::Surrogate
+                    | G::PrivateUse
+                    | G::Unassigned
+                    | G::LineSeparator
+                    | G::ParagraphSeparator
+                    | G::SpaceSeparator
+            )
+    })
+}
