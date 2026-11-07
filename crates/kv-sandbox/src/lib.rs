@@ -3,6 +3,7 @@
 //! wrapping, output redaction and leaked-file scanning.
 
 pub mod bwrap;
+pub mod capsule;
 pub mod classify;
 pub mod identity;
 pub mod paths;

@@ -17,6 +17,7 @@ sha2 = "0.10"
 base64 = "0.22"
 hex = "0.4"
 hmac = "0.12"
+tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }
