@@ -48,7 +48,6 @@ only `pre` decides, every other mode allows, as Python's `main` does.
   dumped field must match.
 - `crates/kv-hook/tests/hook_parity.rs`: Python `_decide` versus Rust
   `decide` over the tool cases (Read/Write/Edit/Glob/Grep/Bash, symlinks,
-  loops, editor configuration files, unusual field types) and, with
-  `KV_RR3_CASES` pointing at the reference's `rr3_cases.json`, all 647 RR3
-  inputs, in one fixture project and HOME. 841 of 841 replies matched.
+  loops, editor configuration files, unusual field types) and all 647 RR3
+  inputs (bundled as `tests/fixtures/rr3_hook_inputs.json`), in one fixture project and HOME. 841 of 841 replies matched.
 - Both tests are registered in `scripts/parity_inventory.json`.

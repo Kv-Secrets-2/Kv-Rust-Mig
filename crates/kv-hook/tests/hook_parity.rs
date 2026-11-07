@@ -116,22 +116,14 @@ fn load_cases(fixture: &Fixture) -> Vec<Value> {
     )
     .unwrap();
     cases.extend(hand.iter().map(|case| substitute(case, fixture)));
-    if let Ok(text) = std::fs::read_to_string(rr3_corpus()) {
-        let rr3: Vec<Value> = serde_json::from_str(&text).unwrap();
-        for case in rr3 {
-            if let Some(input) = case.get("hook_input") {
-                cases.push(input.clone());
-            }
-        }
-    }
+    // The RR3 corpus of kv-secrets 0.4.0 (tests/fixtures/rr3/rr3_cases.json), hook inputs only.
+    let rr3: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(root.join("tests/fixtures/rr3_hook_inputs.json")).unwrap())
+            .unwrap();
+    cases.extend(rr3);
     cases
 }
 
-fn rr3_corpus() -> PathBuf {
-    match std::env::var_os("KV_RR3_CASES") {
-        Some(path) => PathBuf::from(path),
-        None => PathBuf::from("/nonexistent"),
-    }
 }
 
 #[test]

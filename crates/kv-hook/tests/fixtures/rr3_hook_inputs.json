@@ -1,0 +1,3890 @@
+[
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\U0000006b\\U00000076' get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv $'g\\U00000065t' FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv approvals $'appr\\U0000006fve' req_1"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv $'get\\0junk' FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v g''et FOO)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v g''et FOO)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"${UNSET:-$(k''v g''et FOO)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"`k''v g''et FOO`\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v g''et FOO)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo ${UNSET:-$(k''v g''et FOO)}"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "cat <<EOF\n$(k''v g''et FOO)\nEOF"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock kv g''et FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- 'k=kv'\nk get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias 'k=kv'\nk get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | env bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | command bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | tee >(bash)"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | bash -n +o noexec"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | # c\nbash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "python3 -m kv.__main__ get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "python3-config -mkv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et FOO; echo \"$(case x in x) :;; esac)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et FOO; echo `case x in x) :;; esac`"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\x6b\\x76' $'\\x67\\x65\\x74' FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v > sink g''et FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et FOO\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et FOO\ncat <<'EOF'\n'\nEOF"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et FOO\necho \"$(cat <<'EOF'\n'\nEOF\n)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v g''et FOO)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\x6b\\x76' $'\\x67\\x65\\x74' FOO\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | { bash; }"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | (bash)"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | if true; then bash; fi"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv %s FOO' get | bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv %s FOO' get | env bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "env bash <<'EOF'\nk''v g''et FOO\nEOF"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "env bash <<<\"k''v g''et FOO\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | bash /dev/stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf 'kv\\x20get FOO' | bash -n +o noexec"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias unused=true k=kv\nk get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias unused=true kv=echo"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\u006b\\u0076' get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\153\\166' get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv $'get\\x00ignored' FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k\"\"v g\"\"et FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(kv get FOO)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$($'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(kv get FOO)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash <<'EOF'\nk''v g''et FOO\nEOF"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -c \"k''v g''et FOO\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\"; echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(true)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(true)\")\")\")\")\")\")\")\")\")\"; echo \"$(flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "printf '%s\\n' \"$(true)\" 'kv status' "
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv 2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv agent"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv export"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv export-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv get"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv grant"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv import-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv lock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv network-allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv network-deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv passphrase"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv provider"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv recover"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv recovery-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv setup-2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv unlock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv upgrade-security"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv vault"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv approvals approve"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv approvals deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv approvals prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy block"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv approval-mode set"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy http add"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy http remove"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv policy http rm"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv ls --reveal"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv sync init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv sync login --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv sync attach-device --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv sync revoke-device --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv sync rotate-device-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv sync create-attach-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv 2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv agent"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv export"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv export-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv get"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv grant"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv import-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv lock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv network-allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv network-deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv passphrase"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv provider"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv recover"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv recovery-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv setup-2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv unlock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv upgrade-security"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv vault"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approvals approve"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approvals deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approvals prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy block"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approval-mode set"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy http add"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy http remove"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy http rm"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv ls --reveal"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync login --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync attach-device --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync revoke-device --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync rotate-device-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync create-attach-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v 2fa; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v agent; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v allow; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v deny; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v export; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v export-key; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v get; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v grant; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v import-key; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v init; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v lock; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v network-allow; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v network-deny; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v passphrase; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v provider; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v recover; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v recovery-key; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v setup-2fa; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v unlock; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v upgrade-security; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v vault; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v approvals approve; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v approvals deny; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v approvals prune; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy allow; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy block; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy deny; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy prune; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v approval-mode set; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy http add; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy http remove; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v policy http rm; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v ls --reveal; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v sync init; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v sync login --token-stdin; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v sync attach-device --token-stdin; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v sync revoke-device --cloud; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v sync rotate-device-token --cloud; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "flock stub-lock k''v sync create-attach-token --cloud; echo kv get FOO"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv 2fa |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv agent |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv allow |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv deny |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv export |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv export-key |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv get |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv grant |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv import-key |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv init |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv lock |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv network-allow |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv network-deny |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv passphrase |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv provider |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv recover |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv recovery-key |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv setup-2fa |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv unlock |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv upgrade-security |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv vault |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approvals approve |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approvals deny |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approvals prune |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy allow |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy block |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy deny |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy prune |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv approval-mode set |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy http add |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy http remove |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv policy http rm |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv ls --reveal |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync init |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync login --token-stdin |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync attach-device --token-stdin |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync revoke-device --cloud |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync rotate-device-token --cloud |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo kv sync create-attach-token --cloud |\n bash"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv 2fa'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv agent'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv allow'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv export'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv export-key'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv get'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv grant'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv import-key'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv init'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv lock'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv network-allow'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv network-deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv passphrase'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv provider'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv recover'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv recovery-key'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv setup-2fa'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv unlock'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv upgrade-security'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv vault'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approvals approve'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approvals deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approvals prune'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy allow'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy block'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy prune'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approval-mode set'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy http add'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy http remove'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy http rm'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv ls --reveal'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync init'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync login --token-stdin'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync attach-device --token-stdin'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync revoke-device --cloud'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync rotate-device-token --cloud'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync create-attach-token --cloud'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv 2fa)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv agent)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv allow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv deny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv export)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv export-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv get)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv grant)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv import-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv init)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv lock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv network-allow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv network-deny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv passphrase)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv provider)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv recover)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv recovery-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv setup-2fa)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv unlock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv upgrade-security)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv vault)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv approvals approve)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv approvals deny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv approvals prune)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy allow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy block)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy deny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy prune)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv approval-mode set)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy http add)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy http remove)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv policy http rm)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv ls --reveal)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv sync init)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv sync login --token-stdin)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv sync attach-device --token-stdin)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv sync revoke-device --cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv sync rotate-device-token --cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(kv sync create-attach-token --cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv 2fa'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv agent'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv allow'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv export'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv export-key'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv get'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv grant'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv import-key'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv init'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv lock'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv network-allow'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv network-deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv passphrase'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv provider'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv recover'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv recovery-key'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv setup-2fa'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv unlock'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv upgrade-security'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv vault'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv approvals approve'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv approvals deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv approvals prune'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy allow'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy block'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy deny'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy prune'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv approval-mode set'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy http add'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy http remove'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv policy http rm'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv ls --reveal'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv sync init'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv sync login --token-stdin'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv sync attach-device --token-stdin'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv sync revoke-device --cloud'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv sync rotate-device-token --cloud'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "bash -n +n -c 'kv sync create-attach-token --cloud'"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' 2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' agent"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' export"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' export-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' get"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' grant"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' import-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' lock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' network-allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' network-deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' passphrase"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' provider"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' recover"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' recovery-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' setup-2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' unlock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' upgrade-security"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' vault"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' approvals approve"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' approvals deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' approvals prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy block"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' approval-mode set"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy http add"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy http remove"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' policy http rm"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' ls --reveal"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' sync init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' sync login --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' sync attach-device --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' sync revoke-device --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' sync rotate-device-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'\\553\\566' sync create-attach-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' 2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' agent"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' export"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' export-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' get"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' grant"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' import-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' lock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' network-allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' network-deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' passphrase"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' provider"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' recover"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' recovery-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' setup-2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' unlock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' upgrade-security"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' vault"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' approvals approve"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' approvals deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' approvals prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy block"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' approval-mode set"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy http add"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy http remove"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' policy http rm"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' ls --reveal"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' sync init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' sync login --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' sync attach-device --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' sync revoke-device --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' sync rotate-device-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "$'kv\\0junk' sync create-attach-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v 2''fa)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v a''gent)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v a''llow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v d''eny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v e''xport)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v e''xport-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v g''et)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v g''rant)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v i''mport-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v i''nit)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v l''ock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v n''etwork-allow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v n''etwork-deny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''assphrase)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''rovider)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v r''ecover)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v r''ecovery-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''etup-2fa)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v u''nlock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v u''pgrade-security)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v v''ault)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v a''pprovals a''pprove)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v a''pprovals d''eny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v a''pprovals p''rune)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy a''llow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy b''lock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy d''eny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy p''rune)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v a''pproval-mode s''et)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy h''ttp a''dd)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy h''ttp r''emove)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v p''olicy h''ttp r''m)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v l''s -''-reveal)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''ync i''nit)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''ync l''ogin -''-token-stdin)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''ync a''ttach-device -''-token-stdin)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''ync r''evoke-device -''-cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''ync r''otate-device-token -''-cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": ": >\"$(k''v s''ync c''reate-attach-token -''-cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v 2''fa)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v a''gent)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v a''llow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v d''eny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v e''xport)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v e''xport-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v g''et)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v g''rant)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v i''mport-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v i''nit)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v l''ock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v n''etwork-allow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v n''etwork-deny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''assphrase)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''rovider)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v r''ecover)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v r''ecovery-key)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''etup-2fa)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v u''nlock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v u''pgrade-security)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v v''ault)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v a''pprovals a''pprove)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v a''pprovals d''eny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v a''pprovals p''rune)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy a''llow)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy b''lock)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy d''eny)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy p''rune)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v a''pproval-mode s''et)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy h''ttp a''dd)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy h''ttp r''emove)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v p''olicy h''ttp r''m)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v l''s -''-reveal)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''ync i''nit)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''ync l''ogin -''-token-stdin)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''ync a''ttach-device -''-token-stdin)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''ync r''evoke-device -''-cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''ync r''otate-device-token -''-cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "true <<<\"$(k''v s''ync c''reate-attach-token -''-cloud)\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v 2''fa)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v a''gent)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v a''llow)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v d''eny)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v e''xport)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v e''xport-key)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v g''et)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v g''rant)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v i''mport-key)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v i''nit)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v l''ock)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v n''etwork-allow)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v n''etwork-deny)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''assphrase)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''rovider)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v r''ecover)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v r''ecovery-key)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''etup-2fa)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v u''nlock)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v u''pgrade-security)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v v''ault)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v a''pprovals a''pprove)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v a''pprovals d''eny)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v a''pprovals p''rune)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy a''llow)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy b''lock)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy d''eny)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy p''rune)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v a''pproval-mode s''et)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy h''ttp a''dd)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy h''ttp r''emove)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v p''olicy h''ttp r''m)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v l''s -''-reveal)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''ync i''nit)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''ync l''ogin -''-token-stdin)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''ync a''ttach-device -''-token-stdin)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''ync r''evoke-device -''-cloud)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''ync r''otate-device-token -''-cloud)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"${UNSET:-$(k''v s''ync c''reate-attach-token -''-cloud)}\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk 2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk agent"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk export"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk export-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk get"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk grant"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk import-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk lock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk network-allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk network-deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk passphrase"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk provider"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk recover"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk recovery-key"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk setup-2fa"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk unlock"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk upgrade-security"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk vault"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk approvals approve"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk approvals deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk approvals prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy allow"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy block"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy deny"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy prune"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk approval-mode set"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy http add"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy http remove"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy http rm"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk ls --reveal"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync init"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync login --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync attach-device --token-stdin"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync revoke-device --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync rotate-device-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync create-attach-token --cloud"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v 2''fa)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''gent)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''llow)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v d''eny)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v e''xport)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v e''xport-key)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v g''et)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v g''rant)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v i''mport-key)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v i''nit)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v l''ock)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v n''etwork-allow)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v n''etwork-deny)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''assphrase)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''rovider)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v r''ecover)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v r''ecovery-key)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''etup-2fa)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v u''nlock)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v u''pgrade-security)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v v''ault)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pprovals a''pprove)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pprovals d''eny)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pprovals p''rune)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy a''llow)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy b''lock)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy d''eny)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy p''rune)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pproval-mode s''et)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy h''ttp a''dd)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy h''ttp r''emove)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy h''ttp r''m)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v l''s -''-reveal)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync i''nit)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync l''ogin -''-token-stdin)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync a''ttach-device -''-token-stdin)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync r''evoke-device -''-cloud)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync r''otate-device-token -''-cloud)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync c''reate-attach-token -''-cloud)\")\")\")\")\")\")\")\")\")\""
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v 2''fa\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v a''gent\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v a''llow\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v d''eny\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v e''xport\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v e''xport-key\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''et\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v g''rant\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v i''mport-key\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v i''nit\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v l''ock\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v n''etwork-allow\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v n''etwork-deny\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''assphrase\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''rovider\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v r''ecover\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v r''ecovery-key\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''etup-2fa\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v u''nlock\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v u''pgrade-security\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v v''ault\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v a''pprovals a''pprove\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v a''pprovals d''eny\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v a''pprovals p''rune\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy a''llow\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy b''lock\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy d''eny\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy p''rune\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v a''pproval-mode s''et\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy h''ttp a''dd\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy h''ttp r''emove\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v p''olicy h''ttp r''m\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v l''s -''-reveal\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''ync i''nit\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''ync l''ogin -''-token-stdin\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''ync a''ttach-device -''-token-stdin\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''ync r''evoke-device -''-cloud\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''ync r''otate-device-token -''-cloud\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "k''v s''ync c''reate-attach-token -''-cloud\n: '"
+}
+},
+{
+"tool_name": "Bash",
+"tool_input": {
+"command": "kv get CONTROL"
+}
+}
+]
