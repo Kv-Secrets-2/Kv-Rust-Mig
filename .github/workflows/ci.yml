@@ -59,7 +59,7 @@ jobs:
           log = Path(os.environ["RUNNER_TEMP"]) / "kv-native-tests.log"
           if log.is_file():
               text = log.read_text(errors="replace")
-              tracked = subprocess.check_output(["git", "ls-files", "-z", "crates"], text=True).split("\0")
+              tracked = subprocess.check_output(["git", "ls-files", "-z", "crates"], text=True, encoding="utf-8", errors="replace").split("\0")
               public_functions = set()
               source_lines = {}
               for path in tracked:
