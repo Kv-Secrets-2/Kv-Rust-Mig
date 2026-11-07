@@ -1,0 +1,23 @@
+[package]
+name = "kv-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+kv-store = { path = "../kv-store" }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
+
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
