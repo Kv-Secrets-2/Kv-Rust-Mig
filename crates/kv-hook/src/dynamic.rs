@@ -141,7 +141,8 @@ pub fn exact_tracked(agent: &dyn Agent, path: &str) -> Option<bool> {
 
 /// The real daemon of the project at `root`, reached over its Unix socket.
 pub struct SocketAgent {
-    pub root: PathBuf,
+    /// The project root, `None` for the daemon's "default" project.
+    pub root: Option<PathBuf>,
 }
 
 #[cfg(unix)]
@@ -208,12 +209,12 @@ mod unix {
         pid: PathBuf,
     }
 
-    fn endpoints(root: &Path) -> Option<Endpoints> {
+    fn endpoints(root: Option<&Path>) -> Option<Endpoints> {
         Some(Endpoints {
             runtime: kv_proto::runtime_dir().ok()?,
-            socket: kv_proto::agent_socket_path(Some(root)).ok()?,
-            token: kv_proto::agent_token_path(Some(root)).ok()?,
-            pid: kv_proto::agent_pid_path(Some(root)).ok()?,
+            socket: kv_proto::agent_socket_path(root).ok()?,
+            token: kv_proto::agent_token_path(root).ok()?,
+            pid: kv_proto::agent_pid_path(root).ok()?,
         })
     }
 
@@ -402,7 +403,7 @@ mod unix {
 
         fn request(&self, cmd: &str, fields: &Map<String, Value>) -> Option<Value> {
             kv_proto::agent_request_with_timeout(
-                &self.root,
+                self.root.as_deref().unwrap_or(Path::new("")),
                 cmd,
                 fields,
                 Some(Duration::from_secs(30)),
@@ -411,7 +412,7 @@ mod unix {
         }
 
         fn status_check(&self) -> (bool, Arrived) {
-            let Some(points) = endpoints(&self.root) else {
+            let Some(points) = endpoints(self.root.as_deref()) else {
                 return (false, Arrived::Refused);
             };
             if socket_problem(&points) {
@@ -443,7 +444,11 @@ mod unix {
             {
                 return (false, Arrived::Reply);
             }
-            let expected = self.root.to_string_lossy();
+            let expected = self
+                .root
+                .as_deref()
+                .map(|r| r.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let same_root = expected.is_empty()
                 || reply.get("root").and_then(Value::as_str) == Some(&*expected);
             let running = reply.get("running") == Some(&Value::Bool(true));
@@ -454,7 +459,7 @@ mod unix {
         }
 
         fn service_state(&self, arrived: Arrived) -> String {
-            match endpoints(&self.root) {
+            match endpoints(self.root.as_deref()) {
                 Some(points) => service_state(&points, arrived).to_owned(),
                 None => "unknown".to_owned(),
             }

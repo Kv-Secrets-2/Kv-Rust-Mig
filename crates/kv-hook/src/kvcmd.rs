@@ -205,8 +205,10 @@ pub fn kv_protected_pattern(args: &[String], prefix: &str) -> Option<String> {
     if REVEALING_SUBCOMMANDS.contains(&sub) || ADMIN_SUBCOMMANDS.contains(&sub) {
         return Some(format!("{prefix} {sub}"));
     }
-    if sub == "sync" {
-        if let Some((action, after)) = tail.split_first() {
+    if sub == "sync"
+        && let Some((action, after)) = tail.split_first()
+    {
+        {
             let has = |flag: &str| after.iter().any(|token| token == flag);
             match action.as_str() {
                 "init" => return Some(format!("{prefix} sync init")),
@@ -308,10 +310,10 @@ fn legacy_sub_pattern(prefix: &str, tokens: &[String], sub_at: usize) -> Option<
     if REVEALING_SUBCOMMANDS.contains(&sub) {
         return Some(format!("{prefix} {sub}"));
     }
-    if sub == "sync" {
-        if let Some(found) = sync_pattern(prefix, tokens, sub_at + 1) {
-            return Some(found);
-        }
+    if sub == "sync"
+        && let Some(found) = sync_pattern(prefix, tokens, sub_at + 1)
+    {
+        return Some(found);
     }
     if ADMIN_SUBCOMMANDS.contains(&sub) {
         return Some(format!("{prefix} {sub}"));
@@ -333,17 +335,19 @@ pub fn legacy_kv_token_scan(command: &str) -> Option<String> {
         Err(_) => command.split_whitespace().map(str::to_owned).collect(),
     };
     for (i, tok) in tokens.iter().enumerate() {
-        if basename(tok) == "kv" && i + 1 < tokens.len() {
-            if let Some(found) = legacy_sub_pattern("kv", &tokens, i + 1) {
-                return Some(found);
-            }
+        if basename(tok) == "kv"
+            && i + 1 < tokens.len()
+            && let Some(found) = legacy_sub_pattern("kv", &tokens, i + 1)
+        {
+            return Some(found);
         }
         if tok == "-m" && i > 0 && i + 2 < tokens.len() {
             let prev = basename(&tokens[i - 1]);
-            if prev.starts_with("python") && tokens[i + 1] == "kv" {
-                if let Some(found) = legacy_sub_pattern("python -m kv", &tokens, i + 2) {
-                    return Some(found);
-                }
+            if prev.starts_with("python")
+                && tokens[i + 1] == "kv"
+                && let Some(found) = legacy_sub_pattern("python -m kv", &tokens, i + 2)
+            {
+                return Some(found);
             }
         }
     }
@@ -427,10 +431,10 @@ fn env_split_argv(args: &[String]) -> Option<String> {
         if let Some(value) = tok.strip_prefix("--split-string=") {
             return Some(format!("{value} {}", args[k + 1..].join(" ")));
         }
-        if let Some(value) = tok.strip_prefix("-S") {
-            if !value.is_empty() {
-                return Some(format!("{value} {}", args[k + 1..].join(" ")));
-            }
+        if let Some(value) = tok.strip_prefix("-S")
+            && !value.is_empty()
+        {
+            return Some(format!("{value} {}", args[k + 1..].join(" ")));
         }
     }
     None
@@ -445,8 +449,11 @@ fn script_body(args: &[String]) -> Option<String> {
         if let Some(value) = tok.strip_prefix("--command=") {
             return Some(value.to_owned());
         }
-        if tok.starts_with('-') && !tok.starts_with("--") {
-            if let Some(index) = tok[1..].find('c') {
+        if tok.starts_with('-')
+            && !tok.starts_with("--")
+            && let Some(index) = tok[1..].find('c')
+        {
+            {
                 let rest = &tok[1 + index + 1..];
                 return if rest.is_empty() {
                     args.get(k + 1).cloned()
@@ -666,10 +673,10 @@ pub fn definitions(text: &str) -> BTreeSet<String> {
             .map(str::to_owned),
     );
     for run in name_run_re().find_iter(text) {
-        if parens_body_re().is_match(&text[run.end()..]) {
-            if let Some(start) = name_start_re().find(run.as_str()) {
-                names.insert(run.as_str()[start.start()..].to_owned());
-            }
+        if parens_body_re().is_match(&text[run.end()..])
+            && let Some(start) = name_start_re().find(run.as_str())
+        {
+            names.insert(run.as_str()[start.start()..].to_owned());
         }
     }
     names
@@ -738,12 +745,15 @@ fn kv_fed_to_shell(commands: &[Cmd]) -> Option<String> {
     None
 }
 
+/// (reason, text) pairs for text the hook could not read.
+type Uncertain = Vec<(Option<String>, String)>;
+
 /// Python `_nested_command_lists`: (lists, uncertain (reason, text)).
 fn nested_command_lists(
     commands: Vec<Cmd>,
     extras: &shell::Extras,
     depth: usize,
-) -> (Vec<Vec<Cmd>>, Vec<(Option<String>, String)>) {
+) -> (Vec<Vec<Cmd>>, Uncertain) {
     let mut lists = vec![commands];
     let mut uncertain = Vec::new();
     for (body, _, _) in &extras.subs {
@@ -800,10 +810,10 @@ fn decoded_pieces(commands: &[Cmd]) -> Vec<String> {
 pub fn kv_reveal_pattern(command: &str) -> Option<String> {
     let text = command.replace("\\\n", "");
     let found = scan_text(&text, 0);
-    if let Some(found) = &found {
-        if !is_generic(found) {
-            return Some(found.clone());
-        }
+    if let Some(found) = &found
+        && !is_generic(found)
+    {
+        return Some(found.clone());
     }
     let general = found;
     for source in [command, text.as_str()] {

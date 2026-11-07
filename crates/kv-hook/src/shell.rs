@@ -162,12 +162,10 @@ fn find(text: &[char], c: char, from: usize) -> Option<usize> {
 }
 
 fn starts_with(text: &[char], at: usize, pat: &str) -> bool {
-    let mut i = at;
-    for p in pat.chars() {
+    for (i, p) in (at..).zip(pat.chars()) {
         if i >= text.len() || text[i] != p {
             return false;
         }
-        i += 1;
     }
     true
 }
@@ -177,12 +175,15 @@ fn is_digits(text: &str) -> bool {
     !text.is_empty() && text.chars().all(char::is_numeric)
 }
 
+/// (owner command, delimiter, strip tabs, quoted, operator start).
+type PendingHeredoc = (Rc<RefCell<Cmd>>, String, bool, bool, usize);
+
 struct Lexer<'a> {
     text: &'a [char],
     n: usize,
     commands: Vec<Rc<RefCell<Cmd>>>,
     extras: Extras,
-    pending: Vec<(Rc<RefCell<Cmd>>, String, bool, bool, usize)>,
+    pending: Vec<PendingHeredoc>,
     pipeline: usize,
     index: usize,
     cmd: Rc<RefCell<Cmd>>,

@@ -170,14 +170,12 @@ fn path_fragments(part: &str) -> Vec<&str> {
     while at < part.len() {
         let c = part[at..].chars().next().expect("char");
         let boundary = !previous.is_some_and(|p| p.is_ascii_alphanumeric() || p == '_');
-        if boundary {
-            if let Some(m) = path_fragment_re().find(&part[at..]) {
-                found.push(m.as_str());
-                let end = at + m.end();
-                previous = part[..end].chars().next_back();
-                at = end;
-                continue;
-            }
+        if boundary && let Some(m) = path_fragment_re().find(&part[at..]) {
+            found.push(m.as_str());
+            let end = at + m.end();
+            previous = part[..end].chars().next_back();
+            at = end;
+            continue;
         }
         previous = Some(c);
         at += c.len_utf8();
@@ -433,10 +431,10 @@ pub fn extract_read_targets(command: &str) -> Vec<String> {
                         j += 2;
                         continue;
                     }
-                    if let Some(value) = value {
-                        if !value.is_empty() {
-                            push_target(&mut targets, &value);
-                        }
+                    if let Some(value) = value
+                        && !value.is_empty()
+                    {
+                        push_target(&mut targets, &value);
                     }
                     j += 1;
                     continue;
