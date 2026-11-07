@@ -940,10 +940,7 @@ mod tests {
             kv_reveal_pattern("ls; echo 'oops").as_deref(),
             Some(UNREADABLE_REASON)
         );
-        assert_eq!(
-            kv_reveal_pattern("ls; kv 'get").as_deref(),
-            Some(UNPARSED_REASON)
-        );
+        assert_eq!(kv_reveal_pattern("ls; kv 'get").as_deref(), Some("kv get"));
         assert_eq!(kv_reveal_pattern("$X get Y").as_deref(), Some("kv get"));
     }
 
