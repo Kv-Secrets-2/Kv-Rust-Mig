@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 kv-mcp = { path = "../kv-mcp" }
+kv-agent = { path = "../kv-agent" }
 kv-store = { path = "../kv-store" }
 kv-crypto = { path = "../kv-crypto" }
 kv-proto = { path = "../kv-proto" }

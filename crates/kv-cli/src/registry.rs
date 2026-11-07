@@ -95,7 +95,7 @@ pub fn register_vault(root: &Path, kind: &str) -> Result<(), String> {
 }
 
 /// `json.dumps(sort_keys=True)`: every object's keys in code point order.
-fn sort_keys(value: Value) -> Value {
+pub fn sort_keys(value: Value) -> Value {
     match value {
         Value::Object(map) => {
             let mut sorted: Vec<(String, Value)> = map.into_iter().collect();

@@ -49,7 +49,7 @@ use lifecycle::{
 };
 
 #[cfg(unix)]
-const START_REFUSAL_PREFIX: &str = "Cannot start kv daemon:";
+pub const START_REFUSAL_PREFIX: &str = "Cannot start kv daemon:";
 #[cfg(unix)]
 const AGENT_VERSION: &str = "0.4.0";
 #[cfg(unix)]

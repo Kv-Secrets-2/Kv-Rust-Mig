@@ -326,6 +326,15 @@ fn verify_approved(
     Ok(())
 }
 
+/// The authority the owner approved for this vault, if any (`_open(root, key, _read(root))`).
+pub fn approved_authority(
+    root: impl AsRef<Path>,
+    master_key: &Key32,
+) -> Result<Option<Value>, AuthorityError> {
+    let root = root.as_ref();
+    open_record(root, master_key, read_authority(root)?.as_deref())
+}
+
 pub fn require_approved(
     root: impl AsRef<Path>,
     master_key: &Key32,

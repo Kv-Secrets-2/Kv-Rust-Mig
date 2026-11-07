@@ -28,6 +28,14 @@ pub enum Command {
         output: Option<String>,
     },
     Envs,
+    Unlock {
+        foreground: bool,
+        install: bool,
+    },
+    Lock,
+    Status,
+    AgentChild,
+    Vault(crate::vaultcmd::VaultAction),
     Env(crate::envcmd::EnvAction),
     History(crate::history::HistoryAction),
     Backup(crate::backup::BackupAction),
@@ -60,7 +68,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,version,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -144,6 +152,42 @@ const SPECS: &[Spec] = &[
     Spec {
         name: "envs",
         usage: "usage: kv envs [-h]\n",
+        help: "\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &[],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "unlock",
+        usage: "usage: kv unlock [-h] [--foreground] [--install]\n",
+        help: "\noptions:\n  -h, --help        show this help message and exit\n",
+        positionals: &[],
+        env: false,
+        flags: &[
+            (
+                "--foreground",
+                "  --foreground, -f  Run in foreground (show logs, block terminal)\n",
+            ),
+            (
+                "--install",
+                "  --install         Auto-start on login (Linux, systemd; not available on\n                    macOS; only for a vault without a passphrase)\n",
+            ),
+        ],
+        options: &[],
+    },
+    Spec {
+        name: "lock",
+        usage: "usage: kv lock [-h]\n",
+        help: "\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &[],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "status",
+        usage: "usage: kv status [-h]\n",
         help: "\noptions:\n  -h, --help  show this help message and exit\n",
         positionals: &[],
         env: false,
@@ -341,6 +385,12 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     if first == "backup" {
         return parse_backup(&argv[1..]);
     }
+    if first == "vault" {
+        return parse_vault(&argv[1..]);
+    }
+    if first == crate::lifecycle::AGENT_CHILD {
+        return Ok(Some(Command::AgentChild));
+    }
     let Some(spec) = SPECS.iter().find(|spec| spec.name == first.as_str()) else {
         return Err(ParseError::Unknown);
     };
@@ -395,6 +445,12 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
                 .map(|(_, value)| value),
         },
         "envs" => Command::Envs,
+        "unlock" => Command::Unlock {
+            foreground: parsed.flags.contains(&"--foreground"),
+            install: parsed.flags.contains(&"--install"),
+        },
+        "lock" => Command::Lock,
+        "status" => Command::Status,
         _ => Command::Version,
     }))
 }
@@ -763,4 +819,53 @@ fn parse_backup(rest: &[String]) -> Result<Option<Command>, ParseError> {
             dir: pos.next().unwrap_or_default(),
         },
     })))
+}
+
+const VAULT_USAGE: &str = "usage: kv vault [-h]\n                {approve-local,approve-config,restore-old-key,relocate,migrate-drawers,backup-drawers,rollback-drawers}\n                ...\n";
+
+const VAULT_HELP_TEXT: &str = "\npositional arguments:\n  {approve-local,approve-config,restore-old-key,relocate,migrate-drawers,backup-drawers,rollback-drawers}\n    approve-local       Approve a supplied vault on this machine at your\n                        terminal\n    approve-config      Review and approve config authority with your\n                        passphrase\n    restore-old-key     Put the saved old key back so kv 0.3.0 opens this\n                        vault (Linux only)\n    relocate            Bind a moved vault's key file to this folder\n    migrate-drawers     Migrate env-bundle vaults to drawer storage\n    backup-drawers      Create private migration backup before drawer migration\n    rollback-drawers    Verify or restore a drawer migration backup\n\noptions:\n  -h, --help            show this help message and exit\n";
+
+const VAULT_ACTIONS: &[&str] = &[
+    "approve-local",
+    "approve-config",
+    "restore-old-key",
+    "relocate",
+    "migrate-drawers",
+    "backup-drawers",
+    "rollback-drawers",
+];
+
+fn parse_vault(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::vaultcmd::VaultAction;
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Vault(VaultAction::None)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!("{VAULT_USAGE}{VAULT_HELP_TEXT}")));
+    }
+    if !VAULT_ACTIONS.contains(&action.as_str()) {
+        let choices = VAULT_ACTIONS
+            .iter()
+            .map(|name| format!("'{name}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ParseError::Usage(format!(
+            "{VAULT_USAGE}kv vault: error: argument vault_action: invalid choice: '{action}' (choose from {choices})\n"
+        )));
+    }
+    if action == "approve-config" {
+        if let Some(extra) = rest.get(1) {
+            if extra == "-h" || extra == "--help" {
+                return Err(ParseError::Help(
+                    "usage: kv vault approve-config [-h]\n\noptions:\n  -h, --help  show this help message and exit\n".to_owned(),
+                ));
+            }
+            return Err(ParseError::Usage(format!(
+                "{USAGE_TOP}kv: error: unrecognized arguments: {}\n",
+                rest[1..].join(" ")
+            )));
+        }
+        return Ok(Some(Command::Vault(VaultAction::ApproveConfig)));
+    }
+    Ok(Some(Command::Vault(VaultAction::Unported(action.clone()))))
 }

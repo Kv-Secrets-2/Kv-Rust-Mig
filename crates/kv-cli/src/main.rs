@@ -8,6 +8,7 @@ mod fsutil;
 mod help;
 mod history;
 mod init;
+mod lifecycle;
 mod project;
 mod registry;
 mod render;
@@ -15,6 +16,7 @@ mod reserved_env;
 mod secrets;
 mod terminal;
 mod ui;
+mod vaultcmd;
 
 use project::Exit;
 
@@ -79,5 +81,13 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Env(action) => envcmd::cmd_env(p, action),
         History(action) => history::cmd_history(p, action),
         Backup(action) => backup::cmd_backup(p, action),
+        Unlock {
+            foreground,
+            install,
+        } => lifecycle::cmd_unlock(p, foreground, install),
+        Lock => lifecycle::cmd_lock(p),
+        Status => lifecycle::cmd_status(p),
+        AgentChild => lifecycle::cmd_agent_child(p),
+        Vault(action) => vaultcmd::cmd_vault(p, action),
     }
 }

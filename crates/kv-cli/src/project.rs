@@ -158,7 +158,7 @@ fn render_location(location: &[u8]) -> String {
 }
 
 /// `_prompt_verified_passphrase(root, check_identity=True, read=_owner_getpass)`.
-fn prompt_verified_passphrase(
+pub fn prompt_verified_passphrase(
     p: &Palette,
     root: &Path,
 ) -> CmdResult<(kv_crypto::Identity, Zeroizing<String>)> {
@@ -200,6 +200,22 @@ fn prompt_verified_passphrase(
         }
     }
     Err(Exit(1))
+}
+
+/// `SecretStore(root, passphrase).master_key` with the key-file location check and no prompt.
+pub fn unlock_identity(root: &Path, passphrase: &[u8]) -> Result<kv_crypto::Identity, String> {
+    let blob =
+        std::fs::read(key_path(root)).map_err(|e| format!("cannot open the key file: {e}"))?;
+    let identity = match keyfile::unwrap_v4(&blob, passphrase) {
+        Ok(identity) => identity,
+        Err(
+            error @ (kv_crypto::CryptoError::Header(_)
+            | kv_crypto::CryptoError::UnsupportedVersion(_)),
+        ) => return Err(format!("cannot open the key file: {error}")),
+        Err(_) => return Err("wrong passphrase or damaged key file".into()),
+    };
+    identity_check(root, &identity)?;
+    Ok(identity)
 }
 
 fn read_owner_secret(p: &Palette, prompt: &str) -> CmdResult<Zeroizing<String>> {
@@ -286,6 +302,11 @@ pub fn get_store(p: &Palette) -> CmdResult<Opened> {
 }
 
 /// `_audit_secret_event`: names only, best effort.
+/// Python `str()` of a JSON value.
+pub fn py_text(value: &Value) -> String {
+    kv_store::approval_refs::py_str(value)
+}
+
 pub fn audit_secret_event(_root: &Path, event: &str, env: &str, secret: &str) {
     let mut fields = Map::new();
     fields.insert("env".into(), Value::String(env.to_owned()));
