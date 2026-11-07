@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+pub mod kvcmd;
 pub mod paths;
 pub mod reply;
 pub mod shell;
