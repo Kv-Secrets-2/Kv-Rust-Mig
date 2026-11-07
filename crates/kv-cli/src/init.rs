@@ -411,7 +411,7 @@ fn init_project(p: &Palette, root: &Path, passphrase: &str) -> CmdResult<Key32> 
 }
 
 /// `_install_recovery_key(root, master_key)`: the token and the saved wrap.
-fn install_recovery_key(
+pub fn install_recovery_key(
     p: &Palette,
     root: &Path,
     master: &Key32,

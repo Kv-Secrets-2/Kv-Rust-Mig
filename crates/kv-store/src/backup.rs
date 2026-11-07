@@ -738,7 +738,7 @@ fn environment_values(environments: &[BackupEnv]) -> Value {
     )
 }
 
-fn summary(state: &BackupState, created_at: &str, made_from: &str) -> BackupSummary {
+pub fn summary(state: &BackupState, created_at: &str, made_from: &str) -> BackupSummary {
     let mut environments = Vec::with_capacity(state.environments.len());
     let mut secret_count = 0;
     let mut version_count = 0;

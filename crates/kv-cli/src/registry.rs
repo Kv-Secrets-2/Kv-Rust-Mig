@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
-fn now() -> String {
+pub fn now_stamp() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -57,7 +57,7 @@ pub fn register_vault(root: &Path, kind: &str) -> Result<(), String> {
         Err(_) => Vec::new(),
     };
     entries.retain(|e| e.get("path").and_then(Value::as_str) != Some(real_text.as_str()));
-    let stamp = now();
+    let stamp = now_stamp();
     let name = if kind == "global" {
         "global".to_owned()
     } else {
@@ -127,4 +127,37 @@ pub fn last_backup_at(root: &Path) -> Option<String> {
         && digits(17..19)
         && b[19] == b'Z';
     ok.then(|| stamp.to_owned())
+}
+
+/// `vault_registry.record_backup(path, when)`: set `last_backup_at` for the listed vault.
+/// A missing list or an unlisted vault is not an error (nothing is written).
+pub fn record_backup(root: &Path, stamp: &str) -> Result<(), String> {
+    let folder = kv_store::vault_origin::state_dir().map_err(|e| e.to_string())?;
+    let file = folder.join("vaults.json");
+    let raw = match std::fs::symlink_metadata(&file) {
+        Ok(meta) if meta.is_file() => std::fs::read(&file).map_err(|e| e.to_string())?,
+        Ok(_) => return Err("~/.kv/vaults.json is not a plain file".into()),
+        Err(_) => return Ok(()),
+    };
+    let real = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let real_text = real.to_str().ok_or("the vault path is not text")?;
+    let mut doc: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
+    let Some(entries) = doc.get_mut("vaults").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    let mut found = false;
+    for entry in entries.iter_mut() {
+        if entry.get("path").and_then(Value::as_str) == Some(real_text)
+            && let Some(obj) = entry.as_object_mut()
+        {
+            obj.insert("last_backup_at".into(), Value::String(stamp.to_owned()));
+            found = true;
+        }
+    }
+    if !found {
+        return Ok(());
+    }
+    let payload =
+        kv_store::pyjson::to_vec_indent2_ascii(&sort_keys(doc)).map_err(|e| e.to_string())?;
+    crate::fsutil::write_private_atomic(&file, &payload).map_err(|e| e.to_string())
 }

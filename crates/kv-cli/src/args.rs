@@ -30,6 +30,7 @@ pub enum Command {
     Envs,
     Env(crate::envcmd::EnvAction),
     History(crate::history::HistoryAction),
+    Backup(crate::backup::BackupAction),
 }
 
 impl Command {
@@ -43,6 +44,7 @@ impl Command {
                 | Command::Rm { .. }
                 | Command::Export { .. }
                 | Command::History(_)
+                | Command::Backup(_)
         )
     }
 }
@@ -335,6 +337,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "history" {
         return parse_history(&argv[1..]);
+    }
+    if first == "backup" {
+        return parse_backup(&argv[1..]);
     }
     let Some(spec) = SPECS.iter().find(|spec| spec.name == first.as_str()) else {
         return Err(ParseError::Unknown);
@@ -689,5 +694,73 @@ fn parse_history(rest: &[String]) -> Result<Option<Command>, ParseError> {
             env,
         },
         _ => HistoryAction::Keep { count: pos.next() },
+    })))
+}
+
+const BACKUP_USAGE: &str = "usage: kv backup [-h] {create,show,restore} ...\n";
+
+const BACKUP_HELP_TEXT: &str = "\npositional arguments:\n  {create,show,restore}\n    create              Write an encrypted backup file of this vault\n    show                List what a backup file holds (no values)\n    restore             Make a new vault in a new folder from a backup file\n\noptions:\n  -h, --help            show this help message and exit\n";
+
+const BACKUP_SPECS: &[Spec] = &[
+    Spec {
+        name: "backup create",
+        usage: "usage: kv backup create [-h] file\n",
+        help: "\npositional arguments:\n  file        The new backup file (never overwritten)\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["file"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "backup show",
+        usage: "usage: kv backup show [-h] file\n",
+        help: "\npositional arguments:\n  file        A backup file\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["file"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "backup restore",
+        usage: "usage: kv backup restore [-h] file dir\n",
+        help: "\npositional arguments:\n  file        A backup file\n  dir         A new folder (absent or empty)\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["file", "dir"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+];
+
+fn parse_backup(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::backup::BackupAction;
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Backup(BackupAction::None)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{BACKUP_USAGE}{BACKUP_HELP_TEXT}"
+        )));
+    }
+    let Some(spec) = BACKUP_SPECS
+        .iter()
+        .find(|spec| spec.name.strip_prefix("backup ") == Some(action.as_str()))
+    else {
+        return Err(ParseError::Usage(format!(
+            "{BACKUP_USAGE}kv backup: error: argument backup_action: invalid choice: '{action}' (choose from 'create', 'show', 'restore')\n"
+        )));
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let mut pos = parsed.positionals.into_iter();
+    Ok(Some(Command::Backup(match action.as_str() {
+        "create" => BackupAction::Create {
+            file: pos.next().unwrap_or_default(),
+        },
+        "show" => BackupAction::Show {
+            file: pos.next().unwrap_or_default(),
+        },
+        _ => BackupAction::Restore {
+            file: pos.next().unwrap_or_default(),
+            dir: pos.next().unwrap_or_default(),
+        },
     })))
 }

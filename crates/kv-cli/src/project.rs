@@ -158,7 +158,10 @@ fn render_location(location: &[u8]) -> String {
 }
 
 /// `_prompt_verified_passphrase(root, check_identity=True, read=_owner_getpass)`.
-fn prompt_verified_passphrase(p: &Palette, root: &Path) -> CmdResult<kv_crypto::Identity> {
+fn prompt_verified_passphrase(
+    p: &Palette,
+    root: &Path,
+) -> CmdResult<(kv_crypto::Identity, Zeroizing<String>)> {
     let blob = std::fs::read(key_path(root))
         .map_err(|e| quiet_error(p, &format!("cannot open the key file: {e}")))?;
     let max_attempts = 3u32;
@@ -168,7 +171,7 @@ fn prompt_verified_passphrase(p: &Palette, root: &Path) -> CmdResult<kv_crypto::
             Ok(identity) => {
                 identity_check(root, &identity).map_err(|m| quiet_error(p, &m))?;
                 ui::out(&format!("  {}verified{}\n", p.green, p.reset));
-                return Ok(identity);
+                return Ok((identity, passphrase));
             }
             Err(
                 error @ (kv_crypto::CryptoError::Header(_)
@@ -213,6 +216,8 @@ pub struct Opened {
     pub root: PathBuf,
     pub vault: Vault,
     pub config: ConfigSnapshot,
+    /// `_get_store(keep_passphrase=True)`: kept for `kv backup create`.
+    pub passphrase: Zeroizing<String>,
 }
 
 /// `_get_store()`: the passphrase-protected vault opened at the terminal.
@@ -268,7 +273,7 @@ pub fn get_store(p: &Palette) -> CmdResult<Opened> {
             "two-factor unlock is not supported by this build yet; use the Python kv for this vault",
         ));
     }
-    let identity = prompt_verified_passphrase(p, &root)?;
+    let (identity, passphrase) = prompt_verified_passphrase(p, &root)?;
     let master = Key32::new(*identity.master_key.as_bytes());
     let vault = Vault::open(root.clone(), DrawerStore::open(secrets_dir(&root), master));
     ui::out(&format!("  {}unlocked{}\n", p.green, p.reset));
@@ -276,6 +281,7 @@ pub fn get_store(p: &Palette) -> CmdResult<Opened> {
         root,
         vault,
         config,
+        passphrase,
     })
 }
 

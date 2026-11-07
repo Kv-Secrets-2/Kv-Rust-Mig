@@ -48,3 +48,19 @@ pub fn mkdir_private(path: &Path) -> std::io::Result<()> {
         std::fs::create_dir(path)
     }
 }
+
+/// `os.path.abspath` on an absolute path: `.` and `..` are collapsed lexically.
+pub fn normalize(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}

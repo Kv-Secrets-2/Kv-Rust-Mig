@@ -873,6 +873,10 @@ impl Vault {
         }
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn list_environments(&self) -> Result<Vec<String>, StoreError> {
         list_environments(&self.root)
     }
