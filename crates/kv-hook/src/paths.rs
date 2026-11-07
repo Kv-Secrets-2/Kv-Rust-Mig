@@ -903,8 +903,10 @@ pub fn path_buf(path: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     pub struct TestDir(pub PathBuf);
 
+    #[cfg(unix)]
     impl TestDir {
         pub fn new(tag: &str) -> TestDir {
             let path = std::env::temp_dir().join(format!(
@@ -920,6 +922,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for TestDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
@@ -942,6 +945,7 @@ mod tests {
         assert_eq!(normpath(""), ".");
     }
 
+    #[cfg(unix)]
     #[test]
     fn resolve_keeps_missing_components_and_follows_links() {
         let dir = TestDir::new("resolve");
