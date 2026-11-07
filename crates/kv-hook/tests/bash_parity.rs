@@ -39,6 +39,15 @@ fn rust_record(text: &str) -> Value {
         "definitions": kv_hook::kvcmd::definitions(text).into_iter().collect::<Vec<_>>(),
         "key_access": kv_hook::kvcmd::has_key_access_code(text),
         "config_mutation": kv_hook::kvcmd::has_kv_config_mutation_code(text),
+        "all_paths": kv_hook::fileaccess::extract_all_paths(text),
+        "read_targets": kv_hook::fileaccess::extract_read_targets(text),
+        "stdin_targets": kv_hook::fileaccess::extract_stdin_redirection_targets(text),
+        "variable_path_read": kv_hook::fileaccess::has_variable_path_read(text),
+        "glob_to_secrets": kv_hook::fileaccess::has_glob_path_to_secrets(text),
+        "git_metadata": kv_hook::fileaccess::is_git_metadata_command(text),
+        "git_stripped": kv_hook::fileaccess::strip_git_free_text_values(text),
+        "subcommands": kv_hook::fileaccess::extract_shell_subcommands(text),
+        "path_candidates": kv_hook::fileaccess::bash_path_candidates(text),
         "lex": lex_dump(text),
     })
 }

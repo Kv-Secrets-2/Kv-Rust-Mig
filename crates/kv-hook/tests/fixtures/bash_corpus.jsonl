@@ -756,3 +756,94 @@
 {"command": "echo '\u00e9' && kv get X"}
 {"command": "echo \"\u00fcn\u00efcode\" | kv export"}
 {"command": "kv ls; echo 'kv get' | cat"}
+{"command": "cat .secr*/k?y"}
+{"command": "cat .secrets/drawer*/x"}
+{"command": "ls .secr*/k?y"}
+{"command": "cat *.txt"}
+{"command": "cat [.]secrets/key"}
+{"command": "cat .secrets/[k]ey"}
+{"command": "cat .kv-write-*.tmp"}
+{"command": "cat '.kv-write-????????????????????????????????.tmp'"}
+{"command": "cat ~/.kv/*.token"}
+{"command": "A=.secrets; cat $A/key"}
+{"command": "echo $A; cat x"}
+{"command": "git commit -F $F"}
+{"command": "git commit -m 'kv get' -F f"}
+{"command": "git log --grep=kv --pretty=x -- a b"}
+{"command": "GIT_X=1 env -u Y git -C . commit -m 'kv get'"}
+{"command": "git commit -m x; kv get"}
+{"command": "git -c a=b commit --file=.secrets/key"}
+{"command": "git tag -F .secrets/key v1"}
+{"command": "git log -L 1,2:.secrets/key"}
+{"command": "git log -L :func:.secrets/key"}
+{"command": "git log -L .secrets/key"}
+{"command": "git commit --fi=.secrets/key"}
+{"command": "git commit --template .secrets/key"}
+{"command": "git commit -t.secrets/key"}
+{"command": "git commit -- .secrets/key x"}
+{"command": "git commit -m a -F- x"}
+{"command": "env -S 'git commit' -F x"}
+{"command": "env -- git commit -F x"}
+{"command": "env FOO=1 -C /tmp git commit -F x"}
+{"command": "cat <.secrets/key"}
+{"command": "cat -n<.secrets/key"}
+{"command": "true;<.secrets/key"}
+{"command": "(cat)<.secrets/key"}
+{"command": "cat <<<x<.secrets/key"}
+{"command": "head -n 1 c"}
+{"command": "cat a, b: (c)"}
+{"command": "cat ~/x ~root/y ~nosuchuser/z"}
+{"command": "cat x/../.secrets/key"}
+{"command": "cat ./.secrets/key"}
+{"command": "cat ../.secrets/key"}
+{"command": "cat /abs/.secrets/key"}
+{"command": "echo a/b --x=~/y"}
+{"command": "echo x=/etc/passwd"}
+{"command": "echo a/etc 0/x _/y"}
+{"command": "cat $(cat .secrets/key)"}
+{"command": "cat `cat .secrets/key`"}
+{"command": "cat <(cat .secrets/key)"}
+{"command": "echo \"$(cat .secrets/key)\""}
+{"command": "echo \"<(cat x)\""}
+{"command": "echo '$(cat x)'"}
+{"command": "echo \\$(cat x)"}
+{"command": "echo $(echo $(cat .secrets/key))"}
+{"command": "echo $("}
+{"command": "echo `"}
+{"command": "echo $(a 'b)' c)"}
+{"command": "echo $(a \"b)\" c)"}
+{"command": "echo $(a \\) b)"}
+{"command": "sed -n p .secrets/key"}
+{"command": "tee .secrets/key"}
+{"command": "mv .secrets/key /tmp"}
+{"command": "cp -r .secrets /tmp"}
+{"command": "diff .secrets/key x"}
+{"command": "base64 .secrets/key"}
+{"command": "awk 1 .secrets/key"}
+{"command": "strings .secrets/drawers/x"}
+{"command": "od .secrets/dev.enc"}
+{"command": "python3 -c 'open(\".secrets/key\").read()'"}
+{"command": "python3 -c 'import base64; open(\"x\").read()'"}
+{"command": "cat .secrets/.gitignore"}
+{"command": "cat .secrets"}
+{"command": "ls .secrets"}
+{"command": "ls -la .secrets/"}
+{"command": "cat .SECRETS/key"}
+{"command": "cat .secrets\\\\key"}
+{"command": "cat .secrets/config.json"}
+{"command": "cat .secrets/run_grants.json"}
+{"command": "cat .secrets/approval_signing_key"}
+{"command": "echo .secrets/key"}
+{"command": "cat x.kvi"}
+{"command": "cat .secrets/x/index.kvi"}
+{"command": "cat ~/.kv/agent-0123456789ab.sock"}
+{"command": "cat agent.token"}
+{"command": "cat \"a b/.secrets/key\""}
+{"command": "cat 'a'\"b\"/.secrets/key"}
+{"command": "cat .secrets/key\\ x"}
+{"command": "cat 2>&1 .secrets/key"}
+{"command": "cat .secrets/key 2>&1 | head"}
+{"command": "cat x >> .secrets/key"}
+{"command": "echo x > .secrets/key"}
+{"command": "cat < .secrets/key"}
+{"command": "cat << EOF\n.secrets/key\nEOF"}

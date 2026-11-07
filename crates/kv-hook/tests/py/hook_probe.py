@@ -49,6 +49,15 @@ def main():
             "definitions": sorted(hook._definitions(text)),
             "key_access": hook._has_key_access_code(text),
             "config_mutation": hook._has_kv_config_mutation_code(text),
+            "all_paths": hook._extract_all_paths(text),
+            "read_targets": hook._extract_read_targets(text),
+            "stdin_targets": hook._extract_stdin_redirection_targets(text),
+            "variable_path_read": hook._has_variable_path_read(text),
+            "glob_to_secrets": hook._has_glob_path_to_secrets(text),
+            "git_metadata": hook._is_git_metadata_command(text),
+            "git_stripped": hook._strip_git_free_text_values(text),
+            "subcommands": hook._extract_shell_subcommands(text),
+            "path_candidates": hook._bash_path_candidates(text),
             "lex": lex_dump(text),
         }
         sys.stdout.write(json.dumps(record, ensure_ascii=True) + "\n")
