@@ -11,9 +11,20 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+pub mod paths;
 pub mod reply;
 
 pub use reply::Reply;
+
+/// A refusal raised part-way through a check (Python `_deny`, which exits).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Denied(pub String);
+
+impl From<Denied> for Reply {
+    fn from(denied: Denied) -> Reply {
+        Reply::Deny(denied.0)
+    }
+}
 
 /// Python `HOOK_SCAN_BUDGET_SECONDS`.
 pub const SCAN_BUDGET: Duration = Duration::from_secs(30);
