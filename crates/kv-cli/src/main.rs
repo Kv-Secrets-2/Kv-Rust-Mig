@@ -5,6 +5,7 @@ mod args;
 mod envcmd;
 mod fsutil;
 mod help;
+mod history;
 mod init;
 mod project;
 mod registry;
@@ -75,5 +76,6 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Export { env, output } => secrets::cmd_export(p, env.as_deref(), output.as_deref()),
         Envs => secrets::cmd_envs(p),
         Env(action) => envcmd::cmd_env(p, action),
+        History(action) => history::cmd_history(p, action),
     }
 }

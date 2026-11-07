@@ -29,6 +29,7 @@ pub enum Command {
     },
     Envs,
     Env(crate::envcmd::EnvAction),
+    History(crate::history::HistoryAction),
 }
 
 impl Command {
@@ -41,6 +42,7 @@ impl Command {
                 | Command::Ls { .. }
                 | Command::Rm { .. }
                 | Command::Export { .. }
+                | Command::History(_)
         )
     }
 }
@@ -331,6 +333,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     if first == "env" {
         return parse_env(&argv[1..]);
     }
+    if first == "history" {
+        return parse_history(&argv[1..]);
+    }
     let Some(spec) = SPECS.iter().find(|spec| spec.name == first.as_str()) else {
         return Err(ParseError::Unknown);
     };
@@ -552,5 +557,137 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
         },
         "default" => EnvAction::Default { name: pos.next() },
         _ => EnvAction::KeepDeleted { days: pos.next() },
+    })))
+}
+
+const HISTORY_USAGE: &str =
+    "usage: kv history [-h] {list,show,restore,undo-rm,replace,forget,keep} ...\n";
+
+const HISTORY_HELP_TEXT: &str = "\npositional arguments:\n  {list,show,restore,undo-rm,replace,forget,keep}\n    list                List a secret's versions (no values)\n    show                Print one old value (owner terminal only)\n    restore             Put an old value back as the current one\n    undo-rm             Bring back a removed secret\n    replace             Change a secret and wipe all its old values\n    forget              Wipe old values: one secret, --all in an environment,\n                        or --vault\n    keep                Show or set how many old values to keep (0..100)\n\noptions:\n  -h, --help            show this help message and exit\n";
+
+const KEY_HELP: &str = "\npositional arguments:\n  key                Secret key name\n\noptions:\n  -h, --help         show this help message and exit\n";
+
+const KEY_VERSION_HELP: &str = "\npositional arguments:\n  key                Secret key name\n  version            Version number from kv history list\n\noptions:\n  -h, --help         show this help message and exit\n";
+
+const HISTORY_SPECS: &[Spec] = &[
+    Spec {
+        name: "history list",
+        usage: "usage: kv history list [-h] [-e ENV] key\n",
+        help: KEY_HELP,
+        positionals: &["key"],
+        env: true,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "history show",
+        usage: "usage: kv history show [-h] [-e ENV] key version\n",
+        help: KEY_VERSION_HELP,
+        positionals: &["key", "version"],
+        env: true,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "history restore",
+        usage: "usage: kv history restore [-h] [-e ENV] key version\n",
+        help: KEY_VERSION_HELP,
+        positionals: &["key", "version"],
+        env: true,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "history undo-rm",
+        usage: "usage: kv history undo-rm [-h] [-e ENV] key\n",
+        help: KEY_HELP,
+        positionals: &["key"],
+        env: true,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "history replace",
+        usage: "usage: kv history replace [-h] [-e ENV] secret\n",
+        help: "\npositional arguments:\n  secret             KEY=VALUE or just KEY (prompts for value)\n\noptions:\n  -h, --help         show this help message and exit\n",
+        positionals: &["secret"],
+        env: true,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "history forget",
+        usage: "usage: kv history forget [-h] [--all] [--vault] [-e ENV] [key]\n",
+        // argparse lists --all/--vault before -e: their text lives here, not in `flags`.
+        help: "\npositional arguments:\n  key                Secret key name\n\noptions:\n  -h, --help         show this help message and exit\n  --all              Every secret in the environment\n  --vault            Every environment\n",
+        positionals: &["?key"],
+        env: true,
+        flags: &[("--all", ""), ("--vault", "")],
+        options: &[],
+    },
+    Spec {
+        name: "history keep",
+        usage: "usage: kv history keep [-h] [count]\n",
+        help: "\npositional arguments:\n  count       Old values to keep per secret (0 keeps none)\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["?count"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+];
+
+/// `kv history ...`: argparse's sub-subparser; no action is reported by `cmd_history`.
+fn parse_history(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::history::HistoryAction;
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::History(HistoryAction::None)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{HISTORY_USAGE}{HISTORY_HELP_TEXT}"
+        )));
+    }
+    let Some(spec) = HISTORY_SPECS
+        .iter()
+        .find(|spec| spec.name.strip_prefix("history ") == Some(action.as_str()))
+    else {
+        return Err(ParseError::Usage(format!(
+            "{HISTORY_USAGE}kv history: error: argument history_action: invalid choice: '{action}' (choose from 'list', 'show', 'restore', 'undo-rm', 'replace', 'forget', 'keep')\n"
+        )));
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let env = parsed.env;
+    let mut pos = parsed.positionals.into_iter();
+    let has = |flag: &str| parsed.flags.contains(&flag);
+    Ok(Some(Command::History(match action.as_str() {
+        "list" => HistoryAction::List {
+            key: pos.next().unwrap_or_default(),
+            env,
+        },
+        "show" => HistoryAction::Show {
+            key: pos.next().unwrap_or_default(),
+            version: pos.next().unwrap_or_default(),
+            env,
+        },
+        "restore" => HistoryAction::Restore {
+            key: pos.next().unwrap_or_default(),
+            version: pos.next().unwrap_or_default(),
+            env,
+        },
+        "undo-rm" => HistoryAction::UndoRm {
+            key: pos.next().unwrap_or_default(),
+            env,
+        },
+        "replace" => HistoryAction::Replace {
+            secret: pos.next().unwrap_or_default(),
+            env,
+        },
+        "forget" => HistoryAction::Forget {
+            key: pos.next(),
+            all: has("--all"),
+            vault: has("--vault"),
+            env,
+        },
+        _ => HistoryAction::Keep { count: pos.next() },
     })))
 }
