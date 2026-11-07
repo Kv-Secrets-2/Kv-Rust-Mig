@@ -254,6 +254,8 @@ fn restore(p: &Palette, file: &str, dir: &str) -> CmdResult {
     let vault = restore_backup(payload, &passphrase, &target)
         .map_err(|e| quiet_error(p, &e.to_string()))?;
     let root = vault.root().to_path_buf();
+    kv_store::vault_origin::record_created(&root)
+        .map_err(|e| quiet_error(p, &format!("restore failed: {e}")))?;
     let blob = std::fs::read(project::key_path(&root))
         .map_err(|e| quiet_error(p, &format!("restore failed: {e}")))?;
     let identity = keyfile::unwrap_v4(&blob, passphrase.as_bytes())
