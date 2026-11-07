@@ -322,11 +322,11 @@ pub fn kv_runtime_hides(kv_dir: &str) -> Result<Vec<String>, RunRefusal> {
     let Ok(entries) = std::fs::read_dir(&kv_dir) else {
         return emit_bwrap_option("--tmpfs", &[&kv_dir]);
     };
-    let mut names: Vec<String> = entries
+    // Directory order, as Python's `os.listdir` reads it.
+    let names: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
-    names.sort();
     let mut args = Vec::new();
     for name in names {
         let path = join(&kv_dir, &name);

@@ -22,3 +22,4 @@ rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
+tempfile = "3"
