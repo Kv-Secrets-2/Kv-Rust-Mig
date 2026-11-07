@@ -7,6 +7,7 @@ mod envcmd;
 mod fsutil;
 mod help;
 mod history;
+mod hook;
 mod init;
 mod lifecycle;
 mod project;
@@ -88,6 +89,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Lock => lifecycle::cmd_lock(p),
         Status => lifecycle::cmd_status(p),
         AgentChild => lifecycle::cmd_agent_child(p),
+        Hook { mode } => hook::cmd_hook(&mode),
         Vault(action) => vaultcmd::cmd_vault(p, action),
     }
 }

@@ -1,0 +1,17 @@
+[package]
+name = "kv-hook"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kv-store = { path = "../kv-store" }
+kv-proto = { path = "../kv-proto" }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+
+[lints]
+workspace = true
