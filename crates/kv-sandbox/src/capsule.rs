@@ -229,8 +229,13 @@ fn copy_tree(src: &str, dst: &str) -> std::io::Result<()> {
                 from.to_str().unwrap_or_default(),
                 to.to_str().unwrap_or_default(),
             )?;
-        } else {
+        } else if meta.is_file() {
             std::fs::copy(&from, &to)?;
+        } else {
+            return Err(std::io::Error::other(format!(
+                "`{}` is a special file (named pipe, socket or device)",
+                from.display()
+            )));
         }
     }
     Ok(())
@@ -341,6 +346,33 @@ mod tests {
                 .unwrap()
                 .private_cwd
                 .is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_cwd_refuses_named_pipes() {
+        let tmp = tempfile::Builder::new()
+            .prefix("kvcap")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("a.txt"), "a").unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(proj.join("pipe"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let cwd = proj.to_str().unwrap();
+        let err = prepare_run_cwd_capsule(cwd, true, true, &[]).unwrap_err();
+        assert!(err.message().contains("private cwd capsule failed"));
+        assert!(
+            !std::fs::read_dir("/tmp").unwrap().flatten().any(|e| {
+                e.file_name().to_string_lossy().starts_with("kv-run-cwd-")
+                    && e.path().join("cwd/a.txt").exists()
+            }),
+            "failed capsule must be removed"
         );
     }
 
