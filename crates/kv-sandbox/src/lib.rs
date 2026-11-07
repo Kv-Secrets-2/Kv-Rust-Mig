@@ -2,7 +2,9 @@
 //! `kv/sandbox.py`: command classification, run environment, bubblewrap
 //! wrapping, output redaction and leaked-file scanning.
 
+pub mod bwrap;
 pub mod classify;
+pub mod paths;
 pub mod redact;
 pub mod runenv;
 
