@@ -20,7 +20,7 @@ pub enum VaultAction {
 
 fn ascii_json(value: &Value) -> String {
     kv_store::pyjson::to_vec_indent2_ascii(&sort_keys(value.clone()))
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map(|bytes| String::from_utf8_lossy(&bytes).trim_end().to_owned())
         .unwrap_or_else(|_| "null".to_owned())
 }
 
