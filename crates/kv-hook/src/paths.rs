@@ -168,10 +168,7 @@ fn loop_error() -> io::Error {
 
 #[cfg(not(unix))]
 fn loop_error() -> io::Error {
-    err(
-        io::ErrorKind::FilesystemLoop,
-        "too many levels of symbolic links",
-    )
+    err(io::ErrorKind::Other, "too many levels of symbolic links")
 }
 
 // ---------------------------------------------------------------------------
