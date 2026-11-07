@@ -416,12 +416,11 @@ fn search_path(call: &ToolCall) -> Result<(String, bool), Reply> {
 fn static_glob(call: &ToolCall, secrets_dir: Option<&str>) -> Result<(), Reply> {
     let pattern = text_field(&call.tool_input, "pattern", "TypeError")?;
     let (glob_path, given) = search_path(call)?;
-    if given {
-        if let Some(secrets_dir) = secrets_dir {
-            if paths::path_is_or_inside(&glob_path, secrets_dir) {
-                return deny("[kv-secrets] blocked: glob path includes .secrets/ directory.");
-            }
-        }
+    if given
+        && let Some(secrets_dir) = secrets_dir
+        && paths::path_is_or_inside(&glob_path, secrets_dir)
+    {
+        return deny("[kv-secrets] blocked: glob path includes .secrets/ directory.");
     }
     paths::refuse_through_vault_folder(&glob_path, false)?;
     let kv_dir = paths::kv_dir();
@@ -457,10 +456,10 @@ fn static_glob(call: &ToolCall, secrets_dir: Option<&str>) -> Result<(), Reply> 
 
 fn static_grep(call: &ToolCall, secrets_dir: Option<&str>) -> Result<(), Reply> {
     let (grep_path, _) = search_path(call)?;
-    if let Some(secrets_dir) = secrets_dir {
-        if paths::path_touches(&grep_path, secrets_dir) {
-            return deny("[kv-secrets] blocked: search path includes .secrets/ directory.");
-        }
+    if let Some(secrets_dir) = secrets_dir
+        && paths::path_touches(&grep_path, secrets_dir)
+    {
+        return deny("[kv-secrets] blocked: search path includes .secrets/ directory.");
     }
     paths::refuse_through_vault_folder(&grep_path, false)?;
     if paths::path_touches(&grep_path, &paths::kv_dir()) {
