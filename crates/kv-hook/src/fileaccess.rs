@@ -1022,7 +1022,7 @@ mod tests {
             vec!["b \"$(c)\"", "d", "e"]
         );
         assert_eq!(extract_shell_subcommands("\"<(x)\""), Vec::<String>::new());
-        assert_eq!(bash_path_candidates("cat <in -n<f"), vec!["in", "f"]);
+        assert_eq!(bash_path_candidates("cat <in -n<f"), vec!["<in", "in", "f"]);
         assert_eq!(
             shlex_join(&["a b".to_owned(), "c'd".to_owned(), String::new()]),
             "'a b' 'c'\"'\"'d' ''"

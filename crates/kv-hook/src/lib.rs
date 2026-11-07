@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+pub mod dynamic;
 pub mod fileaccess;
+pub mod glob;
 pub mod kvcmd;
 pub mod paths;
 pub mod reply;
