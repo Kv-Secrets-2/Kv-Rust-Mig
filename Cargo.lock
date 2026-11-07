@@ -640,6 +640,7 @@ dependencies = [
  "kv-audit",
  "kv-broker",
  "kv-crypto",
+ "kv-hook",
  "kv-mcp",
  "kv-proto",
  "kv-store",
@@ -667,6 +668,16 @@ dependencies = [
  "subtle",
  "thiserror",
  "zeroize",
+]
+
+[[package]]
+name = "kv-hook"
+version = "0.5.0-dev"
+dependencies = [
+ "kv-proto",
+ "kv-store",
+ "kv-test-support",
+ "serde_json",
 ]
 
 [[package]]
