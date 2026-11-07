@@ -90,7 +90,10 @@ pub fn register_vault(root: &Path, kind: &str) -> Result<(), String> {
     let mut fields = Map::new();
     fields.insert("path".into(), Value::String(real_text));
     fields.insert("kind".into(), Value::String(kind.to_owned()));
+    #[cfg(unix)]
     let _ = kv_audit::Audit::new(folder).emit("vault_registered", fields);
+    #[cfg(not(unix))]
+    let _ = (folder, fields);
     Ok(())
 }
 

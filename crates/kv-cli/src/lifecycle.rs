@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value};
 use zeroize::Zeroizing;
 
-use kv_agent::{START_REFUSAL_PREFIX, TrustContext, run_agent};
+#[cfg(unix)]
+use kv_agent::START_REFUSAL_PREFIX;
+use kv_agent::{TrustContext, run_agent};
 use kv_crypto::Key32;
 use kv_store::{DrawerStore, config_authority, envname};
 

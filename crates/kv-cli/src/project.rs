@@ -316,8 +316,15 @@ pub fn audit_secret_event(_root: &Path, event: &str, env: &str, secret: &str) {
 
 /// `audit.emit(event, **fields)` into `~/.kv/audit.jsonl`; failures are ignored.
 pub fn audit_event(event: &str, fields: Map<String, Value>) {
-    let Ok(dir) = kv_proto::runtime_dir() else {
-        return;
-    };
-    let _ = kv_audit::Audit::new(dir).emit(event, fields);
+    #[cfg(unix)]
+    {
+        let Ok(dir) = kv_proto::runtime_dir() else {
+            return;
+        };
+        let _ = kv_audit::Audit::new(dir).emit(event, fields);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (event, fields);
+    }
 }
