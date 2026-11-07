@@ -144,6 +144,10 @@ fn decisions_match_python() {
         "corpus too small: {}",
         parseable.len()
     );
+    assert!(
+        rg_on_path(),
+        "hook_parity needs ripgrep (`rg`) on PATH: Python's Glob oracle refuses every Glob without it"
+    );
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut child = Command::new(&python)
         .arg("-I")
@@ -244,4 +248,11 @@ fn probe_main() {
         out.push('\n');
     }
     std::fs::write(replies, out).unwrap();
+}
+
+fn rg_on_path() -> bool {
+    let exe = if cfg!(windows) { "rg.exe" } else { "rg" };
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(exe).is_file()))
+        .unwrap_or(false)
 }
