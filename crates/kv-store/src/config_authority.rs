@@ -184,7 +184,7 @@ fn read_authority(root: &Path) -> Result<Option<Vec<u8>>, AuthorityError> {
     }
 }
 
-fn canonical_location(root: &Path) -> Result<Vec<u8>, AuthorityError> {
+pub fn canonical_location(root: &Path) -> Result<Vec<u8>, AuthorityError> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
