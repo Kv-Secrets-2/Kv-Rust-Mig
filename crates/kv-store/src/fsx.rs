@@ -7,9 +7,16 @@ use crate::StoreError;
 
 pub const VAULT_FILE_LIMIT: usize = 64 * 1024 * 1024;
 
+/// A storage lock is owned by the thread whose lock stack records it.
+///
+/// ```compile_fail
+/// fn transferable<T: Send>() {}
+/// transferable::<kv_store::fsx::StorageLock>();
+/// ```
 pub struct StorageLock {
     identity: PathBuf,
     _file: File,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 pub(crate) struct ConfigLock {
@@ -550,6 +557,7 @@ pub fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
     Ok(StorageLock {
         identity,
         _file: file,
+        _thread: std::marker::PhantomData,
     })
 }
 
