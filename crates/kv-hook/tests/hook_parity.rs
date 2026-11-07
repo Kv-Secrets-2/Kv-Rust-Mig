@@ -117,13 +117,12 @@ fn load_cases(fixture: &Fixture) -> Vec<Value> {
     .unwrap();
     cases.extend(hand.iter().map(|case| substitute(case, fixture)));
     // The RR3 corpus of kv-secrets 0.4.0 (tests/fixtures/rr3/rr3_cases.json), hook inputs only.
-    let rr3: Vec<Value> =
-        serde_json::from_str(&std::fs::read_to_string(root.join("tests/fixtures/rr3_hook_inputs.json")).unwrap())
-            .unwrap();
+    let rr3: Vec<Value> = serde_json::from_str(
+        &std::fs::read_to_string(root.join("tests/fixtures/rr3_hook_inputs.json")).unwrap(),
+    )
+    .unwrap();
     cases.extend(rr3);
     cases
-}
-
 }
 
 #[test]

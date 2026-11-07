@@ -134,18 +134,10 @@ pub fn files_matching(
                 "ripgrep did not finish within its time budget".into(),
             ));
         }
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                if error
-                    .io_error()
-                    .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
-                {
-                    continue;
-                }
-                continue;
-            }
-        };
+        // ripgrep reports a folder it could not read and exits 2; Python's
+        // oracle treats that as untrustworthy, so an incomplete walk is one too.
+        let entry =
+            entry.map_err(|error| OracleUnavailable(format!("ripgrep could not walk: {error}")))?;
         let Some(file_type) = entry.file_type() else {
             continue;
         };

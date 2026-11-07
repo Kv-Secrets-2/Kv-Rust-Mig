@@ -151,8 +151,27 @@ fn err(kind: io::ErrorKind, message: &str) -> io::Error {
     io::Error::new(kind, message.to_owned())
 }
 
-fn os_error(code: rustix::io::Errno) -> io::Error {
-    io::Error::from_raw_os_error(code.raw_os_error())
+#[cfg(unix)]
+fn not_dir_error() -> io::Error {
+    io::Error::from_raw_os_error(rustix::io::Errno::NOTDIR.raw_os_error())
+}
+
+#[cfg(not(unix))]
+fn not_dir_error() -> io::Error {
+    err(io::ErrorKind::NotADirectory, "not a directory")
+}
+
+#[cfg(unix)]
+fn loop_error() -> io::Error {
+    io::Error::from_raw_os_error(rustix::io::Errno::LOOP.raw_os_error())
+}
+
+#[cfg(not(unix))]
+fn loop_error() -> io::Error {
+    err(
+        io::ErrorKind::FilesystemLoop,
+        "too many levels of symbolic links",
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -371,14 +390,14 @@ pub fn resolve(path: &str) -> io::Result<String> {
             Ok(meta) => {
                 if !meta.file_type().is_symlink() {
                     if part_count > 0 && !meta.is_dir() {
-                        return Err(os_error(rustix::io::Errno::NOTDIR));
+                        return Err(not_dir_error());
                     }
                     current = candidate;
                     continue;
                 }
                 if let Some((_, resolution)) = seen.iter().find(|(path, _)| *path == candidate) {
                     match resolution {
-                        None => return Err(os_error(rustix::io::Errno::LOOP)),
+                        None => return Err(loop_error()),
                         Some(resolved) => {
                             current = resolved.clone();
                             continue;
