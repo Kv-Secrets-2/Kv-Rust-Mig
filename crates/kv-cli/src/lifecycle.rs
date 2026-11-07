@@ -332,6 +332,7 @@ fn start_background(p: &Palette, root: &Path, passphrase: &str) -> CmdResult {
             ui::error(p, &refusal);
         }
         ui::error(p, "failed to unlock");
+        return Err(Exit(1));
     }
     Ok(())
 }
@@ -389,7 +390,7 @@ pub fn cmd_lock(p: &Palette) -> CmdResult {
     }
     let Some(status) = agent_request(&root, "status", Map::new()) else {
         ui::error(p, "could not lock: the service did not answer");
-        return Ok(());
+        return Err(Exit(1));
     };
     let Some(pid) = status
         .get("pid")
@@ -397,7 +398,7 @@ pub fn cmd_lock(p: &Palette) -> CmdResult {
         .filter(|n| *n != 0)
     else {
         ui::error(p, "could not determine agent PID");
-        return Ok(());
+        return Err(Exit(1));
     };
     let confirmed = request_lock(&root);
     if !stop_service_by_signal(&root, pid) {
@@ -414,7 +415,7 @@ pub fn cmd_lock(p: &Palette) -> CmdResult {
             p.dim, p.reset
         ));
         ui::blank();
-        return Ok(());
+        return Err(Exit(1));
     }
     ui::blank();
     ui::success(p, "vault locked");
