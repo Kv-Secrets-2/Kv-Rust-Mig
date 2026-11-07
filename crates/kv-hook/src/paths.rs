@@ -158,7 +158,7 @@ fn not_dir_error() -> io::Error {
 
 #[cfg(not(unix))]
 fn not_dir_error() -> io::Error {
-    err(io::ErrorKind::NotADirectory, "not a directory")
+    err(io::ErrorKind::Other, "not a directory")
 }
 
 #[cfg(unix)]
