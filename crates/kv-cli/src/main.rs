@@ -10,6 +10,7 @@ mod history;
 mod hook;
 mod init;
 mod lifecycle;
+mod owner_policy;
 mod project;
 mod registry;
 mod render;
@@ -88,6 +89,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         } => lifecycle::cmd_unlock(p, foreground, install),
         Lock => lifecycle::cmd_lock(p),
         Status => lifecycle::cmd_status(p),
+        ApprovalMode(mode) => owner_policy::cmd_approval_mode(p, mode.as_deref()),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Vault(action) => vaultcmd::cmd_vault(p, action),

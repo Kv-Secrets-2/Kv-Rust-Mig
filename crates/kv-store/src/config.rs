@@ -38,6 +38,91 @@ pub struct ConfigLockGuard {
     _lock: fsx::ConfigLock,
 }
 
+pub struct AuthorizationLockGuard {
+    _lock: Option<fsx::StorageLock>,
+}
+
+pub fn authorization_lock(root: impl AsRef<Path>) -> Result<AuthorizationLockGuard, StoreError> {
+    Ok(AuthorizationLockGuard {
+        _lock: fsx::lock_authorization(&secrets_dir(root.as_ref()))?,
+    })
+}
+
+pub fn approval_mode(config: &Value) -> &str {
+    match config
+        .get("security")
+        .and_then(|s| s.get("approval_mode"))
+        .and_then(Value::as_str)
+    {
+        Some(mode @ ("local-convenience" | "protected-approval" | "unsafe-convenience")) => mode,
+        _ => "unset",
+    }
+}
+
+pub fn get_approval_mode(root: impl AsRef<Path>) -> Result<String, StoreError> {
+    let snapshot = load_config(root)?;
+    let object = |value: &Value| {
+        if value.is_object() {
+            Ok(())
+        } else {
+            let kind = match value {
+                Value::Null => "NoneType",
+                Value::Bool(_) => "bool",
+                Value::Number(n) if n.is_f64() => "float",
+                Value::Number(_) => "int",
+                Value::String(_) => "str",
+                Value::Array(_) => "list",
+                Value::Object(_) => unreachable!(),
+            };
+            Err(StoreError::ConfigConflict(format!(
+                "'{kind}' object has no attribute 'get'"
+            )))
+        }
+    };
+    object(&snapshot.value)?;
+    if let Some(security) = snapshot.value.get("security") {
+        object(security)?;
+        if let Some(mode @ (Value::Array(_) | Value::Object(_))) = security.get("approval_mode") {
+            let kind = if mode.is_array() { "list" } else { "dict" };
+            return Err(StoreError::ConfigConflict(format!(
+                "unhashable type: '{kind}'"
+            )));
+        }
+    }
+    Ok(approval_mode(&snapshot.value).to_owned())
+}
+
+pub fn set_approval_mode(root: impl AsRef<Path>, mode: &str) -> Result<bool, StoreError> {
+    if ![
+        "local-convenience",
+        "protected-approval",
+        "unsafe-convenience",
+    ]
+    .contains(&mode)
+    {
+        return Err(StoreError::ConfigConflict(format!(
+            "invalid approval mode: {mode}"
+        )));
+    }
+    let root = root.as_ref();
+    let _authorization = authorization_lock(root)?;
+    config_transaction(root, |config| {
+        let security = config
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("config must be an object".into()))?
+            .entry("security")
+            .or_insert_with(|| json!({}));
+        let security = security
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("security must be an object".into()))?;
+        if security.get("approval_mode").and_then(Value::as_str) == Some(mode) {
+            return Ok(false);
+        }
+        security.insert("approval_mode".into(), Value::String(mode.into()));
+        Ok(true)
+    })
+}
+
 fn secrets_dir(root: &Path) -> PathBuf {
     root.join(".secrets")
 }

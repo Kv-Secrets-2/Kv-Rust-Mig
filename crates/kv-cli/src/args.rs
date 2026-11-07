@@ -34,6 +34,7 @@ pub enum Command {
     },
     Lock,
     Status,
+    ApprovalMode(Option<String>),
     AgentChild,
     Hook {
         mode: String,
@@ -71,7 +72,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,version,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -382,6 +383,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     if first == "env" {
         return parse_env(&argv[1..]);
     }
+    if first == "approval-mode" {
+        return parse_approval_mode(&argv[1..]);
+    }
     if first == "history" {
         return parse_history(&argv[1..]);
     }
@@ -630,6 +634,64 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
 
 const HISTORY_USAGE: &str =
     "usage: kv history [-h] {list,show,restore,undo-rm,replace,forget,keep} ...\n";
+
+const APPROVAL_MODE_USAGE: &str = "usage: kv approval-mode [-h] {status,set} ...\n";
+const APPROVAL_MODE_SET_SPEC: Spec = Spec {
+    name: "approval-mode set",
+    usage: "usage: kv approval-mode set [-h]\n                            {local-convenience,protected-approval,unsafe-convenience}\n",
+    help: "\npositional arguments:\n  {local-convenience,protected-approval,unsafe-convenience}\n                        Approval mode for this project\n\noptions:\n  -h, --help            show this help message and exit\n",
+    positionals: &["mode"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const APPROVAL_MODE_STATUS_SPEC: Spec = Spec {
+    name: "approval-mode status",
+    usage: "usage: kv approval-mode status [-h]\n",
+    help: "\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &[],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+
+fn parse_approval_mode(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::ApprovalMode(None)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{APPROVAL_MODE_USAGE}\npositional arguments:\n  {{status,set}}\n    status      Show approval security mode\n    set         Set approval security mode\n\noptions:\n  -h, --help    show this help message and exit\n"
+        )));
+    }
+    let spec = match action.as_str() {
+        "set" => &APPROVAL_MODE_SET_SPEC,
+        "status" => &APPROVAL_MODE_STATUS_SPEC,
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{APPROVAL_MODE_USAGE}kv approval-mode: error: argument approval_mode_action: invalid choice: '{action}' (choose from 'status', 'set')\n"
+            )));
+        }
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let mode = parsed.positionals.into_iter().next();
+    if let Some(mode) = mode.as_deref()
+        && ![
+            "local-convenience",
+            "protected-approval",
+            "unsafe-convenience",
+        ]
+        .contains(&mode)
+    {
+        return Err(spec_error(
+            spec,
+            &format!(
+                "argument mode: invalid choice: '{mode}' (choose from 'local-convenience', 'protected-approval', 'unsafe-convenience')"
+            ),
+        ));
+    }
+    Ok(Some(Command::ApprovalMode(mode)))
+}
 
 const HISTORY_HELP_TEXT: &str = "\npositional arguments:\n  {list,show,restore,undo-rm,replace,forget,keep}\n    list                List a secret's versions (no values)\n    show                Print one old value (owner terminal only)\n    restore             Put an old value back as the current one\n    undo-rm             Bring back a removed secret\n    replace             Change a secret and wipe all its old values\n    forget              Wipe old values: one secret, --all in an environment,\n                        or --vault\n    keep                Show or set how many old values to keep (0..100)\n\noptions:\n  -h, --help            show this help message and exit\n";
 
