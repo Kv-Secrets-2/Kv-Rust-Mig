@@ -13,6 +13,7 @@ use serde_json::{Map, Value, json};
 
 pub mod paths;
 pub mod reply;
+pub mod shell;
 
 pub use reply::Reply;
 
