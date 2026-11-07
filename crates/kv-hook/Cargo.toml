@@ -10,6 +10,8 @@ kv-store = { path = "../kv-store" }
 kv-proto = { path = "../kv-proto" }
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
+ignore = "0.4"
+globset = "0.4"
 unicode-normalization = "0.1"
 caseless = "0.2"
 
