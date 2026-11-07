@@ -3,3 +3,4 @@
 //! brokered capability, and the short-lived tokens minted at admission.
 
 pub mod normalize;
+pub mod store;

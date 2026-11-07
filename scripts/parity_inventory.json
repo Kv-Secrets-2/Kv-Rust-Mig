@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 78,
+  "minimum_comparisons": 79,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -76,6 +76,9 @@
     "kv-mcp/stage7_mcp": ["transcripts_match_python_with_and_without_the_daemon", "key_kinds_and_fatal_frames_match_python"],
     "kv-grants/normalize_parity": [
       "normalization_matches_python"
+    ],
+    "kv-grants/store_parity": [
+      "stores_match_python"
     ],
     "kv-hook/bash_parity": ["bash_text_analysis_matches_python"],
     "kv-hook/hook_parity": ["decisions_match_python"],
