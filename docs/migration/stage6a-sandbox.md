@@ -10,7 +10,7 @@ command and `kv run`) and 6d (`cap_api`, paused jobs, POST wallets) build on it.
 | Module | Python source | What it covers |
 |---|---|---|
 | `classify` | `classify_command`, `_ALLOWLIST`, exfiltration patterns | work / brokered_act / guarded_env / unsafe_env / reveal modes, allowlist and refusal text |
-| `redact` | `build_secret_variants`, `redact` | secret variants (URL, base64, hex, JSON, shell escapes) and output redaction |
+| `redact` | `build_secret_variants`, `redact` | secret variants (the raw value, standard and URL-safe base64 with and without padding and in 76-column lines, hex, percent-encoding with upper- and lower-case escapes, the reversed value) and output redaction |
 | `runenv` | `build_run_env`, `_check_run_env_pairs`, `decode_args_bytes` | sensitive inherited names, reserved names, the run environment, `--setenv` byte framing |
 | `sealed` | `SealedArgsFd`, `_sealed_args_fd`, `read_args_fd` | the memfd that carries secrets to bubblewrap, sealed against growth, shrinking, writes and more seals |
 | `bwrap` | `wrap_argv`, `_emit_bwrap_option`, `launch_facts`, `_effective_launch_argv`, isolation probe | trusted bubblewrap discovery, fail-closed option table, the wrapper argv, private tmp rules, launch facts |
