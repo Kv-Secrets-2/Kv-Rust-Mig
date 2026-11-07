@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 76,
+  "minimum_comparisons": 77,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -59,6 +59,9 @@
     ],
     "kv-approvals/risk_card_parity": [
       "risk_cards_match_python"
+    ],
+    "kv-approvals/verify_parity": [
+      "verifier_core_matches_python"
     ],
     "kv-broker/kv_broker": ["caller::tests::url_safety_matches_python_for_ip_literals_and_localhost"],
     "kv-broker/python_parity": [
