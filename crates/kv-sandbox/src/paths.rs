@@ -53,6 +53,49 @@ pub fn real_or_lexical(path: &str) -> String {
         .unwrap_or_else(|_| normpath(path))
 }
 
+pub const SECRETS_FOLDER: &str = ".secrets";
+
+/// Python `structure._names_secrets`: a component spelled `.secrets`.
+pub fn names_secrets(name: &str) -> bool {
+    name.split('/').any(|part| part == SECRETS_FOLDER)
+}
+
+/// Python `trust.VaultWatcher.holds_secret_entry` for one vault root: the
+/// path is the vault's `.secrets` or anything below it, lexically.
+pub fn holds_secret_entry(vault_root: &str, path: &str) -> bool {
+    let Ok(entry) = abspath(path) else {
+        return true;
+    };
+    let vault = normpath(&format!(
+        "{}/{SECRETS_FOLDER}",
+        vault_root.trim_end_matches('/')
+    ));
+    entry == vault || entry.starts_with(&format!("{vault}/"))
+}
+
+/// Python `structure.inside_secrets_as_written`: no I/O.
+pub fn inside_secrets_as_written(path: &str, watched_vaults: &[String]) -> bool {
+    watched_vaults
+        .iter()
+        .any(|root| holds_secret_entry(root, path))
+        || names_secrets(path)
+}
+
+/// Python `structure.inside_secrets`: lexically, then after resolving links;
+/// a path that cannot be resolved counts as inside.
+pub fn inside_secrets(path: &str, watched_vaults: &[String]) -> bool {
+    if inside_secrets_as_written(path, watched_vaults) {
+        return true;
+    }
+    let Ok(resolved) = resolve(path) else {
+        return true;
+    };
+    watched_vaults
+        .iter()
+        .any(|root| holds_secret_entry(root, &resolved))
+        || names_secrets(&resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

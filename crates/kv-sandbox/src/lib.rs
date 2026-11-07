@@ -4,6 +4,7 @@
 
 pub mod bwrap;
 pub mod classify;
+pub mod identity;
 pub mod paths;
 pub mod redact;
 pub mod runenv;
