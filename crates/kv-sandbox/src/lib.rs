@@ -8,6 +8,7 @@ pub mod identity;
 pub mod paths;
 pub mod redact;
 pub mod runenv;
+pub mod scan;
 
 pub use classify::{
     CommandDecision, MODE_BROKERED_ACT, MODE_GUARDED_ENV, MODE_REVEAL, MODE_UNSAFE_ENV, MODE_WORK,

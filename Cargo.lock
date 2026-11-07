@@ -816,6 +816,7 @@ version = "0.5.0-dev"
 dependencies = [
  "base64",
  "hex",
+ "hmac",
  "kv-hook",
  "kv-store",
  "kv-test-support",
