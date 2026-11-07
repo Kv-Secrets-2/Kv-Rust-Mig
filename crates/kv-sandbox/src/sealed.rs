@@ -32,7 +32,7 @@ impl SealedArgsFd {
         )
         .map_err(|_| RunEnvError::SealedArgsUnavailable)?;
         let st = fstat(&fd).map_err(|e| RunEnvError::ArgsDescriptorWrite(e.to_string()))?;
-        let identity = (u64::from(st.st_dev), u64::from(st.st_ino));
+        let identity = (st.st_dev, st.st_ino);
         let data = encode_args_bytes(args);
         let mut file = std::fs::File::from(fd);
         file.write_all(&data)
@@ -66,14 +66,12 @@ impl SealedArgsFd {
         self.fd
             .as_ref()
             .and_then(|fd| rustix::fs::fstat(fd).ok())
-            .is_some_and(|st| (u64::from(st.st_dev), u64::from(st.st_ino)) == self.identity)
+            .is_some_and(|st| (st.st_dev, st.st_ino) == self.identity)
     }
 
     pub fn close(&mut self) {
         if let Some(fd) = self.fd.take() {
-            if rustix::fs::fstat(&fd)
-                .is_ok_and(|st| (u64::from(st.st_dev), u64::from(st.st_ino)) == self.identity)
-            {
+            if rustix::fs::fstat(&fd).is_ok_and(|st| (st.st_dev, st.st_ino) == self.identity) {
                 drop(fd);
             } else {
                 std::mem::forget(fd);
