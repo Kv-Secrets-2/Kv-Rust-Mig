@@ -35,7 +35,7 @@ fn scanners_match_python() {
     bin.extend_from_slice(secret.as_bytes());
     bin.extend_from_slice(&[0xc3, 0x28]);
     std::fs::write(root.join("bin.dat"), bin).unwrap();
-    std::fs::write(root.join("sub/deep/d.txt"), format!("{secret}")).unwrap();
+    std::fs::write(root.join("sub/deep/d.txt"), secret).unwrap();
     std::fs::write(root.join(".secrets/leak.txt"), secret).unwrap();
     std::fs::write(root.join("excl/x.txt"), secret).unwrap();
     std::fs::write(
