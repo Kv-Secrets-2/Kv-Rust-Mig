@@ -31,6 +31,7 @@ registered in `scripts/parity_inventory.json`.
 | `redaction_matches_python` | generated secret values and encodings | variant sets and redacted text |
 | `run_env_rules_match_python` | inherited environments, reserved and sensitive names, NUL and `=` cases | kept names, refusals, `--setenv` bytes |
 | `wrapper_matches_python` | 1,922 host/run combinations (bwrap, unshare, none; six environments; five overlay sets; sixteen option sets) | wrapped argv, refusal text, launch facts |
+| `identity_matches_python` | one layout: scripts, a package `__main__`, links, a dangling link, an empty file, a 3 MiB file, `.secrets`; 29 argvs, 11 module names, 4 scopes | file hashes, script paths, module paths, script identity, run identity and fingerprint |
 | `scanners_match_python` | one layout: fresh and old files, nested folders, `.secrets`, folder and file links, invalid UTF-8, encoded secrets, exclusions | snapshots, changed and new files, leaked files, specific-file scan, leak report |
 
 The wrapper comparison found one real difference during development: Rust

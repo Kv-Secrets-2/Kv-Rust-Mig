@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 74,
+  "minimum_comparisons": 75,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -72,6 +72,7 @@
     "kv-hook/hook_parity": ["decisions_match_python"],
     "kv-proto/kv_proto": ["unix_transport::tests::reply_modes_match_live_python_reference"],
     "kv-sandbox/classify_parity": ["classify_decisions_match_python"],
+    "kv-sandbox/identity_parity": ["identity_matches_python"],
     "kv-sandbox/redact_parity": ["redaction_matches_python"],
     "kv-sandbox/runenv_parity": ["run_env_rules_match_python"],
     "kv-sandbox/scan_parity": ["scanners_match_python"],
