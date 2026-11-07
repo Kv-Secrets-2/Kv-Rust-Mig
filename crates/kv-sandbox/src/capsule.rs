@@ -321,6 +321,7 @@ mod tests {
         assert!(!private_cwd_requested(Some(false), Some("1")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn private_cwd_copy_and_escape() {
         let tmp = tempfile::Builder::new()

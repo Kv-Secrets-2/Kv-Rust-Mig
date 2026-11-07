@@ -4,7 +4,9 @@
 //! Linux only: `memfd_create` plus `F_ADD_SEALS`. Anywhere else, or when
 //! the kernel refuses, the run fails closed with `SealedArgsUnavailable`.
 
-use crate::runenv::{RunEnvError, encode_args_bytes};
+use crate::runenv::RunEnvError;
+#[cfg(target_os = "linux")]
+use crate::runenv::encode_args_bytes;
 
 /// An owned memfd whose contents can no longer change. Closing checks the
 /// descriptor still names the file kv made, so a number reused by someone
@@ -97,6 +99,7 @@ impl SealedArgsFd {
         None
     }
 
+    #[cfg(unix)]
     pub fn take(&mut self) -> Option<std::os::fd::OwnedFd> {
         None
     }

@@ -1,4 +1,5 @@
 //! Live comparison of run identity against Python 0.4.0 (`kv.sandbox`).
+#![cfg(unix)]
 
 use std::io::Write;
 use std::path::Path;

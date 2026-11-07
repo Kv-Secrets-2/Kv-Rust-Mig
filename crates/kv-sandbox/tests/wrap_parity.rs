@@ -1,5 +1,6 @@
 //! Differential check: the bubblewrap command line, its refusals and
 //! `launch_facts` against Python 0.4.0 over a generated host layout.
+#![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::io::Write;

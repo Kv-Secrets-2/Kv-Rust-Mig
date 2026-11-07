@@ -1,6 +1,7 @@
 //! Differential check of the leak scanners against Python 0.4.0 on one
 //! generated layout (fresh and old files, nested folders, a `.secrets`
 //! subtree, a folder link, invalid UTF-8, encoded secrets, exclusions).
+#![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::io::Write;
