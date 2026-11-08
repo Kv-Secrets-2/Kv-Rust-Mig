@@ -21,6 +21,7 @@ kv-crypto = { path = "../kv-crypto" }
 kv-proto = { path = "../kv-proto" }
 hex = "0.4"
 sha2 = "0.10"
+time = "0.3"
 kv-approvals = { path = "../kv-approvals" }
 kv-broker = { path = "../kv-broker" }
 kv-audit = { path = "../kv-audit" }

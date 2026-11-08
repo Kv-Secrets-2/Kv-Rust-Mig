@@ -113,11 +113,17 @@ fn approve(p: &Palette, request_id: &str, run_grant_flags: bool) -> CmdResult {
         let status = match ctx.register_permit(&permit) {
             Ok(status) => status,
             Err(SigningError::Unconfirmed(reason)) => {
-                ui::error(p, &format!("no permit confirmed: {reason}"));
-                ui::info(&format!(
-                    "{}the service may still hold this permit; check with kv approvals list{}",
-                    p.dim, p.reset
-                ));
+                // An answer was lost: the service may hold the permit.
+                event = "call_permit_outcome_unknown";
+                let until = permit["payload"]["expires_at_epoch"].as_i64().unwrap_or(0);
+                ui::error(
+                    p,
+                    &format!(
+                        "{} Last answer: {}",
+                        outcome_unknown_text(until),
+                        crate::render::escape(&reason)
+                    ),
+                );
                 return Err(project::Exit(1));
             }
             Err(error) => return Err(signing_failure(p, error)),
@@ -136,6 +142,27 @@ fn approve(p: &Palette, request_id: &str, run_grant_flags: bool) -> CmdResult {
     })();
     project::audit_event(event, audit_fields);
     outcome
+}
+
+/// Python `_permit_outcome_unknown_text` (the time is shown in UTC here; Python shows the
+/// local zone).
+fn outcome_unknown_text(expires_at_epoch: i64) -> String {
+    let until = time::OffsetDateTime::from_unix_timestamp(expires_at_epoch)
+        .map(|t| {
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+                t.year(),
+                u8::from(t.month()),
+                t.day(),
+                t.hour(),
+                t.minute(),
+                t.second()
+            )
+        })
+        .unwrap_or_else(|_| "an unknown time".to_owned());
+    format!(
+        "outcome unknown: this permit may be live until {until} (it can run its one call once). kv lock ends it for any call not yet made; a call already under way is not stopped. Check that kv lock says \"vault locked\"."
+    )
 }
 
 fn signing_failure(p: &Palette, error: SigningError) -> project::Exit {
