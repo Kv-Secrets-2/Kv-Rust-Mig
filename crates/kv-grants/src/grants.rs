@@ -251,7 +251,7 @@ pub(crate) fn create_run_grant_locked(
             Some(&secret_names),
             Some(&capability_names),
             max_calls_value.as_ref(),
-            "",
+            "risk_card_not_provided",
         ),
         Some(card) => bind_risk_card_to_grant(
             &normalize_risk_card(Some(card)),
