@@ -3,7 +3,7 @@
 //! `_find_private_cwd_symlink_escape`, `private_cwd_requested`,
 //! `checked_run_cwd`, `prepare_run_cwd_capsule`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 
 use sha2::{Digest, Sha256};
@@ -397,4 +397,156 @@ mod tests {
                 .is_none()
         );
     }
+}
+
+/// Python `PrivateCwdCopyResult`: what a private cwd's copy-back did.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PrivateCwdCopyResult {
+    pub copied: Vec<String>,
+    /// `(path, reason)`: `secret`, `vault`, `unresolvable`, `path_escape`.
+    pub blocked: Vec<(String, String)>,
+    pub conflicts: Vec<String>,
+}
+
+impl RunCwdCapsule {
+    /// Python `RunCwdCapsule.enabled`.
+    pub fn enabled(&self) -> bool {
+        self.capsule_dir.is_some() && !self.original_cwd.is_empty() && self.private_cwd.is_some()
+    }
+
+    /// Python `bind_source`: what bubblewrap binds at the cwd.
+    pub fn bind_source(&self) -> &str {
+        self.effective_cwd()
+    }
+
+    /// Python `scan_root`: where changed files are looked for.
+    pub fn scan_root(&self) -> &str {
+        self.effective_cwd()
+    }
+
+    fn relative_in_private(&self, resolved: &str) -> Option<String> {
+        let private = self.private_cwd.as_deref()?;
+        let rel = resolved.strip_prefix(private)?;
+        let rel = rel.strip_prefix('/')?;
+        if rel.is_empty() || rel == "." || rel.starts_with("../") || rel.starts_with('/') {
+            return None;
+        }
+        Some(rel.to_owned())
+    }
+
+    /// Python `original_path_for`.
+    pub fn original_path_for(&self, private_path: &str) -> String {
+        let resolved = crate::paths::real_or_lexical(private_path);
+        if !self.enabled() {
+            return resolved;
+        }
+        match self.relative_in_private(&resolved) {
+            Some(rel) => crate::paths::real_or_lexical(&format!("{}/{rel}", self.original_cwd)),
+            None => resolved,
+        }
+    }
+
+    /// Python `copy_back`: changed private files go back to the real project
+    /// only after leak scanning; deletions are never propagated.
+    pub fn copy_back(
+        &self,
+        changed_files: &BTreeSet<String>,
+        leaked_files: &[String],
+    ) -> PrivateCwdCopyResult {
+        let mut result = PrivateCwdCopyResult::default();
+        if !self.enabled() {
+            return result;
+        }
+        let leaked_real: BTreeSet<String> = leaked_files
+            .iter()
+            .map(|path| crate::paths::real_or_lexical(path))
+            .collect();
+        let mut changed: Vec<String> = changed_files
+            .iter()
+            .map(|path| crate::paths::real_or_lexical(path))
+            .collect();
+        changed.sort();
+        for private_path in changed {
+            if leaked_real.contains(&private_path) {
+                result
+                    .blocked
+                    .push((self.original_path_for(&private_path), "secret".into()));
+                continue;
+            }
+            let Some(rel) = self.relative_in_private(&private_path) else {
+                result.conflicts.push(private_path);
+                continue;
+            };
+            if rel.split('/').next() == Some(".secrets") {
+                result
+                    .blocked
+                    .push((self.original_path_for(&private_path), "vault".into()));
+                continue;
+            }
+            let candidate = crate::paths::normpath(&format!("{}/{rel}", self.original_cwd));
+            let Ok(destination) = resolve(&candidate) else {
+                result.blocked.push((candidate, "unresolvable".into()));
+                continue;
+            };
+            if !path_is_or_under(&destination, &self.original_cwd, false) {
+                result.blocked.push((candidate, "path_escape".into()));
+                continue;
+            }
+            let before = self.original_snapshot.get(&destination);
+            let current = crate::scan::file_fingerprint(&destination);
+            if before != current.as_ref() {
+                result.conflicts.push(destination);
+                continue;
+            }
+            match copy_private_file(&private_path, &destination) {
+                Ok(()) => result.copied.push(destination),
+                Err(_) => result.conflicts.push(destination),
+            }
+        }
+        result
+    }
+
+    /// Python `cleanup`: remove the private copy.
+    pub fn cleanup(&mut self) {
+        if let Some(dir) = self.capsule_dir.take() {
+            let _ = dir.close();
+        }
+        self.private_cwd = None;
+    }
+}
+
+impl RunArtifactCapsule {
+    /// Python `cleanup`.
+    pub fn cleanup(&mut self) {
+        if let Some(dir) = self.capsule_dir.take() {
+            let _ = dir.close();
+        }
+    }
+}
+
+/// Python `shutil.copy2(src, dst, follow_symlinks=False)` for the copy-back:
+/// a link is recreated as a link, a file is copied with its mode and times.
+fn copy_private_file(source: &str, destination: &str) -> std::io::Result<()> {
+    use std::path::Path;
+    if let Some(parent) = Path::new(destination).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let meta = std::fs::symlink_metadata(source)?;
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(source)?;
+        let _ = std::fs::remove_file(destination);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, destination)?;
+        #[cfg(not(unix))]
+        return Err(std::io::Error::other("symlinks are not copied back here"));
+        #[cfg(unix)]
+        return Ok(());
+    }
+    std::fs::copy(source, destination)?;
+    let copied = std::fs::OpenOptions::new().write(true).open(destination)?;
+    copied.set_permissions(meta.permissions())?;
+    if let Ok(modified) = meta.modified() {
+        let _ = copied.set_modified(modified);
+    }
+    Ok(())
 }
