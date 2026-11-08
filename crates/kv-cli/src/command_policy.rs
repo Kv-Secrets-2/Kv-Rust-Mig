@@ -2,7 +2,9 @@ use crate::project::CmdResult;
 use crate::ui::Palette;
 use crate::{owner_policy as owner, project, render, ui};
 use kv_store::{config, policy_requests as store};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(unix)]
+use serde_json::json;
 use std::path::{Path, PathBuf};
 
 pub enum CommandPolicyAction {
@@ -206,6 +208,7 @@ fn target(p: &Palette, root: &Path, request: &Value) -> CmdResult<PathBuf> {
         }
     }
 }
+#[cfg(unix)]
 fn audit(event: &str, r: &Value) {
     let mut fields = kv_audit::requester_fields(r.get("actor"), r.get("reason"));
     fields.insert("attribution".into(), json!("unverified"));
@@ -219,6 +222,9 @@ fn audit(event: &str, r: &Value) {
     );
     project::audit_event(event, fields);
 }
+#[cfg(not(unix))]
+fn audit(_event: &str, _r: &Value) {}
+
 pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
     let root = project::require_project(p)?;
     let convert = |e: kv_store::StoreError| project::fail(p, &render::escape(&e.to_string()));
