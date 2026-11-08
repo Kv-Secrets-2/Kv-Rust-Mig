@@ -2,9 +2,10 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 76,
+  "minimum_comparisons": 77,
   "targets": {
     "kv-requests/approval_requests_parity": ["approval_requests_match_python"],
+    "kv-requests/policy_requests_parity": ["policy_requests_match_python"],
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
       "agent_status_and_commands_match_in_both_directions",
