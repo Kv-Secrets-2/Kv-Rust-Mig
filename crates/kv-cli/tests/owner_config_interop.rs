@@ -204,6 +204,8 @@ fn owner_config_top_level_help_matches_python() {
     let scratch = Scratch::new("owner-help");
     let implemented = [
         "init",
+        "run",
+        "preflight",
         "set",
         "get",
         "ls",
