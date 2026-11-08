@@ -1,6 +1,7 @@
 //! `build_parser()` for the commands this build carries, with argparse's messages.
 
 pub enum Command {
+    Preflight(crate::preflight::Args),
     Version,
     Init {
         location: Option<String>,
@@ -86,6 +87,15 @@ struct Spec {
 const ENV_HELP: &str = "  -e ENV, --env ENV  Environment (default: the project's default)\n";
 
 const SPECS: &[Spec] = &[
+    Spec {
+        name: "preflight",
+        usage: "usage: kv preflight [-h] [--cwd CWD] [--json] [--request]\n                    [--request-ttl REQUEST_TTL] [--env ENV] [--source SOURCE]\n                    [--client CLIENT] [--session-id SESSION_ID]\n                    [--reason REASON]\n                    ...\n",
+        help: "\npositional arguments:\n  cmd                   Command to inspect\n\noptions:\n  -h, --help            show this help message and exit\n  --cwd CWD             Working directory for the command (default: current\n                        directory)\n  --json                Emit machine-readable JSON\n  --request             Create pending approval request(s) for brokered\n                        recommendations\n  --request-ttl REQUEST_TTL\n                        Pending request lifetime in seconds (default: 900)\n  --env ENV             Environment the requested run uses (default: the\n                        project's default)\n  --source SOURCE       Optional requester source to bind, such as mcp\n  --client CLIENT       Optional client name to bind, such as codex\n  --session-id SESSION_ID\n                        Optional agent/session ID to bind\n  --reason REASON       Human note stored with created approval requests\n",
+        positionals: &[],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
     Spec {
         name: "init",
         usage: "usage: kv init [-h] [--location {global,project,custom}] [--path PATH]\n",
@@ -401,6 +411,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     let Some(spec) = SPECS.iter().find(|spec| spec.name == first.as_str()) else {
         return Err(ParseError::Unknown);
     };
+    if spec.name == "preflight" {
+        return parse_preflight(spec, &argv[1..]);
+    }
     let parsed = parse_spec(spec, &argv[1..])?;
     let mut positionals = parsed.positionals.into_iter();
     let option = |name: &str| {
@@ -460,6 +473,149 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
         "status" => Command::Status,
         _ => Command::Version,
     }))
+}
+
+fn parse_preflight(spec: &Spec, rest: &[String]) -> Result<Option<Command>, ParseError> {
+    const NAMES: &[&str] = &[
+        "--help",
+        "--cwd",
+        "--json",
+        "--request",
+        "--request-ttl",
+        "--env",
+        "--source",
+        "--client",
+        "--session-id",
+        "--reason",
+    ];
+    let mut args = crate::preflight::Args::default();
+    let mut unknown = Vec::new();
+    let mut i = 0;
+    while let Some(arg) = rest.get(i) {
+        if arg == "--" || !arg.starts_with('-') || arg == "-" || negative_number(arg) {
+            args.cmd = rest[i..].to_vec();
+            break;
+        }
+        if let Some(value) = arg.strip_prefix("-h").filter(|s| !s.is_empty()) {
+            return Err(spec_error(
+                spec,
+                &format!(
+                    "argument -h/--help: ignored explicit argument {}",
+                    crate::preflight::repr(value.strip_prefix('=').unwrap_or(value))
+                ),
+            ));
+        }
+        let (name, inline) = arg
+            .split_once('=')
+            .map_or((arg.as_str(), None), |(n, v)| (n, Some(v)));
+        let matches: Vec<_> = NAMES
+            .iter()
+            .copied()
+            .filter(|n| {
+                *n == name
+                    || (name.starts_with("--") && n.starts_with(name))
+                    || (name == "-h" && *n == "--help")
+            })
+            .collect();
+        let name = if NAMES.contains(&name) {
+            name
+        } else {
+            match matches.as_slice() {
+                [name] => name,
+                [] => {
+                    unknown.push(arg.clone());
+                    i += 1;
+                    continue;
+                }
+                _ => {
+                    return Err(spec_error(
+                        spec,
+                        &format!(
+                            "ambiguous option: {name} could match {}",
+                            matches.join(", ")
+                        ),
+                    ));
+                }
+            }
+        };
+        if ["--help", "--json", "--request"].contains(&name) {
+            if let Some(value) = inline {
+                let name = if name == "--help" { "-h/--help" } else { name };
+                return Err(spec_error(
+                    spec,
+                    &format!(
+                        "argument {name}: ignored explicit argument {}",
+                        crate::preflight::repr(value)
+                    ),
+                ));
+            }
+            match name {
+                "--help" => return Err(ParseError::Help(format!("{}{}", spec.usage, spec.help))),
+                "--json" => args.json = true,
+                _ => args.request = true,
+            }
+        } else {
+            let value = if let Some(value) = inline {
+                value
+            } else {
+                i += 1;
+                match rest.get(i) {
+                    Some(value)
+                        if !value.starts_with('-') || value == "-" || negative_number(value) =>
+                    {
+                        value
+                    }
+                    _ => {
+                        return Err(spec_error(
+                            spec,
+                            &format!("argument {name}: expected one argument"),
+                        ));
+                    }
+                }
+            };
+            if name == "--request-ttl" && !crate::preflight::is_integer(value) {
+                return Err(spec_error(
+                    spec,
+                    &format!(
+                        "argument --request-ttl: invalid int value: {}",
+                        crate::preflight::repr(value)
+                    ),
+                ));
+            }
+            if name == "--cwd" {
+                args.cwd = Some(value.to_owned());
+            }
+        }
+        i += 1;
+    }
+    if !unknown.is_empty() {
+        return Err(preflight_top_error(&format!(
+            "unrecognized arguments: {}",
+            unknown.join(" ")
+        )));
+    }
+    Ok(Some(Command::Preflight(args)))
+}
+
+fn negative_number(value: &str) -> bool {
+    use unicode_general_category::{GeneralCategory, get_general_category};
+    let Some(number) = value.strip_prefix('-') else {
+        return false;
+    };
+    let digits = |s: &str| {
+        s.chars()
+            .all(|c| get_general_category(c) == GeneralCategory::DecimalNumber)
+    };
+    match number.split_once('.') {
+        Some((whole, fraction)) => digits(whole) && !fraction.is_empty() && digits(fraction),
+        None => !number.is_empty() && digits(number),
+    }
+}
+
+fn preflight_top_error(message: &str) -> ParseError {
+    ParseError::Usage(format!(
+        "usage: kv [-h] [--version]\n          {{init,set,get,ls,rm,history,backup,run,preflight,cap,approvals,policy,approval-mode,grant,export,import,envs,env,vault,status,doctor,audit,export-key,import-key,version,mcp,setup,setup-2fa,2fa,recovery-key,passphrase,recover,upgrade-security,agent,unlock,lock,resume,allow,deny,network-allow,network-deny,provider,signup,login,logout,push,pull,remote,sync,team,token}}\n          ...\nkv: error: {message}\n"
+    ))
 }
 
 const ENV_USAGE: &str = "usage: kv env [-h]\n              {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n              ...\n";

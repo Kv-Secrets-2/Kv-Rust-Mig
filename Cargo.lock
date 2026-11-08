@@ -912,6 +912,7 @@ dependencies = [
  "kv-crypto",
  "kv-hook",
  "kv-mcp",
+ "kv-preflight",
  "kv-proto",
  "kv-store",
  "kv-test-support",
