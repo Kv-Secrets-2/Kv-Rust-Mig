@@ -10,6 +10,7 @@ name = "kv"
 path = "src/main.rs"
 
 [dependencies]
+kv-preflight = { path = "../kv-preflight" }
 kv-mcp = { path = "../kv-mcp" }
 kv-agent = { path = "../kv-agent" }
 kv-hook = { path = "../kv-hook" }
