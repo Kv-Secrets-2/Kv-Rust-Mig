@@ -1161,9 +1161,12 @@ const APPROVALS_HELP: &[(&str, &str)] = &[
 fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::approvalscmd::ApprovalsAction;
     let Some(action) = rest.first() else {
-        return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(
-            "list",
-        ))));
+        // Python: `kv approvals` with no action is `kv approvals list`.
+        return Ok(Some(Command::Approvals(ApprovalsAction::List {
+            all: false,
+            follow: false,
+            interval: 2,
+        })));
     };
     if action == "-h" || action == "--help" {
         return Err(ParseError::Help(format!(
