@@ -685,14 +685,18 @@ fn is_global(ip: IpAddr) -> bool {
             })
         }
         IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return is_global(IpAddr::V4(mapped));
+            }
             let segments = ip.segments();
             let special_public = matches!(ip.to_string().as_str(), "2001:1::1" | "2001:1::2")
                 || (segments[0] == 0x2001 && segments[1] == 3)
                 || (segments[0] == 0x2001 && segments[1] == 4 && segments[2] == 0x112)
                 || (segments[0] == 0x2001 && matches!(segments[1] & 0xfff0, 0x20 | 0x30));
-            segments[0] & 0xe000 == 0x2000
+            (segments[0] & 0xe000 == 0x2000 || segments[0] & 0xffc0 == 0xfec0)
                 && (segments[0] != 0x2001 || segments[1] & 0xfe00 != 0 || special_public)
                 && segments[0] != 0x2002
+                && !(segments[0] == 0x3fff && segments[1] & 0xf000 == 0)
                 && !ip.is_unspecified()
                 && !ip.is_loopback()
                 && segments[0] & 0xfe00 != 0xfc00
@@ -839,6 +843,9 @@ mod tests {
             "https://[2001:db8::1]/",
             "https://[4000::1]/",
             "https://[2002::1]/",
+            "https://[3fff::1]/",
+            "https://[3fff:fff::ffff]/",
+            "https://[3fff:1000::1]/",
             "https://[2001:2::1]/",
             "https://[2001:1::1]/",
             "https://[2001:3::1]/",
@@ -849,6 +856,8 @@ mod tests {
             "https://[2001::ffff:fffe]/",
             "https://[2606:4700::1111]/",
             "https://[::ffff:1.1.1.1]/",
+            "https://[fec0::1]/",
+            "https://[::ffff:127.0.0.1]/",
             "https://1.1.1.1/",
             "https://localhost/",
             "https://localhost./",

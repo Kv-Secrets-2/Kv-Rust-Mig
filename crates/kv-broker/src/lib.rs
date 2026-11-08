@@ -5,9 +5,11 @@ mod redact;
 
 pub use caller::{ApiCaller, ApiPreview, ApiRequest, UrlSafety, check_url_safety};
 pub use policy::{
-    HttpPolicySnapshot, default_http_policy, describe_http_policy_snapshot, evaluate_http_policy,
-    evaluate_provider_http_request, http_headers_security_error, http_request_security_error,
-    load_http_policy_snapshot, post_rules_overlap, validate_http_provider_policy,
+    HttpPolicySnapshot, HttpRuleOptions, default_http_policy, describe_http_policy_snapshot,
+    evaluate_http_policy, evaluate_provider_http_request, http_headers_security_error,
+    http_policy_route_label, http_policy_rule, http_request_security_error,
+    load_http_policy_snapshot, post_rules_overlap, validate_http_policy_binding,
+    validate_http_provider_policy,
 };
 pub use providers::{
     ProviderTable, api_body_security_error, build_auth, build_provider_table, build_url,
