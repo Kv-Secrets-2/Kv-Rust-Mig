@@ -59,12 +59,13 @@ impl From<AdmissionRefused> for GrantError {
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use kv_approvals::permit_session::SessionBinding;
 use kv_approvals::risk_card::{minimal_risk_card, normalize_risk_card};
 use kv_approvals::verify::{
-    MAX_COUNT, RunFacts, WalletEntry, post_wallet_binding, refuse_unprotected, run_mismatch,
-    signed_payload,
+    MAX_COUNT, RunFacts, VerifiedGrant, WalletEntry, payload_digest, post_wallet_binding,
+    refuse_unprotected, run_mismatch, signed_payload, wallet_entry_key,
 };
 use serde_json::{Map, Value, json};
 
@@ -818,4 +819,343 @@ pub fn revoke_run_grant(
         return Ok(true);
     }
     Ok(false)
+}
+
+/// `verify_for_admission`: the VerifiedGrant for admitting `run` under
+/// `grant`, registering the signed payload in the ledger.
+pub fn verify_for_admission(
+    ctx: &GrantContext<'_>,
+    grant: &Map<String, Value>,
+    run: &RunFacts,
+    now: i64,
+) -> Result<Arc<VerifiedGrant>, GrantError> {
+    refuse_unprotected(ctx.binding)?;
+    let Some(payload) = signed_payload(ctx.binding, &Value::Object(grant.clone())) else {
+        return Err(AdmissionRefused::with_code(
+            "not signed by this vault's owner key for this daemon session",
+            "not_signed",
+        )
+        .into());
+    };
+    if let Some(mismatch) = run_mismatch(&payload, run, ctx.providers) {
+        let code = match mismatch {
+            "environment" => "environment_mismatch",
+            "provider" => "provider_mismatch",
+            _ => "mismatch",
+        };
+        return Err(AdmissionRefused::with_code(
+            format!("the signed {mismatch} does not allow this run"),
+            code,
+        )
+        .into());
+    }
+    let digest = payload_digest(&Value::Object(payload.clone()))
+        .ok_or_else(|| AdmissionRefused::new("approval changed or revoked"))?;
+    let (_status, verified) = ctx.ledger.insert(&payload, &digest, now)?;
+    Ok(verified)
+}
+
+/// `parent_verified`: the entry registered at a token's admission in this
+/// session; it must be this parent's approval.
+pub fn parent_verified(
+    ctx: &GrantContext<'_>,
+    parent: &Map<String, Value>,
+) -> Result<Arc<VerifiedGrant>, AdmissionRefused> {
+    refuse_unprotected(ctx.binding)?;
+    let artifact_id = kv_approvals::artifacts::grant_approval_ref(&Value::Object(parent.clone())).0;
+    match ctx.ledger.get(grant_id_of(parent)) {
+        Some(verified) if Some(&verified.artifact_id) == artifact_id.as_ref() => Ok(verified),
+        _ => Err(AdmissionRefused::with_code(
+            "the token's parent grant is not registered in this daemon session",
+            "not_registered",
+        )),
+    }
+}
+
+fn string_list(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn present(value: Option<&Value>) -> Option<&Value> {
+    value.filter(|v| !v.is_null())
+}
+
+fn opt_eq(left: Option<&Value>, right: Option<&Value>) -> bool {
+    py_eq(left.unwrap_or(&Value::Null), right.unwrap_or(&Value::Null))
+}
+
+/// `_require_service_counts`: a grant for several services carries a count
+/// for each, in kv's form; a one-service grant carries none.
+pub fn require_service_counts(grant: &Map<String, Value>) -> Result<(), GrantError> {
+    let names = string_list(grant.get("capability_names"));
+    let per = present(grant.get("calls_per_service"));
+    if let Some(wallet) = present(grant.get("post_wallet")) {
+        wallet_scope(
+            wallet,
+            &string_list(grant.get("secret_names")),
+            &names,
+            per,
+            grant.get("max_calls"),
+        )?;
+        return Ok(());
+    }
+    if names.len() < 2 {
+        if let Some(per) = per {
+            let blank: Map<String, Value> = names
+                .iter()
+                .map(|name| (name.clone(), Value::Null))
+                .collect();
+            if !py_eq(per, &Value::Object(blank)) {
+                return Err(
+                    InvalidValue::new("a one-service grant carries no per-service counts").into(),
+                );
+            }
+        }
+        return Ok(());
+    }
+    let Some(per) = per else {
+        return Err(InvalidValue::new(
+            "this grant names several services without a count for each service",
+        )
+        .into());
+    };
+    let (_total, normalized) = normalize_service_calls(&names, grant.get("max_calls"), Some(per))?;
+    let normalized = normalized.map(Value::Object).unwrap_or(Value::Null);
+    if !py_eq(&normalized, per) {
+        return Err(
+            InvalidValue::new("this grant's per-service counts are not in kv's form").into(),
+        );
+    }
+    Ok(())
+}
+
+/// `_token_services_match`: the token's services and counts are its parent's.
+pub fn token_services_match(record: &Map<String, Value>, parent: &Map<String, Value>) -> bool {
+    let names = parent
+        .get("capability_names")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    if let Some(wallet) = present(parent.get("post_wallet")) {
+        let Some(entries) = wallet.as_array() else {
+            return false;
+        };
+        let mut keyed = Map::new();
+        for entry in entries {
+            let (Some(provider), Some(rule_id), Some(calls)) = (
+                entry.get("provider").and_then(Value::as_str),
+                entry.get("rule_id").and_then(Value::as_str),
+                entry.get("calls"),
+            ) else {
+                return false;
+            };
+            keyed.insert(wallet_entry_key(provider, rule_id), calls.clone());
+        }
+        return opt_eq(record.get("capability_names"), Some(&names))
+            && opt_eq(record.get("calls_per_entry"), Some(&Value::Object(keyed)))
+            && present(record.get("calls_per_service")).is_none()
+            && !record.contains_key("capability_name");
+    }
+    if present(record.get("calls_per_entry")).is_some() {
+        return false;
+    }
+    if present(record.get("calls_per_service")).is_some() {
+        return opt_eq(record.get("capability_names"), Some(&names))
+            && opt_eq(
+                record.get("calls_per_service"),
+                parent.get("calls_per_service"),
+            );
+    }
+    let single = names.as_array().is_some_and(|list| list.len() == 1);
+    single
+        && names
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| opt_eq(record.get("capability_name"), Some(name)))
+        && record.get("capability_name").is_some()
+        && present(parent.get("calls_per_service")).is_none()
+}
+
+/// `token_parent`: why a capability token's parent grant no longer backs it,
+/// or the verified parent.
+pub fn token_parent(
+    ctx: &GrantContext<'_>,
+    record: &Map<String, Value>,
+) -> Result<(Option<String>, Option<Arc<VerifiedGrant>>), GrantError> {
+    if refuse_unprotected(ctx.binding).is_err() {
+        return Ok((
+            Some(kv_approvals::permit_session::NO_PASSPHRASE_REFUSAL.to_owned()),
+            None,
+        ));
+    }
+    let truthy_str = |key: &str| {
+        record
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let (Some(grant_id), Some(artifact_id), Some(admission_id)) = (
+        truthy_str("grant_id"),
+        truthy_str("grant_artifact_id"),
+        truthy_str("admission_id"),
+    ) else {
+        return Ok((Some("token needs a fresh grant approval".to_owned()), None));
+    };
+    let parent = read_records(ctx.root, StoreKind::Grants)?
+        .into_iter()
+        .find(|grant| grant_id_of(grant) == grant_id);
+    let Some(parent) = parent.filter(|parent| valid_grant(ctx, parent, None)) else {
+        return Ok((
+            Some("parent grant is missing or invalid; request fresh approval".to_owned()),
+            None,
+        ));
+    };
+    let parent_value = Value::Object(parent.clone());
+    if kv_approvals::artifacts::grant_approval_ref(&parent_value)
+        .0
+        .as_deref()
+        != Some(artifact_id)
+    {
+        return Ok((
+            Some("token belongs to a different grant approval".to_owned()),
+            None,
+        ));
+    }
+    if !matches!(
+        parent.get("status").and_then(Value::as_str),
+        Some("active" | "consumed" | "revoked")
+    ) {
+        return Ok((Some("parent grant state is invalid".to_owned()), None));
+    }
+    if is_revoked(&parent) && parent.get("revoke_mode").and_then(Value::as_str) != Some("future") {
+        return Ok((Some("parent grant revoked immediately".to_owned()), None));
+    }
+    let Some(state) = ctx
+        .ledger
+        .run_state(grant_id)
+        .filter(|state| state.admissions.contains(admission_id))
+    else {
+        return Ok((
+            Some("token admission does not match parent grant".to_owned()),
+            None,
+        ));
+    };
+    if state.revoked.as_deref() == Some("immediate") {
+        return Ok((Some("parent grant revoked immediately".to_owned()), None));
+    }
+    let empty = json!({});
+    if !opt_eq(
+        record.get("command_fingerprint"),
+        parent.get("command_fingerprint"),
+    ) || !script_identity_matches(&parent, record)
+        || !token_services_match(record, &parent)
+        || !actor_matches(
+            parent.get("actor").unwrap_or(&empty),
+            record.get("actor").unwrap_or(&empty),
+        )
+    {
+        return Ok((
+            Some("token scope does not match parent grant".to_owned()),
+            None,
+        ));
+    }
+    Ok(match parent_verified(ctx, &parent) {
+        Ok(verified) => (None, Some(verified)),
+        Err(refused) => (Some(refused.message().to_owned()), None),
+    })
+}
+
+pub fn token_parent_denial(
+    ctx: &GrantContext<'_>,
+    record: &Map<String, Value>,
+) -> Result<Option<String>, GrantError> {
+    Ok(token_parent(ctx, record)?.0)
+}
+
+/// `prune_expired_run_grants`: drop expired grants nobody still needs;
+/// returns how many remain.
+pub fn prune_expired_run_grants(ctx: &GrantContext<'_>, now: i64) -> Result<usize, GrantError> {
+    let grants = read_records(ctx.root, StoreKind::Grants)?;
+    let kept = extended(ctx, now)?;
+    let before = grants.len();
+    let current: Vec<Map<String, Value>> = grants
+        .into_iter()
+        .filter(|grant| {
+            !is_expired(grant, now)
+                || kept.contains(grant_id_of(grant))
+                || waiting_after_end(grant, now)
+        })
+        .collect();
+    if current.len() != before {
+        write_records(ctx.root, StoreKind::Grants, &current)?;
+    }
+    Ok(current.len())
+}
+
+/// A run admitted under a grant: the grant, the ledger's verified entry and
+/// the admission id the run's capability token will carry.
+#[derive(Debug, Clone)]
+pub struct Admission {
+    pub grant: Map<String, Value>,
+    pub verified: Arc<VerifiedGrant>,
+    pub admission_id: String,
+}
+
+fn random_hex(bytes: usize) -> String {
+    let mut buffer = vec![0u8; bytes];
+    getrandom::getrandom(&mut buffer).expect("operating system randomness");
+    hex::encode(buffer)
+}
+
+/// `admit_run_grant` up to the ledger admission: find the matching grant,
+/// check its service counts, verify and count the admission. The caller
+/// mints the capability token for `admission_id` when the run has one.
+pub fn admit_run_grant(
+    ctx: &GrantContext<'_>,
+    request: &RunRequest,
+    env_name: Option<&str>,
+    now: i64,
+) -> Result<Option<Admission>, GrantError> {
+    if !request.capability_names.is_empty() && env_name.map(str::trim).is_none_or(str::is_empty) {
+        return Err(InvalidValue::new("capability admission requires an environment").into());
+    }
+    let run = RunFacts {
+        env_name: env_name.map(str::to_owned),
+        secret_names: request.secret_names.clone(),
+        capability_names: request.capability_names.iter().map(|n| json!(n)).collect(),
+    };
+    let Some(grant) = find_matching_run_grant(ctx, request, now, Some(&run))? else {
+        return Ok(None);
+    };
+    require_service_counts(&grant)?;
+    let verified = verify_for_admission(ctx, &grant, &run, now)?;
+    let admission_id = random_hex(24);
+    if read_records(ctx.root, StoreKind::Grants)?
+        .iter()
+        .any(|g| g.get("admission_id").and_then(Value::as_str) == Some(admission_id.as_str()))
+    {
+        return Err(InvalidValue::new("duplicate grant admission").into());
+    }
+    if !request.capability_names.is_empty()
+        && read_records(ctx.root, StoreKind::Tokens)?
+            .iter()
+            .any(|t| t.get("admission_id").and_then(Value::as_str) == Some(admission_id.as_str()))
+    {
+        return Err(InvalidValue::new("duplicate capability admission").into());
+    }
+    ctx.ledger.admit(&grant, &verified, &admission_id, now)?;
+    Ok(Some(Admission {
+        grant,
+        verified,
+        admission_id,
+    }))
 }
