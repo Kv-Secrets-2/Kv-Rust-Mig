@@ -153,12 +153,24 @@ fn python_number(number: &Number) -> String {
 
 pub fn to_vec_indent2_ascii(value: &Value) -> Result<Vec<u8>, StoreError> {
     let mut output = Vec::new();
-    write_indented(value, &mut output, 0)?;
+    write_indented(value, &mut output, 0, false)?;
     output.push(b'\n');
     Ok(output)
 }
 
-fn write_indented(value: &Value, output: &mut Vec<u8>, depth: usize) -> Result<(), StoreError> {
+pub fn to_vec_indent2_ascii_python(value: &Value) -> Result<Vec<u8>, StoreError> {
+    let mut output = Vec::new();
+    write_indented(value, &mut output, 0, true)?;
+    output.push(b'\n');
+    Ok(output)
+}
+
+fn write_indented(
+    value: &Value,
+    output: &mut Vec<u8>,
+    depth: usize,
+    floats: bool,
+) -> Result<(), StoreError> {
     match value {
         Value::Null => output.extend_from_slice(b"null"),
         Value::Bool(true) => output.extend_from_slice(b"true"),
@@ -168,6 +180,8 @@ fn write_indented(value: &Value, output: &mut Vec<u8>, depth: usize) -> Result<(
                 output.extend_from_slice(integer.to_string().as_bytes());
             } else if let Some(integer) = number.as_u64() {
                 output.extend_from_slice(integer.to_string().as_bytes());
+            } else if floats {
+                output.extend_from_slice(python_number(number).as_bytes());
             } else {
                 return Err(StoreError::ConfigFloat);
             }
@@ -178,7 +192,7 @@ fn write_indented(value: &Value, output: &mut Vec<u8>, depth: usize) -> Result<(
             output.extend_from_slice(b"[\n");
             for (index, item) in items.iter().enumerate() {
                 write_indent(output, depth + 1);
-                write_indented(item, output, depth + 1)?;
+                write_indented(item, output, depth + 1, floats)?;
                 if index + 1 != items.len() {
                     output.push(b',');
                 }
@@ -194,7 +208,7 @@ fn write_indented(value: &Value, output: &mut Vec<u8>, depth: usize) -> Result<(
                 write_indent(output, depth + 1);
                 write_ascii_string(key, output);
                 output.extend_from_slice(b": ");
-                write_indented(item, output, depth + 1)?;
+                write_indented(item, output, depth + 1, floats)?;
                 if index + 1 != items.len() {
                     output.push(b',');
                 }
