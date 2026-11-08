@@ -196,7 +196,9 @@ impl Lifecycle {
 
     /// Parse and reject malformed wire choices before calling this method.
     /// Mark the stop connection as control before publishing the decision.
-    pub(crate) fn request_stop(&self, choice: Option<StopChoice>) -> StopPlan {
+    /// `running` is the count of live `kv_run` programs (Python
+    /// `_count_in_flight` adds them to the committed windows).
+    pub(crate) fn request_stop(&self, choice: Option<StopChoice>, running: usize) -> StopPlan {
         let mut state = lock(&self.state);
         let now = Instant::now();
         self.expire_choice_locked(&mut state, now);
@@ -217,9 +219,9 @@ impl Lifecycle {
             if state.choice_deadline.is_none() {
                 state.choice_deadline = Some(now + self.settings.choice_wait);
             }
-            if state.committed != 0 {
+            if state.committed + running != 0 {
                 StopPlan::AwaitingChoice {
-                    in_flight: state.committed,
+                    in_flight: state.committed + running,
                 }
             } else {
                 self.choose_locked(&mut state, StopChoice::Now, now);
@@ -282,7 +284,14 @@ impl Lifecycle {
 
     /// Wait for at most a polling slice, so the foreground can apply signals.
     /// The first drain result is retained for every stop answer and finalizer.
-    pub(crate) fn poll_drain(&self, timeout: Duration) -> Option<DrainOutcome> {
+    /// `open_runs` counts the live `kv_run` programs (their slots notify
+    /// `changed` as they end); the drain closes only when both the committed
+    /// windows and the runs are gone, or at the deadline.
+    pub(crate) fn poll_drain(
+        &self,
+        timeout: Duration,
+        open_runs: &dyn Fn() -> usize,
+    ) -> Option<DrainOutcome> {
         let until = Instant::now() + timeout;
         let mut state = lock(&self.state);
         loop {
@@ -293,10 +302,9 @@ impl Lifecycle {
             if self.expire_choice_locked(&mut state, now) {
                 self.changed.notify_all();
             }
-            if state
-                .stop_deadline
-                .is_some_and(|deadline| state.committed == 0 || now >= deadline)
-            {
+            if state.stop_deadline.is_some_and(|deadline| {
+                (state.committed == 0 && open_runs() == 0) || now >= deadline
+            }) {
                 let outcome = DrainOutcome {
                     wait_seconds: state.wait_seconds,
                     cut_off: state.committed,
@@ -320,12 +328,29 @@ impl Lifecycle {
         }
     }
 
-    pub(crate) fn wait_for_drain(&self) -> DrainOutcome {
+    pub(crate) fn wait_for_drain(&self, open_runs: &dyn Fn() -> usize) -> DrainOutcome {
         loop {
-            if let Some(outcome) = self.poll_drain(Duration::from_millis(500)) {
+            if let Some(outcome) = self.poll_drain(Duration::from_millis(500), open_runs) {
                 return outcome;
             }
         }
+    }
+
+    /// The stop's chosen wait and what remains of it: `None` before any
+    /// choice. Python `_stop_wait_choice` / `_stop_wait_remaining`.
+    pub(crate) fn stop_budget(&self) -> Option<(u64, Duration)> {
+        let state = lock(&self.state);
+        state.stop_deadline.map(|deadline| {
+            (
+                state.wait_seconds,
+                deadline.saturating_duration_since(Instant::now()),
+            )
+        })
+    }
+
+    /// Wake drain waiters after a run slot changes.
+    pub(crate) fn notify(&self) {
+        self.changed.notify_all();
     }
 
     /// Wait on existing windows without choosing a stop or changing its budget.
@@ -652,12 +677,12 @@ mod tests {
         let lifecycle = Lifecycle::new();
         assert_eq!(lifecycle.phase(), Phase::Running);
         assert_eq!(
-            lifecycle.request_stop(None),
+            lifecycle.request_stop(None, 0),
             StopPlan::Drain { wait_seconds: 10 }
         );
         assert!(lifecycle.try_commit().is_err());
         assert_eq!(
-            lifecycle.wait_for_drain(),
+            lifecycle.wait_for_drain(&|| 0),
             DrainOutcome {
                 wait_seconds: 10,
                 cut_off: 0
@@ -672,7 +697,7 @@ mod tests {
         let lifecycle = short_lifecycle();
         let work = lifecycle.try_commit().unwrap();
         assert_eq!(
-            lifecycle.request_stop(None),
+            lifecycle.request_stop(None, 0),
             StopPlan::AwaitingChoice { in_flight: 1 }
         );
         assert_eq!(lifecycle.phase(), Phase::AwaitingChoice);
@@ -682,29 +707,29 @@ mod tests {
         assert!(lifecycle.expire_choice());
         let deadline = lock(&lifecycle.state).stop_deadline;
         assert_eq!(
-            lifecycle.request_stop(Some(StopChoice::Wait)),
+            lifecycle.request_stop(Some(StopChoice::Wait), 0),
             StopPlan::AlreadyStopping { wait_seconds: 10 }
         );
         assert_eq!(lock(&lifecycle.state).stop_deadline, deadline);
         drop(work);
-        assert_eq!(lifecycle.wait_for_drain().cut_off, 0);
+        assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
     }
 
     #[test]
     fn wait_never_extends_a_decision_and_signal_wakes_the_drain() {
         let lifecycle = short_lifecycle();
         let work = lifecycle.try_commit().unwrap();
-        lifecycle.request_stop(Some(StopChoice::Wait));
+        lifecycle.request_stop(Some(StopChoice::Wait), 0);
         let first = lock(&lifecycle.state).stop_deadline;
-        lifecycle.request_stop(Some(StopChoice::Wait));
+        lifecycle.request_stop(Some(StopChoice::Wait), 0);
         assert_eq!(lock(&lifecycle.state).stop_deadline, first);
         let (sender, receiver) = mpsc::channel();
         let waiting = Arc::clone(&lifecycle);
-        let waiter = thread::spawn(move || sender.send(waiting.wait_for_drain()).unwrap());
+        let waiter = thread::spawn(move || sender.send(waiting.wait_for_drain(&|| 0)).unwrap());
         lifecycle.signal_stop();
         let shortened = lock(&lifecycle.state).stop_deadline;
         assert!(shortened < first);
-        lifecycle.request_stop(Some(StopChoice::Wait));
+        lifecycle.request_stop(Some(StopChoice::Wait), 0);
         assert_eq!(lock(&lifecycle.state).stop_deadline, shortened);
         let outcome = receiver.recv_timeout(Duration::from_millis(400)).unwrap();
         assert_eq!(
@@ -717,7 +742,7 @@ mod tests {
         drop(work);
         // Later completion and retirement must not rewrite the stop answer.
         assert_eq!(lifecycle.retire(), outcome);
-        assert_eq!(lifecycle.wait_for_drain(), outcome);
+        assert_eq!(lifecycle.wait_for_drain(&|| 0), outcome);
         waiter.join().unwrap();
     }
 
@@ -725,28 +750,28 @@ mod tests {
     fn signal_closes_pending_choice_and_wait_cannot_reopen_it() {
         let lifecycle = short_lifecycle();
         let work = lifecycle.try_commit().unwrap();
-        lifecycle.request_stop(None);
+        lifecycle.request_stop(None, 0);
         lifecycle.signal_stop();
         assert_eq!(lifecycle.phase(), Phase::Draining);
         assert!(lock(&lifecycle.state).choice_deadline.is_none());
         assert_eq!(
-            lifecycle.request_stop(Some(StopChoice::Wait)),
+            lifecycle.request_stop(Some(StopChoice::Wait), 0),
             StopPlan::Drain { wait_seconds: 10 }
         );
         drop(work);
-        assert_eq!(lifecycle.wait_for_drain().cut_off, 0);
+        assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
     }
 
     #[test]
     fn completion_after_deadline_cannot_erase_a_cutoff_before_polling() {
         let lifecycle = short_lifecycle();
         let work = lifecycle.try_commit().unwrap();
-        lifecycle.request_stop(Some(StopChoice::Now));
+        lifecycle.request_stop(Some(StopChoice::Now), 0);
         lock(&lifecycle.state).stop_deadline = Some(Instant::now());
         drop(work);
         assert_eq!(lifecycle.committed_count(), 0);
         assert_eq!(
-            lifecycle.poll_drain(Duration::ZERO),
+            lifecycle.poll_drain(Duration::ZERO, &|| 0),
             Some(DrainOutcome {
                 wait_seconds: 10,
                 cut_off: 1,
@@ -766,12 +791,12 @@ mod tests {
                 worker_state.try_commit()
             });
             barrier.wait();
-            lifecycle.request_stop(Some(StopChoice::Now));
+            lifecycle.request_stop(Some(StopChoice::Now), 0);
             let admitted = worker.join().unwrap();
             assert_eq!(lifecycle.committed_count(), usize::from(admitted.is_ok()));
             assert!(lifecycle.try_commit().is_err());
             drop(admitted);
-            assert_eq!(lifecycle.wait_for_drain().cut_off, 0);
+            assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
         }
     }
 
@@ -793,7 +818,7 @@ mod tests {
             Ok::<(), ()>(())
         });
         assert!(matches!(closed, Err(CommitError::Stopping)));
-        lifecycle.request_stop(Some(StopChoice::Now));
+        lifecycle.request_stop(Some(StopChoice::Now), 0);
         let stopped = lifecycle.commit_charging(None, || {
             charges.fetch_add(1, Ordering::SeqCst);
             Ok::<(), ()>(())
@@ -820,7 +845,7 @@ mod tests {
         // The callback must run under the admission lock, not before it.
         assert!(lifecycle.state.try_lock().is_err());
         let stopper_state = Arc::clone(&lifecycle);
-        let stopper = thread::spawn(move || stopper_state.request_stop(None));
+        let stopper = thread::spawn(move || stopper_state.request_stop(None, 0));
         release_tx.send(()).unwrap();
         let work = worker.join().unwrap().unwrap();
         assert_eq!(
@@ -838,7 +863,7 @@ mod tests {
         let work = lifecycle.try_commit().unwrap();
         assert_eq!(lifecycle.wait_for_open_work(Duration::ZERO), 1);
         assert_eq!(lifecycle.phase(), Phase::Running);
-        lifecycle.request_stop(Some(StopChoice::Wait));
+        lifecycle.request_stop(Some(StopChoice::Wait), 0);
         let deadline = lock(&lifecycle.state).stop_deadline;
         let waiting = Arc::clone(&lifecycle);
         let waiter = thread::spawn(move || waiting.wait_for_open_work(Duration::from_secs(2)));
@@ -873,7 +898,7 @@ mod tests {
                 .unwrap();
         }
         assert!(control.mark_control());
-        lifecycle.request_stop(Some(StopChoice::Now));
+        lifecycle.request_stop(Some(StopChoice::Now), 0);
         assert_eq!(tracker.shutdown_idle(), 1);
         let mut byte = [0];
         assert_eq!(idle_client.read(&mut byte).unwrap(), 0);
@@ -934,8 +959,8 @@ mod tests {
             let _work = work;
             panic!("test worker panic");
         }));
-        lifecycle.request_stop(Some(StopChoice::Wait));
-        assert_eq!(lifecycle.wait_for_drain().cut_off, 0);
+        lifecycle.request_stop(Some(StopChoice::Wait), 0);
+        assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
         assert_eq!(client.read(&mut [0]).unwrap(), 0);
         wait_until(|| tracker.workers.iter().all(JoinHandle::is_finished));
         assert_eq!(

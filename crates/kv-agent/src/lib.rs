@@ -799,7 +799,7 @@ pub fn run_agent_with_api_caller(
         if signal_guard.requested() {
             lifecycle.signal_stop();
         }
-        if let Some(outcome) = lifecycle.poll_drain(Duration::from_millis(20)) {
+        if let Some(outcome) = lifecycle.poll_drain(Duration::from_millis(20), &|| 0) {
             break outcome;
         }
         workers.reap_finished();
@@ -1099,7 +1099,7 @@ fn handle_connection(
             // Register the reply as control before retirement can close idle
             // sockets. Control answers contain no vault data or work authority.
             connection.mark_control();
-            let response = match lifecycle.request_stop(choice) {
+            let response = match lifecycle.request_stop(choice, 0) {
                 StopPlan::AwaitingChoice { in_flight } => {
                     json!({"in_flight":in_flight,"awaiting_choice":true,"runs":[]})
                 }
@@ -1107,7 +1107,7 @@ fn handle_connection(
                     json!({"stopping":true,"wait_seconds":wait_seconds,"runs":[]})
                 }
                 StopPlan::Drain { .. } => {
-                    let outcome = lifecycle.wait_for_drain();
+                    let outcome = lifecycle.wait_for_drain(&|| 0);
                     json!({"stopping":true,"wait_seconds":outcome.wait_seconds,
                         "cut_off":outcome.cut_off,"ended_runs":[]})
                 }
