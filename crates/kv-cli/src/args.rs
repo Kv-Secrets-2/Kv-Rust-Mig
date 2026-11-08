@@ -1123,6 +1123,41 @@ const APPROVALS_CHOICES: &[&str] = &[
 ];
 const APPROVE_USAGE: &str = "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n";
 
+const APPROVALS_HELP: &[(&str, &str)] = &[
+    (
+        "list",
+        "usage: kv approvals list [-h] [--all]\n\noptions:\n  -h, --help  show this help message and exit\n  --all       Include approved, denied, and expired requests\n",
+    ),
+    (
+        "watch",
+        "usage: kv approvals watch [-h] [--all] [--follow] [--interval INTERVAL]\n\noptions:\n  -h, --help           show this help message and exit\n  --all                Include approved, denied, and expired requests\n  --follow             Keep refreshing until interrupted\n  --interval INTERVAL  Refresh interval for --follow\n",
+    ),
+    (
+        "request",
+        "usage: kv approvals request [-h] [--secret NAME] [--capability api:PROVIDER]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N] [--ttl TTL]\n                            [--suggest-minutes SUGGEST_MINUTES] [--cwd CWD]\n                            [--source SOURCE] [--client CLIENT]\n                            [--session-id SESSION_ID] [--reason REASON]\n                            [--env ENV]\n                            ...\n\npositional arguments:\n  cmd                   Command requesting approval\n\noptions:\n  -h, --help            show this help message and exit\n  --secret NAME         Secret name requested for this run (repeatable)\n  --capability api:PROVIDER\n                        Broker capability requested for this run\n  --max-calls MAX_CALLS\n                        Requested call budget for broker capability\n  --max-calls-for SERVICE=N\n                        Requested calls for one service of several\n                        (repeatable), e.g. api:openai=10\n  --ttl TTL             Pending request lifetime in seconds (default: 900)\n  --suggest-minutes SUGGEST_MINUTES\n                        The time limit the agent suggests for the approval, in\n                        minutes (shown to the owner; the owner decides)\n  --cwd CWD             Working directory for the command (default: current\n                        directory)\n  --source SOURCE       Optional requester source to bind, such as mcp\n  --client CLIENT       Optional client name to bind, such as codex\n  --session-id SESSION_ID\n                        Optional agent/session ID to bind\n  --reason REASON       Human note stored with the request\n  --env ENV             Environment the requested run uses (default: the\n                        project's default)\n",
+    ),
+    (
+        "approve",
+        "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n\npositional arguments:\n  request_id            Approval request ID\n\noptions:\n  -h, --help            show this help message and exit\n  --reuse               Allow matching runs until expiry; call budget is per\n                        run (default: one run)\n  --ttl TTL             Grant lifetime in seconds (default: the agent's\n                        suggestion, else kv's: 300)\n  --no-call-limit       No call count for the service(s) named: any number of\n                        calls until the time limit (the approval screen shows\n                        a red caution)\n  --when-spent {pause,end}\n                        When calls or time run out: pause the job and ask you\n                        (default on a passphrase-protected vault), or end it\n  --wait-minutes WAIT_MINUTES\n                        How long a paused job or a call waits for your answer\n                        (default 60)\n  --wait-seconds WAIT_SECONDS\n                        The same wait, in seconds\n  --add-calls ADD_CALLS\n                        Answering a paused job: calls to add (default: what it\n                        asked)\n  --add-minutes ADD_MINUTES\n                        Answering a paused job: minutes to add (default: what\n                        it asked)\n  --max-calls MAX_CALLS\n                        Override broker capability call budget\n  --max-calls-for SERVICE=N\n                        Calls per run for one service of several (repeatable),\n                        e.g. api:openai=10\n  --post-rule api:PROVIDER/RULE=N\n                        One entry of a POST wallet (repeatable): up to N POST\n                        calls per run to one HTTP rule of one service, with\n                        any body. Every service of the approval needs an\n                        entry; the counts are the entries' (do not use --max-\n                        calls, --max-calls-for or --no-call-limit with it)\n  --max-runs MAX_RUNS   With --reuse: how many runs the grant allows (required\n                        on a passphrase-protected vault)\n  --reason REASON       Human note stored with the grant\n",
+    ),
+    (
+        "page",
+        "usage: kv approvals page [-h] [--no-browser]\n\noptions:\n  -h, --help    show this help message and exit\n  --no-browser  Print the one-time link only; do not open a browser\n",
+    ),
+    (
+        "pause",
+        "usage: kv approvals pause [-h] [job_id]\n\npositional arguments:\n  job_id      The job to pause (from the list)\n\noptions:\n  -h, --help  show this help message and exit\n",
+    ),
+    (
+        "deny",
+        "usage: kv approvals deny [-h] [--reason REASON] request_id\n\npositional arguments:\n  request_id       Approval request ID\n\noptions:\n  -h, --help       show this help message and exit\n  --reason REASON  Human note stored with the denial\n",
+    ),
+    (
+        "prune",
+        "usage: kv approvals prune [-h] [--missed]\n\noptions:\n  -h, --help  show this help message and exit\n  --missed    Also remove requests that expired undecided (missed) now\n",
+    ),
+];
+
 fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::approvalscmd::ApprovalsAction;
     let Some(action) = rest.first() else {
@@ -1140,16 +1175,19 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
             "{APPROVALS_USAGE}kv approvals: error: argument approvals_action: invalid choice: '{action}' (choose from 'list', 'watch', 'request', 'approve', 'page', 'pause', 'deny', 'prune')\n"
         )));
     };
+    let rest = &rest[1..];
+    if rest.iter().any(|v| v == "-h" || v == "--help") {
+        let help = APPROVALS_HELP
+            .iter()
+            .find(|(name, _)| name == choice)
+            .map(|(_, help)| *help)
+            .unwrap_or("");
+        return Err(ParseError::Help(help.to_owned()));
+    }
     if *choice != "approve" {
         return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(
             choice,
         ))));
-    }
-    let rest = &rest[1..];
-    if rest.iter().any(|v| v == "-h" || v == "--help") {
-        return Err(ParseError::Help(format!(
-            "{APPROVE_USAGE}\npositional arguments:\n  request_id            Approval request ID\n\noptions:\n  -h, --help            show this help message and exit\n"
-        )));
     }
     let mut request_id = None;
     let mut run_grant_flags = false;
