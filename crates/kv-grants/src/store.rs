@@ -33,6 +33,18 @@ pub enum StoreFault {
 }
 
 impl StoreFault {
+    /// The Python exception class the fault corresponds to.
+    pub fn python_type(&self) -> &'static str {
+        match self {
+            StoreFault::NotPrivate(_) => "PermissionError",
+            StoreFault::Invalid(_) => "ValueError",
+            StoreFault::Io(_) => "OSError",
+            StoreFault::Origin(_) => "VaultOriginError",
+            StoreFault::Structure(_) => "VaultStructureError",
+            StoreFault::Decode(_) => "UnicodeDecodeError",
+        }
+    }
+
     pub fn message(&self) -> &str {
         match self {
             StoreFault::NotPrivate(m)

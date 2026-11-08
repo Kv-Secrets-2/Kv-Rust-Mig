@@ -1108,6 +1108,8 @@ pub struct Admission {
     pub grant: Map<String, Value>,
     pub verified: Arc<VerifiedGrant>,
     pub admission_id: String,
+    /// The capability token minted for the run, with the raw token under `token`.
+    pub issued_capability: Option<Map<String, Value>>,
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -1116,9 +1118,8 @@ fn random_hex(bytes: usize) -> String {
     hex::encode(buffer)
 }
 
-/// `admit_run_grant` up to the ledger admission: find the matching grant,
-/// check its service counts, verify and count the admission. The caller
-/// mints the capability token for `admission_id` when the run has one.
+/// `admit_run_grant`: find the matching grant, check its service counts,
+/// verify and count the admission, and mint the run's capability token.
 pub fn admit_run_grant(
     ctx: &GrantContext<'_>,
     request: &RunRequest,
@@ -1153,9 +1154,69 @@ pub fn admit_run_grant(
         return Err(InvalidValue::new("duplicate capability admission").into());
     }
     ctx.ledger.admit(&grant, &verified, &admission_id, now)?;
+    let mut issued_capability = None;
+    if !request.capability_names.is_empty() {
+        let per_entry = verified.post_wallet.as_ref().map(|wallet| {
+            wallet
+                .iter()
+                .map(|entry| {
+                    (
+                        wallet_entry_key(&entry.provider, &entry.rule_id),
+                        json!(entry.calls),
+                    )
+                })
+                .collect::<Map<String, Value>>()
+        });
+        let expires = grant
+            .get("expires_at_epoch")
+            .and_then(Value::as_i64)
+            .unwrap_or(now);
+        let mint = crate::capabilities::MintRequest {
+            actor: Some(Value::Object(request.actor.clone())),
+            grant_id: grant.get("grant_id").cloned(),
+            reason: None,
+            env_name: env_name.map(|e| json!(e)),
+            ttl_seconds: Some(json!(expires - now)),
+            max_calls: Some(grant.get("max_calls").cloned().unwrap_or(json!(1))),
+            token_id: None,
+            grant_artifact_id: kv_approvals::artifacts::grant_approval_ref(&Value::Object(
+                grant.clone(),
+            ))
+            .0,
+            admission_id: Some(admission_id.clone()),
+            verified: Some(&verified),
+            calls_per_service: grant.get("calls_per_service").cloned(),
+            calls_per_entry: per_entry.map(Value::Object),
+        };
+        let mut services = request.capability_names.clone();
+        services.sort();
+        match crate::capabilities::mint_capability_token(
+            ctx,
+            &Value::Object(request.identity.clone()),
+            &services[0],
+            &mint,
+            now,
+        ) {
+            Ok(token) => issued_capability = Some(token),
+            Err(GrantError::Refused(refused)) => return Err(GrantError::Refused(refused)),
+            Err(error) => {
+                let error_type = match &error {
+                    GrantError::Store(fault) => fault.python_type(),
+                    _ => "ValueError",
+                };
+                return Err(GrantError::Spent {
+                    message: error.to_string(),
+                    grant_id: grant_id_of(&grant).to_owned(),
+                    spent: grant.get("usage_mode").and_then(Value::as_str) == Some("once"),
+                    error_type,
+                });
+            }
+        }
+    }
     Ok(Some(Admission {
         grant,
         verified,
         admission_id,
+        issued_capability,
     }))
 }
