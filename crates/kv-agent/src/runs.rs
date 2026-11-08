@@ -497,6 +497,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn own_stat_parses() {
         let pid = std::process::id() as i32;
         let (ppid, started) = proc_stat(pid).expect("own stat");

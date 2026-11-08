@@ -204,7 +204,17 @@ mod tests {
 
     #[test]
     fn stdin_is_null_and_env_is_only_what_was_given() {
-        let result = run(&["sh", "-c", "cat; env | grep -c ."]);
-        assert_eq!(result.stdout.trim(), "2");
+        // `cat` returns at once on a null stdin; the shell adds only its own
+        // variables (PWD, SHLVL, ...), never this process's.
+        assert!(std::env::var_os("HOME").is_some());
+        let result = run(&["sh", "-c", "cat; env"]);
+        assert_eq!(result.status.code(), Some(0));
+        let names: Vec<&str> = result
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(name, _)| name))
+            .collect();
+        assert!(names.contains(&"PATH"), "{names:?}");
+        assert!(!names.contains(&"HOME"), "{names:?}");
     }
 }
