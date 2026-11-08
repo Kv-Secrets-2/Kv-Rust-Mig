@@ -74,3 +74,19 @@ existing pattern writer and compares config bytes as well as queue/ignore bytes.
 
 Same-vault checks resolve existing vault directories with the OS; unavailable
 directories fail closed rather than accepting a non-strict lexical fallback.
+
+## Session request records
+
+| Python `kv.request_records` | Rust `kv_requests::request_records` |
+| --- | --- |
+| `RequestRecord`, `RequestRecordsFull` | same names |
+| `_record_of` | `record_of` |
+| `RequestRecords(bound=None)` | `RequestRecords::new(None)` / `default()` |
+| `record`, `get`, `__len__` | `record`, `get`, `len` |
+
+The mutex-backed session store preserves the first record for an id, prunes on
+`record` and `get` using the supplied epoch (or current time), and never evicts a
+live record to admit another. Like Python, `len` does not prune. Expiry preserves
+arbitrary-sized JSON integers; booleans and floating-point numbers are not
+integers for record validation. A poisoned Rust mutex refuses further access.
+The typed Rust bound is a nonnegative `usize`; ids passed to `get` are strings.

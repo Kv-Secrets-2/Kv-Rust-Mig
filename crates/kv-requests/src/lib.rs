@@ -2,11 +2,14 @@
 
 pub mod approvals;
 pub mod policy_requests;
+pub mod request_records;
 
 use kv_store::StoreError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RequestError {
+    #[error(transparent)]
+    RecordsFull(#[from] request_records::RequestRecordsFull),
     #[error("{0}")]
     Invalid(String),
     #[error(transparent)]
