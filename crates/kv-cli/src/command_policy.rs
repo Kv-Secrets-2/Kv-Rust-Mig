@@ -1,11 +1,13 @@
 use crate::project::CmdResult;
 use crate::ui::Palette;
 use crate::{owner_policy as owner, project, render, ui};
-use kv_store::{config, policy_requests as store};
+use kv_requests::policy_requests as store;
+use kv_store::config;
 use serde_json::Value;
 #[cfg(unix)]
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub enum CommandPolicyAction {
     List(bool),
@@ -72,6 +74,13 @@ fn duration(value: i64) -> String {
         format!("{}d", n / 86400)
     }
 }
+fn display_epoch(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
+        .or_else(|| value.as_f64().filter(|v| v.is_finite()).map(|v| v as i64))
+        .or_else(|| value.as_bool().map(i64::from))
+}
 fn print_request(p: &Palette, r: &Value, now: i64, allowed: Option<&[String]>) -> CmdResult {
     let state = text(r, "effective_status", text(r, "status", "pending"));
     ui::info(&format!(
@@ -85,8 +94,8 @@ fn print_request(p: &Palette, r: &Value, now: i64, allowed: Option<&[String]>) -
         p.reset
     ));
     if let (Some(created), Some(expires)) = (
-        store::epoch(&r["created_at_epoch"]),
-        store::epoch(&r["expires_at_epoch"]),
+        display_epoch(&r["created_at_epoch"]),
+        display_epoch(&r["expires_at_epoch"]),
     ) {
         if state == "pending" {
             ui::info(&format!(
@@ -227,11 +236,15 @@ fn audit(_event: &str, _r: &Value) {}
 
 pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
     let root = project::require_project(p)?;
-    let convert = |e: kv_store::StoreError| project::fail(p, &render::escape(&e.to_string()));
+    let convert = |e: kv_requests::RequestError| project::fail(p, &render::escape(&e.to_string()));
+    let config_error = |e: kv_store::StoreError| project::fail(p, &render::escape(&e.to_string()));
     match action {
         CommandPolicyAction::List(all) => {
-            let now = store::now();
-            let requests = store::list(&root, all, now).map_err(convert)?;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let requests = store::list_policy_requests(&root, all, Some(now)).map_err(convert)?;
             let allowlist = if requests.iter().any(|r| r["effective_status"] == "allowed") {
                 config::get_run_policy(&root).ok().map(|(mode, patterns)| {
                     if mode == "allowlist" {
@@ -264,7 +277,7 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
             }
         }
         CommandPolicyAction::Allow { id, reason } => {
-            let request = store::get(&root, &id, store::now())
+            let request = store::get_policy_request(&root, &Value::from(id.as_str()), None)
                 .map_err(convert)?
                 .ok_or_else(|| {
                     project::fail(
@@ -273,7 +286,7 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
                     )
                 })?;
             if request["effective_status"] == "allowed" {
-                let (mode, patterns) = config::get_run_policy(&root).map_err(convert)?;
+                let (mode, patterns) = config::get_run_policy(&root).map_err(config_error)?;
                 if mode != "allowlist"
                     || !patterns.iter().any(|s| {
                         s == text(&request, "allowed_pattern", text(&request, "pattern", ""))
@@ -306,7 +319,7 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
             let snapshot = project::config_value(p, &target)?;
             owner::block_local_approval_if_protected(p, &target, "command-policy allow")?;
             let pattern = text(&request, "pattern", "");
-            let reviewed = store::fingerprint(&request).map_err(convert)?;
+            let reviewed = store::request_fingerprint(&request).map_err(convert)?;
             let broad = kv_sandbox::classify::broad_secret_allowlist_reason(pattern);
             if !broad.is_empty() {
                 return Err(project::fail(p, &render::escape(&broad)));
@@ -335,14 +348,17 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
                 .as_deref()
                 .filter(|s| !s.is_empty())
                 .unwrap_or("allowed by user via kv policy allow");
-            if !store::allow(
+            if !store::allow_policy_request(
                 &root,
-                text(&request, "request_id", ""),
+                &request["request_id"],
                 &target,
-                &snapshot,
-                &reviewed,
-                Some(reason),
-                kv_sandbox::classify::broad_secret_allowlist_reason,
+                store::AllowPolicyRequest {
+                    snapshot: &snapshot,
+                    expected_fingerprint: &reviewed,
+                    reason: &Value::from(reason),
+                    now: None,
+                },
+                |root, pattern| config::add_allowed_command(root, pattern).map(|_| ()),
             )
             .map_err(convert)?
             {
@@ -368,7 +384,7 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
         }
         CommandPolicyAction::Block { id, reason, alias } => {
             owner::refuse_policy_change_without_passphrase(p, &root)?;
-            let request = store::get(&root, &id, store::now())
+            let request = store::get_policy_request(&root, &Value::from(id.as_str()), None)
                 .map_err(convert)?
                 .ok_or_else(|| {
                     project::fail(
@@ -413,16 +429,16 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
                 "blocked by user via kv policy {}",
                 if alias { "deny" } else { "block" }
             );
-            if !store::block(
+            if !store::block_policy_request(
                 &root,
-                text(&request, "request_id", ""),
-                Some(
+                &request["request_id"],
+                &Value::from(
                     reason
                         .as_deref()
                         .filter(|s| !s.is_empty())
                         .unwrap_or(&default),
                 ),
-                store::now(),
+                None,
             )
             .map_err(convert)?
             {
@@ -443,7 +459,7 @@ pub fn run(p: &Palette, action: CommandPolicyAction) -> CmdResult {
             );
         }
         CommandPolicyAction::Prune => {
-            let remaining = store::prune(&root, store::now()).map_err(convert)?;
+            let remaining = store::prune_policy_requests(&root, None).map_err(convert)?;
             ui::success(p, "command-policy requests pruned");
             ui::info(&format!(
                 "{}{remaining} pending command-policy request{} remain{}",

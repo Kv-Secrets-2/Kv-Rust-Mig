@@ -134,7 +134,7 @@ Bare `kv policy` and `kv policy list [--all]` show the command-policy inbox.
 `watch` and `request` retain argparse help/usage but refuse as unavailable; tests
 create their requests using Python, not a Rust request command.
 
-The private request store preserves Python's sorted, ASCII-escaped, indented
+The canonical `kv_requests::policy_requests` store preserves Python's sorted, ASCII-escaped, indented
 JSON format, including its trailing newline and floating-point record fields.
 Decision writes hold Python's stable `storage.lock`; allowing records the
 decision before adding the pattern under that same lock and a checked config
@@ -151,9 +151,14 @@ already-decided and missing/expired IDs, broad patterns, protected mode,
 passphrase absence, cancellation, prune counts, audit fields, parser/help, and
 cross-implementation reads. Config and request-store bytes are compared; only
 the two decision-generated update timestamps are masked in interactive runs.
-Fixed-clock store comparisons additionally compare request-store bytes without
+The canonical comparisons in `kv-requests/tests/policy_requests_parity.rs`
+additionally compare fixed-clock request-store bytes without
 masking, fingerprints, stale snapshots, changed review fields, malformed stores,
-and ignore-file maintenance.
+and ignore-file maintenance. The duplicate `kv-store` policy-request module and
+its store-level comparison/probe have been removed; the owner CLI PTY comparisons
+remain unchanged. Allow decisions call `allow_policy_request` with the reviewed
+snapshot/fingerprint and an allowlist-writing closure; the canonical store runs
+that closure under its storage lock and config write guard.
 
 The applicable refusal differences, including unsupported 2FA, are catalogued
 in the consolidated list above.
