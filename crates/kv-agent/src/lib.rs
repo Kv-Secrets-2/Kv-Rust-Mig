@@ -40,6 +40,8 @@ use thiserror::Error;
 #[cfg(all(unix, test))]
 mod audit_reply_tests;
 #[cfg(unix)]
+mod capture;
+#[cfg(unix)]
 mod lifecycle;
 #[cfg(unix)]
 mod permits;
