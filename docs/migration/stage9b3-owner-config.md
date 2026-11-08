@@ -65,3 +65,41 @@ and parser help/errors. Broker comparisons cover validators, provider-table
 loading, default policy, and public/restricted IPv6 literals. The shared URL
 guard now also rejects reserved and special-purpose IPv6 ranges that Python
 rejects; it retains Python's public exceptions.
+
+### IPv6 URL admission baseline
+
+The broker guard is pinned to CPython **3.10.22**, not whichever interpreter
+happens to run the tests. Step 4 added rejection of reserved IPv6 space outside
+`2000::/3`, and `2001::/23` and `2002::/16` special-purpose ranges. Public
+exceptions within `2001::/23` are retained: `2001:1::1/128`, `2001:1::2/128`,
+`2001:3::/32`, `2001:4:112::/48`, `2001:20::/28`, and `2001:30::/28`.
+
+The canonical tables also reject **`3fff::/20`** (RFC 9637); Step 5 adds that
+missing range, with both boundary and neighboring-address parity cases.
+The installed 3.10.12 runtime's tables did not contain this range. This is a
+maintenance-version difference, not simply a Python 3.10-versus-3.13 distinction.
+Step 5 also corrects the broad reserved-space gate to preserve 3.10.22's public
+IPv4-mapped IPv6 delegation and its treatment of `fec0::/10`, rather than using
+3.10.12's IPv4-mapped reserved classification. Private mapped addresses remain
+blocked. Live comparisons for this step use a separately installed 3.10.22.
+
+## HTTP policy CLI
+
+`kv policy http` / `list [provider]`, `add`, and `remove` / `rm` reuse broker rule
+validation and binding checks. Additions authorize loosening and save the loaded
+snapshot; invalid-entry removal is a protected-mode-blocked loosening repair,
+while ordinary removal remains available in protected mode. Command-policy
+actions deliberately refuse as unavailable until step 6.
+
+There is no unsafe-method flag: Python automatically stores `approval: per-call`
+for POST, PUT, PATCH, and DELETE rules. Mixing safe and unsafe methods is refused.
+An accepted unsafe rule does not authorize calls; a signed one-call permit is
+still required at runtime. Python accepts `Authorization` in an allowed-header
+list, although request-time broker checks still reject caller authentication
+headers; this command preserves that distinction.
+
+Differential tests compare transcripts, exits, and config bytes for read-only
+and unsafe rules, repeated methods/query keys/headers, default-policy insertion,
+binding errors, duplicate IDs, route validation, repair, cancellation, protected
+mode, listing, aliases, and argparse help/errors. Pure broker helper comparisons
+also cover empty/default input, unsupported methods, labels, and binding checks.

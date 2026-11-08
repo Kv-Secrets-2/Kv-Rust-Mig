@@ -1,6 +1,8 @@
 //! `build_parser()` for the commands this build carries, with argparse's messages.
 
+use crate::policycmd::PolicyAction;
 use crate::providercmd::{ProviderAction, ProviderOptions};
+use kv_broker::HttpRuleOptions;
 
 pub enum Command {
     Version,
@@ -42,6 +44,7 @@ pub enum Command {
     NetworkAllow(Option<String>),
     NetworkDeny(String),
     Provider(crate::providercmd::ProviderAction),
+    Policy(PolicyAction),
     AgentChild,
     Hook {
         mode: String,
@@ -79,7 +82,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,allow,deny,network-allow,network-deny,provider,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,allow,deny,network-allow,network-deny,provider,policy,version,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -380,6 +383,19 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                 if spec.name == "provider add" {
                     validate_provider_option(spec, option, &value)?;
                 }
+                if spec.name == "policy http add" && matches!(*option, "--path" | "--path-prefix") {
+                    let other = if *option == "--path" {
+                        "--path-prefix"
+                    } else {
+                        "--path"
+                    };
+                    if parsed.options.iter().any(|(name, _)| *name == other) {
+                        return Err(spec_error(
+                            spec,
+                            &format!("argument {option}: not allowed with argument {other}"),
+                        ));
+                    }
+                }
                 parsed.options.push((option, value));
                 i += 1;
                 continue;
@@ -399,7 +415,9 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
         .count();
     let missing_secret =
         spec.name == "provider add" && !parsed.options.iter().any(|(key, _)| *key == "--secret");
-    if parsed.positionals.len() < required || missing_secret {
+    let missing_id =
+        spec.name == "policy http add" && !parsed.options.iter().any(|(key, _)| *key == "--id");
+    if parsed.positionals.len() < required || missing_secret || missing_id {
         let mut missing: Vec<&str> = spec
             .positionals
             .iter()
@@ -410,12 +428,26 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
         if missing_secret {
             missing.push("--secret");
         }
+        if missing_id {
+            missing.push("--id");
+        }
         return Err(spec_error(
             spec,
             &format!(
                 "the following arguments are required: {}",
                 missing.join(", ")
             ),
+        ));
+    }
+    if spec.name == "policy http add"
+        && !parsed
+            .options
+            .iter()
+            .any(|(name, _)| matches!(*name, "--path" | "--path-prefix"))
+    {
+        return Err(spec_error(
+            spec,
+            "one of the arguments --path --path-prefix is required",
         ));
     }
     if parsed.positionals.len() > spec.positionals.len() {
@@ -448,6 +480,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "provider" {
         return parse_provider(&argv[1..]);
+    }
+    if first == "policy" {
+        return parse_policy(&argv[1..]);
     }
     if first == "history" {
         return parse_history(&argv[1..]);
@@ -843,6 +878,127 @@ fn validate_provider_option(spec: &Spec, key: &str, value: &str) -> Result<(), P
         ));
     }
     Ok(())
+}
+
+const POLICY_USAGE: &str =
+    "usage: kv policy [-h] {http,list,watch,request,allow,block,deny,prune} ...\n";
+const HTTP_USAGE: &str = "usage: kv policy http [-h] {list,add,remove,rm} ...\n";
+const HTTP_LIST: Spec = Spec {
+    name: "policy http list",
+    usage: "usage: kv policy http list [-h] [provider]\n",
+    help: "\npositional arguments:\n  provider    Optional provider name\n\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &["?provider"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const HTTP_REMOVE: Spec = Spec {
+    name: "policy http remove",
+    usage: "usage: kv policy http remove [-h] provider rule_id\n",
+    help: "\npositional arguments:\n  provider    HTTP provider name\n  rule_id     Rule id to remove\n\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &["provider", "rule_id"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const HTTP_ADD: Spec = Spec {
+    name: "policy http add",
+    usage: "usage: kv policy http add [-h] --id RULE_ID [--method METHODS]\n                          (--path PATH | --path-prefix PATH_PREFIX)\n                          [--query-key QUERY_KEYS] [--header ALLOWED_HEADERS]\n                          provider\n",
+    help: "\npositional arguments:\n  provider              HTTP provider name, such as github or a custom\n                        provider\n\noptions:\n  -h, --help            show this help message and exit\n",
+    positionals: &["provider"],
+    env: false,
+    flags: &[],
+    options: &[
+        ("--id", "  --id RULE_ID          Rule id, e.g. user-read\n"),
+        (
+            "--method",
+            "  --method METHODS      Allowed method; repeat to add more (default: GET).\n                        POST, PUT, PATCH or DELETE make an unsafe rule; unsafe\n                        calls need owner approval\n",
+        ),
+        (
+            "--path",
+            "  --path PATH           Exact origin-relative path, e.g. /user\n",
+        ),
+        (
+            "--path-prefix",
+            "  --path-prefix PATH_PREFIX\n                        Segment-aware origin-relative path prefix\n",
+        ),
+        (
+            "--query-key",
+            "  --query-key QUERY_KEYS\n                        Allowed query key; repeat for each key\n",
+        ),
+        (
+            "--header",
+            "  --header ALLOWED_HEADERS\n                        Allowed caller header; repeat for each header\n",
+        ),
+    ],
+};
+
+fn parse_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    if rest.first().is_some_and(|v| v == "-h" || v == "--help") {
+        return Err(ParseError::Help(format!(
+            "{POLICY_USAGE}\npositional arguments:\n  {{http,list,watch,request,allow,block,deny,prune}}\n    http                Manage HTTP broker route rules\n    list                List pending command-policy requests\n    watch               Show the terminal command-policy inbox\n    request             Create a blocked command-policy request\n    allow               Allow a pending command shape\n    block               Keep a pending command shape blocked\n    deny                ==SUPPRESS==\n    prune               Remove non-pending and expired policy request records\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    if rest.first().map(String::as_str) != Some("http") {
+        return Ok(Some(Command::Policy(PolicyAction::Unavailable)));
+    }
+    let rest = &rest[1..];
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Policy(PolicyAction::HttpList(None))));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{HTTP_USAGE}\npositional arguments:\n  {{list,add,remove,rm}}\n    list                List HTTP broker route rules\n    add                 Add an HTTP broker route rule; unsafe calls need owner\n                        approval\n    remove (rm)         Remove an HTTP broker route rule\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    let spec = match action.as_str() {
+        "list" => &HTTP_LIST,
+        "add" => &HTTP_ADD,
+        "remove" | "rm" => &HTTP_REMOVE,
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{HTTP_USAGE}kv policy http: error: argument http_policy_action: invalid choice: '{action}' (choose from 'list', 'add', 'remove', 'rm')\n"
+            )));
+        }
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let option = |key| {
+        parsed
+            .options
+            .iter()
+            .rev()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+    };
+    let repeated = |key| {
+        parsed
+            .options
+            .iter()
+            .filter(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+            .collect()
+    };
+    let mut pos = parsed.positionals.into_iter();
+    let provider = pos.next();
+    let action = match action.as_str() {
+        "list" => PolicyAction::HttpList(provider),
+        "add" => PolicyAction::HttpAdd {
+            provider: provider.unwrap_or_default(),
+            rule: Box::new(HttpRuleOptions {
+                id: option("--id").unwrap_or_default(),
+                methods: repeated("--method"),
+                path: option("--path"),
+                path_prefix: option("--path-prefix"),
+                query_keys: repeated("--query-key"),
+                allowed_headers: repeated("--header"),
+            }),
+        },
+        _ => PolicyAction::HttpRemove {
+            provider: provider.unwrap_or_default(),
+            id: pos.next().unwrap_or_default(),
+        },
+    };
+    Ok(Some(Command::Policy(action)))
 }
 
 fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {

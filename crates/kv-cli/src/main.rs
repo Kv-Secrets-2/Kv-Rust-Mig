@@ -12,6 +12,7 @@ mod hook;
 mod init;
 mod lifecycle;
 mod owner_policy;
+mod policycmd;
 mod project;
 mod providercmd;
 mod registry;
@@ -97,6 +98,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         NetworkAllow(pattern) => allowcmd::cmd_network_allow(p, pattern.as_deref()),
         NetworkDeny(pattern) => allowcmd::cmd_network_deny(p, &pattern),
         Provider(action) => providercmd::cmd_provider(p, action),
+        Policy(action) => policycmd::cmd_policy(p, action),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Vault(action) => vaultcmd::cmd_vault(p, action),
