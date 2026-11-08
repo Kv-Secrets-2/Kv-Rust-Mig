@@ -881,7 +881,6 @@ fn grants_and_tokens_match_python() {
             .env("KV_PY_REF", python)
             .env("KV_GRANTS_PARITY_BASE", &base)
             .output()
-
             .unwrap();
         assert!(
             output.status.success(),

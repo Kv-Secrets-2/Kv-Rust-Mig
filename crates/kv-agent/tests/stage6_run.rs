@@ -462,3 +462,101 @@ fn stop_waits_for_a_running_program_and_ends_it_on_now() {
     );
     join.join().unwrap().unwrap();
 }
+
+fn sign_grant_for_running_daemon(python: &std::ffi::OsStr, vault: &Vault, case: &Value) -> Value {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/py/grant_for_daemon.py");
+    let mut child = Command::new(python)
+        .arg(&script)
+        .env("HOME", &vault.home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run Python grant signer");
+    let mut case = case.clone();
+    case["root"] = json!(vault.root);
+    case["passphrase"] = json!(vault.passphrase);
+    use std::io::Write as _;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(case.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "grant signer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("grant JSON")
+}
+
+/// A secret-bearing run admitted by an owner-signed grant: the secret reaches the program
+/// (under bubblewrap, through the sealed descriptor) and only `[REDACTED]` reaches the caller;
+/// the one-use grant is spent; both daemons answer alike.
+#[test]
+fn secret_bearing_run_with_an_owner_grant_matches_python() {
+    let Some(python) = kv_test_support::python_reference() else {
+        eprintln!("SKIP Stage 6c grant run parity: set KV_PY_REF");
+        return;
+    };
+    if !Path::new("/usr/bin/bwrap").exists() && !Path::new("/usr/local/bin/bwrap").exists() {
+        eprintln!("SKIP Stage 6c grant run parity: bubblewrap is not installed");
+        return;
+    }
+    let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let vault = prepare_vault(&python, "g6");
+    let project = vault.root.join("project");
+    fs::create_dir(&project).unwrap();
+    let script = project.join("show.py");
+    fs::write(
+        &script,
+        "import os\nprint('key', os.environ['API_KEY'])\nprint('kept', os.environ.get('MULTILINE'))\nprint('done')\n",
+    )
+    .unwrap();
+    let actor = json!({"source": "mcp", "client_name": "codex", "session_id": "s-1"});
+    let grant_case = json!({
+        "argv": ["python3", script], "cwd": project, "secret_names": ["API_KEY"],
+        "actor": actor, "env": "dev",
+    });
+    let run_fields = json!({
+        "argv": ["python3", script], "env_names": ["API_KEY"], "cwd": project,
+        "audit_ctx": actor,
+    });
+
+    let python_daemon = start_python_daemon(&python, &vault);
+    sign_grant_for_running_daemon(&python, &vault, &grant_case);
+    let python_first = python_agent_request(&python, &vault.root, &vault.home, "run", &run_fields);
+    let python_second = python_agent_request(&python, &vault.root, &vault.home, "run", &run_fields);
+    stop_daemon(&vault.root);
+    drop(python_daemon);
+
+    let join = start_rust_daemon(&vault);
+    sign_grant_for_running_daemon(&python, &vault, &grant_case);
+    let rust_first = rust_request(&vault.root, "run", &run_fields);
+    let rust_second = rust_request(&vault.root, "run", &run_fields);
+    stop_daemon(&vault.root);
+    join.join().unwrap().unwrap();
+
+    assert_eq!(
+        python_first.get("stdout").and_then(Value::as_str),
+        Some("key [REDACTED]\nkept None\ndone\n"),
+        "python first: {python_first}"
+    );
+    assert_eq!(
+        comparable(rust_first.clone()),
+        comparable(python_first.clone()),
+        "admitted run differs"
+    );
+    assert_eq!(
+        comparable(rust_second.clone()),
+        comparable(python_second.clone()),
+        "spent-grant run differs"
+    );
+    assert_eq!(
+        python_second["exit_code"],
+        json!(1),
+        "python second: {python_second}"
+    );
+}

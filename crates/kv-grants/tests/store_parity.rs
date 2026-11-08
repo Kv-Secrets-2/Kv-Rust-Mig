@@ -450,7 +450,6 @@ fn stores_match_python() {
         .env("KV_GRANTS_STORE_PROBE_IN", &rust_in)
         .env("KV_GRANTS_STORE_PROBE_OUT", &rust_out)
         .output()
-
         .unwrap();
     assert!(
         output.status.success(),

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 80,
+  "minimum_comparisons": 83,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -22,6 +22,11 @@
       "permit_audit_attribution_and_session_state_match_python",
       "unprotected_session_refuses_before_lookup_or_preview_like_python",
       "protected_approval_allows_review_but_refuses_registration_like_python"
+    ],
+    "kv-agent/stage6_run": [
+      "run_replies_match_python_on_the_same_vault",
+      "secret_bearing_run_with_an_owner_grant_matches_python",
+      "stop_waits_for_a_running_program_and_ends_it_on_now"
     ],
     "kv-agent/stage6_shutdown": [
       "invalid_stop_choices_and_idle_client_cleanup_match_python",
