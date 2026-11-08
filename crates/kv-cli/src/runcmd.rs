@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
-use crate::project::{self, CmdResult, Exit, agent_request, is_agent_running, require_project};
+use crate::project::{self, CmdResult, Exit, is_agent_running, require_project};
 use crate::ui::{self, Palette};
 
 pub struct RunArgs {
@@ -112,7 +112,9 @@ pub fn cmd_run(p: &Palette, args: RunArgs) -> CmdResult {
             ui::header(p, &format!("running via agent ({env})"));
             ui::blank();
         }
-        let Some(result) = agent_request(root, "run", fields) else {
+        // Python: `agent_request("run", timeout=None, ...)`; the program may run for
+        // as long as the service allows, so the client waits without a limit.
+        let Ok(result) = kv_proto::agent_request_with_timeout(root, "run", &fields, None) else {
             return Err(project::fail(p, "agent error: the agent did not answer"));
         };
         if let Some(error) = result.get("error") {
