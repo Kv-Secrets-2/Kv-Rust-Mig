@@ -61,8 +61,10 @@ def main():
             grant = grants.create_run_grant(
                 root, identity, secret_names=secret_names or None,
                 capability_names=capability_names or None, actor=case.get("actor"),
-                owner_sign=sign, **({"usage_mode": "reusable", "max_runs": case["max_runs"]}
-                                    if case.get("max_runs") else {}))
+                owner_sign=sign,
+                **({"max_calls": case["max_calls"]} if case.get("max_calls") else {}),
+                **({"usage_mode": "reusable", "max_runs": case["max_runs"]}
+                   if case.get("max_runs") else {}))
         print(json.dumps({"grant_id": grant["grant_id"],
                           "command_fingerprint": identity["command_fingerprint"]}))
     finally:

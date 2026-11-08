@@ -37,6 +37,7 @@ pub(crate) struct CapCtx<'a> {
     pub(crate) lifecycle: &'a Arc<Lifecycle>,
     pub(crate) connection: &'a ConnectionGuard,
     pub(crate) shared: &'a Shared,
+    pub(crate) audit: &'a kv_audit::Audit,
     pub(crate) env: &'a str,
     pub(crate) request: &'a Map<String, Value>,
 }
@@ -207,13 +208,6 @@ pub(crate) fn handle(ctx: &CapCtx<'_>) -> Value {
         }
         Err(error) => return json!({"error": error.to_string()}),
     };
-    if per_call {
-        return unconsumed(json!({
-            "error":"one-call permits for capability runs are not supported by this kv service yet",
-            "error_code":"permit_request_refused"
-        }));
-    }
-
     // `_granted_api_call`: the pass's verified grant must cover this call and this provider
     // definition before anything is charged or sent.
     let digest = kv_approvals::wire::provider_digest(provider).ok();
@@ -244,18 +238,98 @@ pub(crate) fn handle(ctx: &CapCtx<'_>) -> Value {
         timeout: Duration::from_secs(API_TIMEOUT),
         max_response_bytes: kv_broker::MAX_BROKER_RESPONSE_BYTES,
     };
+    // `_prepare_api_permit` with the pass's grant and run: a capability run's permit is
+    // signed for this run only, and waits as long as the owner chose for its grant.
+    let run = if per_call {
+        let (Some(grant_id), Some(run_id)) = (
+            record.get("grant_id").and_then(Value::as_str),
+            record.get("created_from_run_id").and_then(Value::as_str),
+        ) else {
+            return unconsumed(json!({
+                "error":"a script permit requires its grant and run",
+                "error_code":"permit_request_refused"
+            }));
+        };
+        Some(permits::RunBinding {
+            grant_id,
+            run_id,
+            wait_seconds: verified.as_ref().and_then(|v| v.owner_wait_seconds),
+        })
+    } else {
+        None
+    };
+    let permit_id = if per_call {
+        match permits::prepare(
+            ctx.trust,
+            ctx.permits,
+            ctx.audit,
+            request,
+            ctx.env,
+            ctx.caller,
+            api_request.clone(),
+            decision.get("policy_rule"),
+            run,
+        ) {
+            Ok(id) => Some(id),
+            Err(response) => return unconsumed(response),
+        }
+    } else {
+        None
+    };
+    let empty_headers = Map::new();
+    let caller_headers = headers.as_object().unwrap_or(&empty_headers);
     let charged: RefCell<Option<Map<String, Value>>> = RefCell::new(None);
     let refused = Cell::new(false);
     let mut result = ctx.caller.call_with_checks(
         api_request,
-        |_preview| Ok(()),
-        |()| {
-            // The charge (`spend_pass`, this call's service only) happens inside the
-            // commit: a hard lock or a stop refuses the call before anything is sent.
+        |preview| {
+            permit_id
+                .map(|id| {
+                    ctx.permits
+                        .match_call(
+                            id,
+                            permits::call_facts(
+                                ctx.env,
+                                provider_name,
+                                provider,
+                                caller_headers,
+                                preview,
+                                run,
+                            ),
+                        )
+                        .map_err(|error| unconsumed(permits::invalid_error(error)))
+                })
+                .transpose()
+        },
+        |matched| {
+            // The charge happens inside the commit: a hard lock or a stop refuses the
+            // call before anything is sent. With a permit (`spend_permit` with the
+            // token hash) the pass's bindings are checked, the permit is spent, then
+            // the pass is debited for this call's service; without one, `spend_pass`.
             let committed = ctx
                 .lifecycle
                 .try_commit_for_with_charge(ctx.connection, || {
                     let pin = ctx.trust.observe_held().map_err(permits::hard_lock_error)?;
+                    if let (Some(matched), Some(run)) = (matched.as_ref(), run) {
+                        ctx.shared
+                            .ledger
+                            .check_pass_for_permit(
+                                &hash,
+                                now_epoch(),
+                                &capability_name,
+                                Some(run.grant_id),
+                                Some(run.run_id),
+                            )
+                            .map_err(|error| {
+                                unconsumed(json!({
+                                    "error": error.message(),
+                                    "error_code": "permit_invalid"
+                                }))
+                            })?;
+                        ctx.permits
+                            .spend_for_run(matched, run.grant_id, run.run_id)
+                            .map_err(|error| unconsumed(permits::invalid_error(error)))?;
+                    }
                     let record = ctx
                         .shared
                         .ledger

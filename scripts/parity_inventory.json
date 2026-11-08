@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 91,
+  "minimum_comparisons": 92,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -26,7 +26,8 @@
       "protected_approval_allows_review_but_refuses_registration_like_python"
     ],
     "kv-agent/stage6_capapi": [
-      "capability_run_api_calls_match_python"
+      "capability_run_api_calls_match_python",
+      "capability_run_permit_matches_python"
     ],
     "kv-agent/stage6_run": [
       "run_replies_match_python_on_the_same_vault",

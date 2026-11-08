@@ -30,6 +30,10 @@ use url::Url;
 
 const API_SECRET: &str = "stage6d-cap-secret-value-1234567890";
 const PROVIDER: &str = "stage6-local";
+/// A public-shaped hostname for the loopback provider: a one-call permit refuses a
+/// URL whose host is a non-global address, so both daemons' URL safety hooks resolve
+/// this name to 127.0.0.1 (as the stage 5 permit fixture does).
+const HOST: &str = "stage6-fixture.example";
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
@@ -83,10 +87,10 @@ struct LocalSafety;
 
 impl UrlSafety for LocalSafety {
     fn check(&self, url: &Url) -> Result<IpAddr, String> {
-        if url.host_str() == Some("127.0.0.1") {
+        if matches!(url.host_str(), Some("127.0.0.1") | Some(HOST)) {
             Ok(IpAddr::V4(Ipv4Addr::LOCALHOST))
         } else {
-            Err("test caller only permits localhost".into())
+            Err("test caller only permits the loopback provider".into())
         }
     }
 }
@@ -212,8 +216,8 @@ impl HttpsServer {
             .self_signed(&ca_key_pair)
             .expect("self-sign test CA");
         let server_key_pair = KeyPair::generate().expect("generate test server key");
-        let mut server_params =
-            CertificateParams::new(vec!["127.0.0.1".into()]).expect("test server parameters");
+        let mut server_params = CertificateParams::new(vec!["127.0.0.1".into(), HOST.into()])
+            .expect("test server parameters");
         server_params
             .extended_key_usages
             .push(ExtendedKeyUsagePurpose::ServerAuth);
@@ -236,6 +240,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     def log_message(self, *args):
         pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.do_GET()
     def do_GET(self):
         with open(observed, "a", encoding="utf-8") as output:
             output.write(json.dumps({"method":self.command,"path":self.path,"authorization":self.headers.get("Authorization")})+"\n")
@@ -323,7 +330,7 @@ fn prepare_vault(python: &std::ffi::OsStr, tag: &str, server: &HttpsServer) -> V
         &home,
         &[&passphrase],
     );
-    let base_url = format!("https://127.0.0.1:{}", server.port);
+    let base_url = format!("https://{HOST}:{}", server.port);
     let config_path = secrets_path.join("config.json");
     let mut config: Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
     if !config["providers"].is_object() {
@@ -338,7 +345,10 @@ fn prepare_vault(python: &std::ffi::OsStr, tag: &str, server: &HttpsServer) -> V
     config["broker_policy"]["http"][PROVIDER] = json!({
         "origin": base_url,
         "secret_name": "API_TOKEN",
-        "rules": [{"id": "safe-read", "methods": ["GET"], "path_prefix": "/api", "approval": "none"}]
+        "rules": [
+            {"id": "safe-read", "methods": ["GET"], "path_prefix": "/api", "approval": "none"},
+            {"id": "write", "methods": ["POST"], "path_prefix": "/api/write", "approval": "per-call"}
+        ]
     });
     fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
     kv_store::config_authority::approve_config_unattended(&root, &master).unwrap();
@@ -456,6 +466,21 @@ fn comparable(mut value: Value) -> Value {
         ] {
             map.remove(key);
         }
+        // `kv.cap_client` names the pending permit request on stderr; its id is random.
+        if let Some(stderr) = map.get("stderr").and_then(Value::as_str) {
+            let masked = stderr
+                .split_whitespace()
+                .map(|word| {
+                    if word.starts_with("permit_request_") {
+                        "permit_request_<id>"
+                    } else {
+                        word
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            map.insert("stderr".into(), Value::String(masked));
+        }
     }
     value
 }
@@ -476,12 +501,79 @@ fn capability_events(home: &Path) -> Vec<Value> {
                 "capability_token_id",
                 "run_id",
                 "grant_id",
+                "permit_id",
+                "request_id",
             ] {
                 object.remove(field);
             }
             event
         })
         .collect()
+}
+
+/// Python coalesces a run's repeated identical refusals (`RefusalCoalescer`) and the
+/// script polls a pending permit once a second, so only the sequence of distinct
+/// consecutive events is comparable between the two daemons.
+fn distinct_consecutive(events: Vec<Value>) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for event in events {
+        if out.last() != Some(&event) {
+            out.push(event);
+        }
+    }
+    out
+}
+
+/// The owner approves the one pending one-call permit of a running capability script
+/// with the pinned Python owner client (`PermitSigningContext`), as `kv approvals
+/// approve` does, once the daemon lists it.
+fn approve_pending_permit(
+    python: &std::ffi::OsStr,
+    vault: &Vault,
+    list: impl Fn() -> Value,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let request_id = loop {
+        let listed = list();
+        if let Some(first) = listed["requests"].as_array().and_then(|r| r.first()) {
+            break first["request_id"].as_str().unwrap().to_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no permit request appeared: {listed}; events so far: {:?}",
+            capability_events(&vault.home)
+        );
+        thread::sleep(Duration::from_millis(200));
+    };
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/permits.py");
+    let mut child = Command::new(python)
+        .arg("-I")
+        .arg(&script)
+        .arg("owner")
+        .arg(&vault.root)
+        .arg(&vault.passphrase)
+        .env("HOME", &vault.home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run the Python owner client");
+    use std::io::Write as _;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(json!({"request_id": request_id}).to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "owner approval failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let approved: Value = serde_json::from_slice(&output.stdout).expect("owner JSON");
+    assert_eq!(approved["status"], "registered", "{approved}");
+    approved
 }
 
 const SCRIPT: &str = r#"
@@ -506,6 +598,160 @@ show("second", lambda: api_call("stage6-local", "/api/two"))
 /// out with the provider secret and comes back redacted, a call outside the policy and an
 /// unknown provider are refused without charge, and both daemons agree, run reply, script
 /// output and `capability_api` audit events alike.
+const SCRIPT_POST: &str = r#"
+import json
+from kv.cap_client import api_call
+
+def show(label, call):
+    try:
+        reply = call()
+        extra = {k: reply.raw.get(k) for
+                 k in ("capability_name", "capability_consumed",
+                       "capability_remaining_calls")}
+        print(label, reply.status, json.dumps(reply.body, sort_keys=True),
+              json.dumps(extra, sort_keys=True))
+    except Exception as exc:
+        print(label, "error", type(exc).__name__, str(exc))
+
+show("post", lambda: api_call("stage6-local", "/api/write", method="POST", body={"n": 1}))
+show("after", lambda: api_call("stage6-local", "/api/after"))
+"#;
+
+/// Stage 6d-1b: a capability script's POST waits for the owner's one-call permit
+/// (`_prepare_api_permit` with the pass's grant and run), which is spent together with
+/// the pass at send time; the two daemons agree on the reply, the provider's view, the
+/// pass accounting and the audit record.
+#[test]
+fn capability_run_permit_matches_python() {
+    let Some(python) = kv_test_support::python_reference() else {
+        eprintln!("SKIP Stage 6d-1b permit parity: set KV_PY_REF");
+        return;
+    };
+    if !bwrap_installed() {
+        eprintln!("SKIP Stage 6d-1b permit parity: bubblewrap is not installed");
+        return;
+    }
+    let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let server_dir = TestDir(harness::socket_temp_dir("c6p", "x"));
+    let server = HttpsServer::start(&python, &server_dir.0);
+    let vault = prepare_vault(&python, "c6p", &server);
+    let project = vault.root.join("project");
+    fs::create_dir(&project).unwrap();
+    let script = project.join("post.py");
+    fs::write(&script, SCRIPT_POST).unwrap();
+    let python_path = Path::new(&python).to_path_buf();
+    let actor = json!({"source": "mcp", "client_name": "codex", "session_id": "s-6d1b"});
+    let grant_case = json!({
+        "argv": [python_path, script], "cwd": project,
+        "capability_names": [format!("api:{PROVIDER}")], "actor": actor, "env": "dev",
+        "max_calls": 2,
+    });
+    let run_fields = json!({
+        "argv": [python_path, script], "capability_names": [format!("api:{PROVIDER}")],
+        "cwd": project, "audit_ctx": actor,
+    });
+
+    let python_daemon = start_python_daemon(&python, &vault, &server);
+    sign_grant_for_running_daemon(&python, &vault, &grant_case);
+    let python_run = {
+        let (interpreter, root, home, fields) = (
+            python.clone(),
+            vault.root.clone(),
+            vault.home.clone(),
+            run_fields.clone(),
+        );
+        let run =
+            thread::spawn(move || python_agent_request(&interpreter, &root, &home, "run", &fields));
+        approve_pending_permit(&python, &vault, || {
+            python_agent_request(
+                &python,
+                &vault.root,
+                &vault.home,
+                "permit_requests",
+                &json!({}),
+            )
+        });
+        run.join().unwrap()
+    };
+    stop_daemon(&vault.root);
+    drop(python_daemon);
+    let python_events = capability_events(&vault.home);
+    let python_observed = server.observed();
+
+    let join = start_rust_daemon(&vault, &server);
+    sign_grant_for_running_daemon(&python, &vault, &grant_case);
+    let rust_run = {
+        let (root, fields) = (vault.root.clone(), run_fields.clone());
+        let run = thread::spawn(move || rust_request(&root, "run", &fields));
+        approve_pending_permit(&python, &vault, || {
+            rust_request(&vault.root, "permit_requests", &json!({}))
+        });
+        run.join().unwrap()
+    };
+    stop_daemon(&vault.root);
+    join.join().unwrap().unwrap();
+    let rust_events = capability_events(&vault.home)[python_events.len()..].to_vec();
+    let rust_observed = server.observed()[python_observed.len()..].to_vec();
+
+    let stdout = python_run["stdout"].as_str().unwrap_or("");
+    assert!(
+        stdout.starts_with("post 200 ") && stdout.contains("\nafter 200 "),
+        "python run: {python_run}"
+    );
+    assert!(
+        !stdout.contains(API_SECRET) && stdout.contains("[REDACTED]"),
+        "the secret must only reach the provider: {stdout}"
+    );
+    assert_eq!(
+        comparable(rust_run.clone()),
+        comparable(python_run.clone()),
+        "capability run replies differ"
+    );
+    let seen = |observed: &[Value]| {
+        observed
+            .iter()
+            .map(|r| {
+                (
+                    r["method"].clone(),
+                    r["path"].clone(),
+                    r["authorization"].clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        seen(&python_observed),
+        vec![
+            (
+                json!("POST"),
+                json!("/api/write"),
+                json!(format!("Bearer {API_SECRET}"))
+            ),
+            (
+                json!("GET"),
+                json!("/api/after"),
+                json!(format!("Bearer {API_SECRET}"))
+            ),
+        ],
+        "python provider calls"
+    );
+    assert_eq!(
+        seen(&rust_observed),
+        seen(&python_observed),
+        "the provider saw different calls"
+    );
+    assert!(
+        !python_events.is_empty(),
+        "python wrote no capability_api events"
+    );
+    assert_eq!(
+        distinct_consecutive(rust_events),
+        distinct_consecutive(python_events),
+        "capability_api audit events differ"
+    );
+    println!("KV_PARITY_COMPARISONS 1");
+}
+
 #[test]
 fn capability_run_api_calls_match_python() {
     let Some(python) = kv_test_support::python_reference() else {

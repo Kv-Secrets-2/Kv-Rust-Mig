@@ -1070,6 +1070,7 @@ fn handle_connection(
             lifecycle,
             connection,
             shared,
+            audit,
             env,
             request,
         });
@@ -2003,6 +2004,7 @@ fn api_call_response(
             caller,
             api_request.clone(),
             decision.get("policy_rule"),
+            None,
         ) {
             Ok(id) => Some(id),
             Err(response) => return response,
@@ -2027,6 +2029,7 @@ fn api_call_response(
                                 provider,
                                 caller_headers,
                                 preview,
+                                None,
                             ),
                         )
                         .map_err(permits::invalid_error)
