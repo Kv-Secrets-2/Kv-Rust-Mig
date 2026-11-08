@@ -38,6 +38,16 @@ pub enum Command {
     Hook {
         mode: String,
     },
+    Run {
+        env: Option<String>,
+        cwd: Option<String>,
+        private_cwd: Option<bool>,
+        quiet: bool,
+        secret_names: Option<Vec<String>>,
+        no_secrets: bool,
+        capability_names: Vec<String>,
+        cmd: Vec<String>,
+    },
     Vault(crate::vaultcmd::VaultAction),
     Env(crate::envcmd::EnvAction),
     History(crate::history::HistoryAction),
@@ -71,7 +81,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,run,unlock,lock,status,export,envs,env,vault,version,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -394,6 +404,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     if first == "hook" {
         let mode = argv.get(1).cloned().unwrap_or_else(|| "pre".to_owned());
         return Ok(Some(Command::Hook { mode }));
+    }
+    if first == "run" {
+        return parse_run(&argv[1..]);
     }
     if first == crate::lifecycle::AGENT_CHILD {
         return Ok(Some(Command::AgentChild));
@@ -875,4 +888,109 @@ fn parse_vault(rest: &[String]) -> Result<Option<Command>, ParseError> {
         return Ok(Some(Command::Vault(VaultAction::ApproveConfig)));
     }
     Ok(Some(Command::Vault(VaultAction::Unported(action.clone()))))
+}
+
+const RUN_USAGE: &str = "usage: kv run [-h] [-e ENV] [--cwd CWD] [--private-cwd | --no-private-cwd]\n              [-q] [--secret NAME | --no-secrets | --capability api:PROVIDER]\n              ...\n";
+const RUN_HELP: &str = "\npositional arguments:\n  cmd                   Command to run\n\noptions:\n  -h, --help            show this help message and exit\n  -e ENV, --env ENV     Environment (default: the project's default)\n  --cwd CWD             Working directory for the command (default: current\n                        directory)\n  --private-cwd         Run secret-bearing commands in a private cwd copy and\n                        copy back safe outputs\n  --no-private-cwd      Disable the private cwd copy for this run (capability\n                        runs use it by default)\n  -q, --quiet           Suppress kv output\n  --secret NAME         Inject only this secret name (repeatable; must appear\n                        before COMMAND)\n  --no-secrets          Run without injecting secrets (must appear before\n                        COMMAND)\n  --capability api:PROVIDER\n                        Inject a temporary broker token for api:<provider>\n                        instead of raw secrets\n";
+
+fn run_error(message: &str) -> ParseError {
+    ParseError::Usage(format!("{RUN_USAGE}kv run: error: {message}\n"))
+}
+
+/// `kv run`: argparse options before the command, then `REMAINDER` (the
+/// command itself, kept verbatim from its first token or `--`).
+fn parse_run(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let mut env = None;
+    let mut cwd = None;
+    let mut private_cwd: Option<bool> = None;
+    let mut private_flag: Option<&str> = None;
+    let mut quiet = false;
+    let mut secret_names: Option<Vec<String>> = None;
+    let mut no_secrets = false;
+    let mut capability_names: Vec<String> = Vec::new();
+    let mut scope_flag: Option<&str> = None;
+    let mut i = 0;
+    let exclusive =
+        |standing: &mut Option<&'static str>, flag: &'static str| -> Result<(), ParseError> {
+            match standing {
+                Some(other) if *other != flag => Err(run_error(&format!(
+                    "argument {flag}: not allowed with argument {other}"
+                ))),
+                _ => {
+                    *standing = Some(flag);
+                    Ok(())
+                }
+            }
+        };
+    while i < rest.len() {
+        let arg = &rest[i];
+        if arg == "--" || !arg.starts_with('-') || arg.len() == 1 {
+            break;
+        }
+        if arg == "-h" || arg == "--help" {
+            return Err(ParseError::Help(format!("{RUN_USAGE}{RUN_HELP}")));
+        }
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) if arg.starts_with("--") => {
+                (name.to_owned(), Some(value.to_owned()))
+            }
+            _ => (arg.clone(), None),
+        };
+        let take_value = |aliases: &str, i: &mut usize| -> Result<String, ParseError> {
+            if let Some(value) = &inline {
+                return Ok(value.clone());
+            }
+            *i += 1;
+            match rest.get(*i) {
+                Some(value) if !(value.starts_with('-') && value.len() > 1) => Ok(value.clone()),
+                _ => Err(run_error(&format!(
+                    "argument {aliases}: expected one argument"
+                ))),
+            }
+        };
+        match name.as_str() {
+            "-e" | "--env" => env = Some(take_value("-e/--env", &mut i)?),
+            "--cwd" => cwd = Some(take_value("--cwd", &mut i)?),
+            "--private-cwd" => {
+                exclusive(&mut private_flag, "--private-cwd")?;
+                private_cwd = Some(true);
+            }
+            "--no-private-cwd" => {
+                exclusive(&mut private_flag, "--no-private-cwd")?;
+                private_cwd = Some(false);
+            }
+            "-q" | "--quiet" => quiet = true,
+            "--secret" => {
+                let value = take_value("--secret", &mut i)?;
+                exclusive(&mut scope_flag, "--secret")?;
+                secret_names.get_or_insert_with(Vec::new).push(value);
+            }
+            "--no-secrets" => {
+                exclusive(&mut scope_flag, "--no-secrets")?;
+                no_secrets = true;
+            }
+            "--capability" => {
+                let value = take_value("--capability", &mut i)?;
+                exclusive(&mut scope_flag, "--capability")?;
+                capability_names.push(value);
+            }
+            _ => {
+                return Err(top_error(&format!(
+                    "unrecognized arguments: {}",
+                    rest[i..].join(" ")
+                )));
+            }
+        }
+        i += 1;
+    }
+    Ok(Some(Command::Run {
+        env,
+        cwd,
+        private_cwd,
+        quiet,
+        secret_names,
+        no_secrets,
+        capability_names,
+        cmd: rest[i..].to_vec(),
+    }))
 }

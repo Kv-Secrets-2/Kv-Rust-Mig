@@ -14,6 +14,7 @@ mod project;
 mod registry;
 mod render;
 mod reserved_env;
+mod runcmd;
 mod secrets;
 mod terminal;
 mod ui;
@@ -90,6 +91,28 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Status => lifecycle::cmd_status(p),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
+        Run {
+            env,
+            cwd,
+            private_cwd,
+            quiet,
+            secret_names,
+            no_secrets,
+            capability_names,
+            cmd,
+        } => runcmd::cmd_run(
+            p,
+            runcmd::RunArgs {
+                env,
+                cwd,
+                private_cwd,
+                quiet,
+                secret_names,
+                no_secrets,
+                capability_names,
+                cmd,
+            },
+        ),
         Vault(action) => vaultcmd::cmd_vault(p, action),
     }
 }
