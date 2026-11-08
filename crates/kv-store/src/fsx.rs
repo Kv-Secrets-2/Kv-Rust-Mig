@@ -7,9 +7,16 @@ use crate::StoreError;
 
 pub const VAULT_FILE_LIMIT: usize = 64 * 1024 * 1024;
 
-pub(crate) struct StorageLock {
+/// A storage lock is owned by the thread whose lock stack records it.
+///
+/// ```compile_fail
+/// fn transferable<T: Send>() {}
+/// transferable::<kv_store::fsx::StorageLock>();
+/// ```
+pub struct StorageLock {
     identity: PathBuf,
     _file: File,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 pub(crate) struct ConfigLock {
@@ -26,7 +33,7 @@ thread_local! {
     static LOCK_STACK: RefCell<Vec<HeldLock>> = const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) fn strictly_present(path: &Path) -> Result<bool, StoreError> {
+pub fn strictly_present(path: &Path) -> Result<bool, StoreError> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -101,7 +108,7 @@ pub(crate) fn read_regular_limit(
     read_regular_limit_with_metadata(path, what, limit).map(|(contents, _)| contents)
 }
 
-pub(crate) fn read_regular_limit_with_metadata(
+pub fn read_regular_limit_with_metadata(
     path: &Path,
     what: &str,
     limit: usize,
@@ -412,7 +419,7 @@ pub(crate) fn write_atomic(
     write_atomic_limit(path, contents, exclusive, VAULT_FILE_LIMIT, "drawer file")
 }
 
-pub(crate) fn write_atomic_limit(
+pub fn write_atomic_limit(
     path: &Path,
     contents: &[u8],
     exclusive: bool,
@@ -478,7 +485,7 @@ pub(crate) fn write_atomic_limit(
     Ok(())
 }
 
-pub(crate) fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
+pub fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
     if !check_directory(secrets_dir)? {
         return Err(StoreError::Structure(format!(
             "{} must be a real directory",
@@ -550,6 +557,7 @@ pub(crate) fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError
     Ok(StorageLock {
         identity,
         _file: file,
+        _thread: std::marker::PhantomData,
     })
 }
 
@@ -663,6 +671,22 @@ impl Drop for StorageLock {
 impl Drop for ConfigLock {
     fn drop(&mut self) {
         pop_lock(2, &self.identity);
+    }
+}
+
+pub fn require_storage_lock(secrets_dir: &Path) -> Result<(), StoreError> {
+    let identity = lock_identity(secrets_dir, "storage.lock")?;
+    if LOCK_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .any(|held| held.rank == 1 && held.identity == identity)
+    }) {
+        Ok(())
+    } else {
+        Err(StoreError::LockOrder(
+            "required vault lock is not held by this thread".into(),
+        ))
     }
 }
 
