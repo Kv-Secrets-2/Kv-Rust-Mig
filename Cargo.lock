@@ -919,6 +919,7 @@ dependencies = [
  "kv-mcp",
  "kv-preflight",
  "kv-proto",
+ "kv-requests",
  "kv-store",
  "kv-test-support",
  "rustix",
