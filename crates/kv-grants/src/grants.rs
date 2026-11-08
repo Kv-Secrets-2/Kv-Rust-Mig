@@ -57,19 +57,23 @@ impl From<AdmissionRefused> for GrantError {
     }
 }
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use kv_approvals::permit_session::SessionBinding;
 use kv_approvals::risk_card::{minimal_risk_card, normalize_risk_card};
-use kv_approvals::verify::{MAX_COUNT, WalletEntry, post_wallet_binding};
+use kv_approvals::verify::{
+    MAX_COUNT, RunFacts, WalletEntry, post_wallet_binding, refuse_unprotected, run_mismatch,
+    signed_payload,
+};
 use serde_json::{Map, Value, json};
 
 use crate::ledger::Ledger;
 use crate::normalize::{
-    DEFAULT_GRANT_TTL_SECONDS, MAX_STORED_GRANTS, WHEN_SPENT, check_seconds, is_expired, iso,
-    normalize_actor, normalize_grant_id, normalize_reason, normalize_run_identity,
-    normalize_scope_list, normalize_service_calls, py_eq, waiting_after_end,
+    DEFAULT_GRANT_TTL_SECONDS, MAX_STORED_GRANTS, WHEN_SPENT, actor_matches, check_seconds,
+    is_expired, is_revoked, iso, normalize_actor, normalize_grant_id, normalize_reason,
+    normalize_run_identity, normalize_scope_list, normalize_service_calls, py_eq,
+    script_identity_matches, waiting_after_end,
 };
 use crate::store::{StoreKind, read_records, write_records};
 
@@ -88,6 +92,8 @@ pub struct GrantContext<'a> {
     pub signing_key: &'a [u8],
     pub binding: &'a SessionBinding,
     pub ledger: &'a Ledger,
+    /// Provider name -> digest, as the daemon snapshotted it at unlock.
+    pub providers: &'a BTreeMap<String, Value>,
 }
 
 /// The owner's request for a new grant (`create_run_grant` keyword arguments);
@@ -506,4 +512,310 @@ pub(crate) fn trim_grants(
         .into());
     }
     Ok(current)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ListFlags {
+    pub include_expired: bool,
+    pub include_revoked: bool,
+    pub include_consumed: bool,
+}
+
+fn grant_id_of(grant: &Map<String, Value>) -> &str {
+    grant.get("grant_id").and_then(Value::as_str).unwrap_or("")
+}
+
+fn runs_used(ctx: &GrantContext<'_>, grant: &Map<String, Value>) -> i64 {
+    ctx.ledger
+        .run_state(grant_id_of(grant))
+        .map(|state| state.used)
+        .unwrap_or(0)
+}
+
+/// `list_run_grants`: the stored grants with `runs_used`, filtered as asked.
+pub fn list_run_grants(
+    ctx: &GrantContext<'_>,
+    flags: ListFlags,
+    now: i64,
+) -> Result<Vec<Map<String, Value>>, GrantError> {
+    let mut grants = Vec::new();
+    for grant in read_records(ctx.root, StoreKind::Grants)? {
+        let used = runs_used(ctx, &grant);
+        let once = grant.get("usage_mode").and_then(Value::as_str) == Some("once");
+        if !flags.include_consumed && once && used != 0 {
+            continue;
+        }
+        if !flags.include_consumed
+            && grant.get("status").and_then(Value::as_str) == Some("consumed")
+        {
+            continue;
+        }
+        if !flags.include_revoked && is_revoked(&grant) {
+            continue;
+        }
+        if !flags.include_expired && is_expired(&grant, now) {
+            continue;
+        }
+        let mut listed = grant;
+        listed.insert("runs_used".into(), json!(used));
+        grants.push(listed);
+    }
+    Ok(grants)
+}
+
+/// `_valid_grant`: signed for this daemon session, matching `run` when given,
+/// a known usage mode and an intact state seal.
+pub fn valid_grant(
+    ctx: &GrantContext<'_>,
+    grant: &Map<String, Value>,
+    run: Option<&RunFacts>,
+) -> bool {
+    if refuse_unprotected(ctx.binding).is_err() {
+        return false;
+    }
+    let grant_value = Value::Object(grant.clone());
+    let Some(payload) = signed_payload(ctx.binding, &grant_value) else {
+        return false;
+    };
+    if let Some(run) = run
+        && run_mismatch(&payload, run, ctx.providers).is_some()
+    {
+        return false;
+    }
+    matches!(
+        grant.get("usage_mode").and_then(Value::as_str),
+        Some("once" | "reusable")
+    ) && kv_approvals::artifacts::verify_grant_state_integrity(ctx.signing_key, &grant_value)
+}
+
+/// What a run asks for, normalized once for matching.
+pub struct RunRequest {
+    pub identity: Map<String, Value>,
+    pub secret_names: Vec<String>,
+    pub capability_names: Vec<String>,
+    pub actor: Map<String, Value>,
+}
+
+impl RunRequest {
+    pub fn normalize(
+        run_identity: &Value,
+        secret_names: Option<&Value>,
+        capability_names: Option<&Value>,
+        actor: Option<&Value>,
+    ) -> Result<Self, GrantError> {
+        Ok(Self {
+            identity: normalize_run_identity(run_identity)?,
+            secret_names: normalize_scope_list(secret_names, "secret_names")?,
+            capability_names: normalize_scope_list(capability_names, "capability_names")?,
+            actor: normalize_actor(actor)?,
+        })
+    }
+}
+
+fn scope_equals(grant: &Map<String, Value>, field: &str, wanted: &[String]) -> bool {
+    match grant.get(field) {
+        None => wanted.is_empty(),
+        Some(value) => py_eq(value, &json!(wanted)),
+    }
+}
+
+fn actor_allows(grant: &Map<String, Value>, actor: &Map<String, Value>) -> bool {
+    match grant.get("actor") {
+        Some(grant_actor)
+            if !matches!(grant_actor, Value::Null | Value::Bool(false))
+                && !(grant_actor.as_object().is_some_and(Map::is_empty)) =>
+        {
+            actor_matches(grant_actor, &Value::Object(actor.clone()))
+        }
+        _ => true,
+    }
+}
+
+/// `find_matching_run_grant`: the first active grant covering this exact run.
+pub fn find_matching_run_grant(
+    ctx: &GrantContext<'_>,
+    request: &RunRequest,
+    now: i64,
+    run: Option<&RunFacts>,
+) -> Result<Option<Map<String, Value>>, GrantError> {
+    let flags = ListFlags {
+        include_consumed: run.is_some(),
+        ..ListFlags::default()
+    };
+    for grant in list_run_grants(ctx, flags, now)? {
+        let grant_id = grant_id_of(&grant);
+        if ctx.ledger.revoked(grant_id).is_some() {
+            continue;
+        }
+        let once = grant.get("usage_mode").and_then(Value::as_str) == Some("once");
+        if once && runs_used(ctx, &grant) != 0 {
+            continue;
+        }
+        if is_revoked(&grant) || grant.get("status").and_then(Value::as_str) != Some("active") {
+            continue;
+        }
+        if !matches!(
+            grant.get("usage_mode").and_then(Value::as_str),
+            Some("once" | "reusable")
+        ) {
+            continue;
+        }
+        if grant.get("command_fingerprint") != request.identity.get("command_fingerprint") {
+            continue;
+        }
+        if !script_identity_matches(&grant, &request.identity) {
+            continue;
+        }
+        if !scope_equals(&grant, "secret_names", &request.secret_names)
+            || !scope_equals(&grant, "capability_names", &request.capability_names)
+        {
+            continue;
+        }
+        if !actor_allows(&grant, &request.actor) {
+            continue;
+        }
+        if !valid_grant(ctx, &grant, run) {
+            continue;
+        }
+        return Ok(Some(grant));
+    }
+    Ok(None)
+}
+
+fn resolve_path(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_owned())
+}
+
+/// `explain_run_grant_mismatch`: why no grant matched, when a near miss exists.
+pub fn explain_run_grant_mismatch(
+    ctx: &GrantContext<'_>,
+    request: &RunRequest,
+    cwd: Option<&str>,
+    argv: Option<&[String]>,
+    now: i64,
+) -> Result<Option<&'static str>, GrantError> {
+    let run_cwd = cwd.filter(|c| !c.is_empty()).map(resolve_path);
+    let run_argv = argv.map(|a| json!(a));
+    let (mut command_seen, mut requested_seen, mut cwd_seen) = (false, false, false);
+    for grant in list_run_grants(ctx, ListFlags::default(), now)? {
+        if is_revoked(&grant) || !valid_grant(ctx, &grant, None) {
+            continue;
+        }
+        if !actor_allows(&grant, &request.actor) {
+            continue;
+        }
+        let card = grant.get("risk_card").and_then(Value::as_object);
+        let grant_cwd = card
+            .and_then(|c| c.get("cwd"))
+            .and_then(Value::as_str)
+            .map(resolve_path);
+        let grant_argv = card.and_then(|c| c.get("argv"));
+        let same_argv = matches!((&run_argv, grant_argv), (Some(run), Some(grant)) if run == grant);
+        let same_cwd = matches!((&run_cwd, &grant_cwd), (Some(run), Some(grant)) if run == grant);
+        if !script_identity_matches(&grant, &request.identity) {
+            if same_argv || same_cwd {
+                command_seen = true;
+            }
+            continue;
+        }
+        if !scope_equals(&grant, "secret_names", &request.secret_names)
+            || !scope_equals(&grant, "capability_names", &request.capability_names)
+        {
+            if same_argv && same_cwd {
+                requested_seen = true;
+            }
+            continue;
+        }
+        if grant.get("command_fingerprint") == request.identity.get("command_fingerprint") {
+            continue;
+        }
+        if same_argv
+            && let (Some(run), Some(grant_dir)) = (&run_cwd, &grant_cwd)
+            && grant_dir != run
+        {
+            cwd_seen = true;
+        } else if same_argv || same_cwd {
+            command_seen = true;
+        }
+    }
+    Ok(if cwd_seen {
+        Some("scope mismatch: cwd")
+    } else if requested_seen {
+        Some(if request.capability_names.is_empty() {
+            "scope mismatch: secret"
+        } else {
+            "scope mismatch: capability"
+        })
+    } else if command_seen {
+        Some("scope mismatch: command")
+    } else {
+        None
+    })
+}
+
+/// `revoke_run_grant`: mark a stored grant revoked (no downgrade from
+/// immediate) and tell the ledger. Returns whether anything changed.
+pub fn revoke_run_grant(
+    ctx: &GrantContext<'_>,
+    grant_id: &str,
+    reason: Option<&Value>,
+    now: i64,
+    mode: &str,
+) -> Result<bool, GrantError> {
+    if grant_id.is_empty() {
+        return Err(InvalidValue::new("grant_id is required").into());
+    }
+    if mode != "immediate" && mode != "future" {
+        return Err(InvalidValue::new("revoke mode must be immediate or future").into());
+    }
+    let mut grants = read_records(ctx.root, StoreKind::Grants)?;
+    for grant in grants.iter_mut() {
+        if grant_id_of(grant) != grant_id {
+            continue;
+        }
+        if !grant.get("owner_approval").is_some_and(Value::is_object) {
+            let value = Value::Object(grant.clone());
+            if !kv_approvals::artifacts::verify_grant_approval_artifact(ctx.signing_key, &value) {
+                return Err(InvalidValue::new("grant approval integrity check failed").into());
+            }
+            if grant.contains_key("usage_mode")
+                && !kv_approvals::artifacts::verify_grant_state_integrity(ctx.signing_key, &value)
+            {
+                return Err(InvalidValue::new("grant state integrity check failed").into());
+            }
+        }
+        if is_revoked(grant) {
+            let old_mode = grant
+                .get("revoke_mode")
+                .and_then(Value::as_str)
+                .unwrap_or("future");
+            if old_mode == "immediate" || mode == "future" {
+                return Ok(false);
+            }
+        }
+        grant.insert("status".into(), json!("revoked"));
+        grant.insert("revoke_mode".into(), json!(mode));
+        grant.insert("revoked_at".into(), json!(iso(now)));
+        grant.insert("revoked_at_epoch".into(), json!(now));
+        ctx.ledger.revoke(grant_id, mode);
+        if reason.is_some() {
+            grant.insert("revoke_reason".into(), json!(normalize_reason(reason)?));
+        }
+        if grant.contains_key("usage_mode") {
+            let sealed = kv_approvals::artifacts::attach_grant_state_integrity(
+                &Value::Object(grant.clone()),
+                ctx.signing_key,
+            )
+            .map_err(|error| GrantError::Invalid(InvalidValue::new(error.to_string())))?;
+            *grant = sealed
+                .as_object()
+                .cloned()
+                .expect("sealed grant is an object");
+        }
+        write_records(ctx.root, StoreKind::Grants, &grants)?;
+        return Ok(true);
+    }
+    Ok(false)
 }
