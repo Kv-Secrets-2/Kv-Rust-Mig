@@ -44,6 +44,8 @@ mod lifecycle;
 #[cfg(unix)]
 mod permits;
 #[cfg(unix)]
+mod runs;
+#[cfg(unix)]
 mod tracked;
 #[cfg(unix)]
 use lifecycle::{
@@ -852,6 +854,7 @@ fn stopping_latched(lifecycle: &Lifecycle) -> bool {
 #[cfg(unix)]
 pub(crate) struct Shared {
     pub(crate) tracked: tracked::Tracked,
+    pub(crate) runs: runs::Runs,
 }
 
 #[cfg(unix)]
@@ -859,6 +862,7 @@ impl Shared {
     pub(crate) fn new() -> Self {
         Self {
             tracked: tracked::Tracked::new(),
+            runs: runs::Runs::new(),
         }
     }
 }

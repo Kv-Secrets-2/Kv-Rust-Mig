@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const SHORT_WAIT_SECONDS: u64 = 10;
-const LONG_WAIT_SECONDS: u64 = 135;
+pub(crate) const LONG_WAIT_SECONDS: u64 = 135;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
