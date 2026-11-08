@@ -1184,6 +1184,19 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
             .unwrap_or("");
         return Err(ParseError::Help(help.to_owned()));
     }
+    if *choice == "list" {
+        let mut all = false;
+        for value in rest {
+            if value == "--all" {
+                all = true;
+            } else {
+                return Err(ParseError::Usage(format!(
+                    "usage: kv approvals list [-h] [--all]\nkv approvals list: error: unrecognized arguments: {value}\n"
+                )));
+            }
+        }
+        return Ok(Some(Command::Approvals(ApprovalsAction::List { all })));
+    }
     if *choice != "approve" {
         return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(
             choice,

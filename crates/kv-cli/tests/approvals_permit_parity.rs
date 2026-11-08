@@ -351,6 +351,21 @@ fn masked(text: &str) -> String {
         .join("\n")
 }
 
+/// `kv approvals list` from the owner's shell (no prompt; the inbox is read-only).
+fn inbox(cmd: &[&str], scenario: &Scenario) -> (i32, String) {
+    let output = Command::new(cmd[0])
+        .args(&cmd[1..])
+        .args(["approvals", "list"])
+        .current_dir(&scenario.root)
+        .env("HOME", &scenario.home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    (output.status.code().unwrap_or(-1), masked(&text))
+}
+
 #[test]
 fn approving_a_one_call_permit_matches_python() {
     let Some(python) = kv_test_support::python_reference() else {
@@ -372,6 +387,17 @@ fn approving_a_one_call_permit_matches_python() {
             } else {
                 vec![python_str, "-m", "kv"]
             };
+            let rust_inbox = inbox(&[kv_bin()], &scenario);
+            let python_inbox = inbox(&[python_str, "-m", "kv"], &scenario);
+            assert_eq!(rust_inbox, python_inbox, "inbox with a pending permit");
+            assert_eq!(rust_inbox.0, 0, "{}", rust_inbox.1);
+            assert!(
+                rust_inbox
+                    .1
+                    .contains("Pending one-call permit: POST permit-local"),
+                "{}",
+                rust_inbox.1
+            );
             let before = scenario.observed();
             let (code, text) = pty(
                 python_str,
@@ -399,6 +425,14 @@ fn approving_a_one_call_permit_matches_python() {
             assert_eq!(replay["error_code"], "permit_invalid", "{replay}");
             transcripts.push(masked(&text));
         }
+        let rust_inbox = inbox(&[kv_bin()], &scenario);
+        let python_inbox = inbox(&[python_str, "-m", "kv"], &scenario);
+        assert_eq!(rust_inbox, python_inbox, "empty inbox");
+        assert!(
+            rust_inbox.1.contains("no pending approval requests"),
+            "{}",
+            rust_inbox.1
+        );
         scenario.stop(&python, daemon);
     }
     // Rust CLI vs Python CLI on each daemon, and each CLI across the two daemons.

@@ -2,9 +2,12 @@
 
 The Rust `kv` can now make the owner decision that a script's or an agent's unsafe API call
 waits for: `kv approvals approve permit_request_<id>` (Python `_approve_call_permit`).
-Everything else under `kv approvals` (list, watch, request, page, pause, deny, prune, and
-approving a run grant or a paused job) keeps Python's argparse usage and help but refuses
-as not available in this build; `kv grant` is not ported yet.
+`kv approvals list [--all]` shows the inbox as Python does: the approval mode, the service's
+pending one-call permits and paused jobs (`permit_requests`), then the approval requests on
+disk (`kv_requests::approvals::list_approval_requests`, rendered as `_print_approval_request`).
+Everything else under `kv approvals` (watch, request, page, pause, deny, prune, and approving
+a run grant or a paused job) keeps Python's argparse usage and help (`--help` shows Python's
+text) but refuses as not available in this build; `kv grant` is not ported yet.
 
 ## What happens
 
@@ -37,6 +40,11 @@ as not available in this build; `kv grant` is not ported yet.
   right before signing but takes no file lock (the service re-checks the mode when it
   registers, as in Python).
 - A wrong passphrase ends the command (Python's `prompt_unwrapped` does the same).
+- A lost registration answer reports Python's `_permit_outcome_unknown_text` and audits
+  `call_permit_outcome_unknown`; the expiry time is shown in UTC (Python: local zone).
+- In `kv approvals list`, a decided request's grant line is Python's wording for an unread
+  grant list ("grant <id>: state unreadable"): the live grant state (`_approval_grant_line`)
+  is read once `kv grant` is ported.
 
 ## Comparison against Python 0.4.0
 
@@ -45,5 +53,6 @@ the stage 5 permit fixture (a vault bound to a local HTTPS server reached by a p
 hostname) is served by the Python daemon and then by the Rust daemon. On each, an agent's
 POST asks for a permit; the Rust `kv` and Python's `kv` each approve one on a pty (passphrase,
 then `y`); the retried call is sent exactly once and a replay answers `permit_invalid`. The
-four terminal transcripts are identical once ids, times and the session nonce are masked.
+four terminal transcripts are identical once ids, times and the session nonce are masked;
+`kv approvals list` from both CLIs is compared with a pending permit and with an empty inbox.
 Skipped without `KV_PY_REF`.
