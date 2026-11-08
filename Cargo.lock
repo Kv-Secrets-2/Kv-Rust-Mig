@@ -911,7 +911,9 @@ version = "0.5.0-dev"
 dependencies = [
  "caseless",
  "getrandom 0.2.17",
+ "hex",
  "kv-agent",
+ "kv-approvals",
  "kv-audit",
  "kv-broker",
  "kv-crypto",
@@ -925,6 +927,7 @@ dependencies = [
  "kv-test-support",
  "rustix",
  "serde_json",
+ "sha2",
  "unicode-general-category",
  "url",
  "zeroize",

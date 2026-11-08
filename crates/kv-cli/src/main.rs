@@ -13,6 +13,7 @@ mod hook;
 mod init;
 mod lifecycle;
 mod owner_policy;
+mod owner_signing;
 mod policycmd;
 mod preflight;
 mod project;

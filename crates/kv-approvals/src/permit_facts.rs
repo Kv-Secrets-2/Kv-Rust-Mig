@@ -8,7 +8,8 @@ use unicode_normalization::UnicodeNormalization;
 use crate::canonical::canonical_json;
 use crate::permit_session::{CallFacts, PERMIT_TTL_SECONDS, PermitError, SessionBinding};
 
-const FACT_KEYS: &[&str] = &[
+/// The keys of a one-call permit's facts (`_PERMIT_FACT_KEYS`).
+pub const FACT_KEYS: &[&str] = &[
     "permit_id",
     "request_id",
     "signer",
