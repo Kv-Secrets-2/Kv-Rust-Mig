@@ -692,6 +692,7 @@ pub fn run_agent_with_api_caller(
     let socket_meta = fs::symlink_metadata(&socket_path)?;
     let socket_id = file_identity(&socket_meta);
     let lifecycle = Lifecycle::new();
+    let shared = Arc::new(Shared::new());
     let signal_guard = StopSignalGuard::install()?;
     let trust = Arc::new(trust);
     let master_key = Arc::new(master_key);
@@ -724,6 +725,7 @@ pub fn run_agent_with_api_caller(
                     }
                 };
                 let worker_lifecycle = Arc::clone(&lifecycle);
+                let worker_shared = Arc::clone(&shared);
                 let cache = Arc::clone(&cache);
                 let trust = Arc::clone(&trust);
                 let master_key = Arc::clone(&master_key);
@@ -757,6 +759,7 @@ pub fn run_agent_with_api_caller(
                             &api_caller,
                             &audit,
                             &worker_lifecycle,
+                            &worker_shared,
                             &connection_guard,
                             &memory_hardening,
                             CONNECTION_TIMEOUT,
@@ -838,6 +841,28 @@ pub fn run_agent(
     ))
 }
 
+/// Python's `_stopping` latch: set from the first stop (or signal) on.
+#[cfg(unix)]
+fn stopping_latched(lifecycle: &Lifecycle) -> bool {
+    !matches!(lifecycle.phase(), lifecycle::Phase::Running)
+}
+
+/// Daemon-wide state every connection shares (Python's closures over
+/// `run_agent` locals): the tracked-file list for the hook.
+#[cfg(unix)]
+pub(crate) struct Shared {
+    pub(crate) tracked: tracked::Tracked,
+}
+
+#[cfg(unix)]
+impl Shared {
+    pub(crate) fn new() -> Self {
+        Self {
+            tracked: tracked::Tracked::new(),
+        }
+    }
+}
+
 #[cfg(unix)]
 #[allow(clippy::too_many_arguments)]
 fn handle_connection(
@@ -856,6 +881,7 @@ fn handle_connection(
     api_caller: &kv_broker::ApiCaller,
     audit: &kv_audit::Audit,
     lifecycle: &Arc<Lifecycle>,
+    shared: &Shared,
     connection: &ConnectionGuard,
     memory_hardening: &Value,
     request_timeout: Duration,
@@ -1089,11 +1115,13 @@ fn handle_connection(
             kv_proto::write_reply(stream, &response)?;
             return Ok(());
         }
-        // No run has created files yet (kv_run arrives with the sandbox stage), so the
-        // hook's dynamic layer is told the truth: nothing is tracked.
-        "tracked_files" => json!({"files": []}),
+        "tracked_files" => shared.tracked.tracked_files(stopping_latched(lifecycle)),
         "check_file" => match request.get("path") {
-            Some(Value::String(_)) => json!({"tracked": false}),
+            Some(Value::String(path)) => shared.tracked.check_file(
+                path,
+                std::slice::from_ref(&root_text.to_owned()),
+                stopping_latched(lifecycle),
+            ),
             _ => json!({"error": "check_file requires a path"}),
         },
         other => json!({"error":format!("{other} is not supported by this kv service yet")}),
@@ -2381,6 +2409,7 @@ mod tests {
         let api_caller = kv_broker::ApiCaller::new();
         let audit = kv_audit::Audit::new(".");
         let lifecycle = Lifecycle::new();
+        let shared = Shared::new();
         let mut workers = WorkerTracker::new();
         let connection = workers.register_connection(&server).unwrap();
         let memory_hardening = json!({});
@@ -2403,6 +2432,7 @@ mod tests {
                 &api_caller,
                 &audit,
                 &lifecycle,
+                &shared,
                 &connection,
                 &memory_hardening,
                 timeout,
