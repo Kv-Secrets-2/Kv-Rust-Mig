@@ -377,6 +377,26 @@ fn run_rust_server(project: &Project, flags: &[&str], input: &[u8]) -> (Vec<u8>,
     (output, normalise_log(&log))
 }
 
+/// Each daemon mints a fresh random `run_id` for every `kv_run`; everything else in the
+/// reply is compared as written.
+fn mask_run_ids(text: &str) -> String {
+    const KEY: &str = "\"run_id\": \"run_";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(KEY) {
+        let after = at + KEY.len();
+        out.push_str(&rest[..after]);
+        let id_len = rest[after..]
+            .bytes()
+            .take_while(|b| b.is_ascii_hexdigit())
+            .count();
+        out.push_str(&"x".repeat(id_len));
+        rest = &rest[after + id_len..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn transcript(frames: &[String]) -> Vec<u8> {
     let mut bytes = Vec::new();
     for frame in frames {
@@ -396,14 +416,14 @@ fn assert_parity(
     let input = transcript(frames);
     let (python_out, python_log) = run_python_server(python, project, flags, &input);
     let (rust_out, rust_log) = run_rust_server(project, flags, &input);
-    let python_text = String::from_utf8_lossy(&python_out);
-    let rust_text = String::from_utf8_lossy(&rust_out);
+    let python_text = mask_run_ids(&String::from_utf8_lossy(&python_out));
+    let rust_text = mask_run_ids(&String::from_utf8_lossy(&rust_out));
     for (index, (expected, actual)) in python_text.lines().zip(rust_text.lines()).enumerate() {
         assert_eq!(actual, expected, "{label}: response {index} differs");
     }
-    assert_eq!(rust_out, python_out, "{label}: response streams differ");
+    assert_eq!(rust_text, python_text, "{label}: response streams differ");
     assert_eq!(rust_log, python_log, "{label}: logs differ");
-    python_text.into_owned()
+    python_text
 }
 
 fn init_frames() -> Vec<String> {
