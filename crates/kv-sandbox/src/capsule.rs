@@ -533,14 +533,15 @@ fn copy_private_file(source: &str, destination: &str) -> std::io::Result<()> {
     }
     let meta = std::fs::symlink_metadata(source)?;
     if meta.file_type().is_symlink() {
-        let target = std::fs::read_link(source)?;
-        let _ = std::fs::remove_file(destination);
         #[cfg(unix)]
-        std::os::unix::fs::symlink(target, destination)?;
+        {
+            let target = std::fs::read_link(source)?;
+            let _ = std::fs::remove_file(destination);
+            std::os::unix::fs::symlink(target, destination)?;
+            return Ok(());
+        }
         #[cfg(not(unix))]
         return Err(std::io::Error::other("symlinks are not copied back here"));
-        #[cfg(unix)]
-        return Ok(());
     }
     std::fs::copy(source, destination)?;
     let copied = std::fs::OpenOptions::new().write(true).open(destination)?;

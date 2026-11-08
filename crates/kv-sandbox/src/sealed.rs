@@ -100,6 +100,7 @@ impl SealedArgsFd {
         Err(RunEnvError::SealedArgsUnavailable)
     }
 
+    #[cfg(unix)]
     pub fn as_fd(&self) -> Option<std::os::fd::BorrowedFd<'_>> {
         None
     }
