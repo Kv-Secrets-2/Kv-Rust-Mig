@@ -328,14 +328,6 @@ impl Lifecycle {
         }
     }
 
-    pub(crate) fn wait_for_drain(&self, open_runs: &dyn Fn() -> usize) -> DrainOutcome {
-        loop {
-            if let Some(outcome) = self.poll_drain(Duration::from_millis(500), open_runs) {
-                return outcome;
-            }
-        }
-    }
-
     /// The stop's chosen wait and what remains of it: `None` before any
     /// choice. Python `_stop_wait_choice` / `_stop_wait_remaining`.
     pub(crate) fn stop_budget(&self) -> Option<(u64, Duration)> {
@@ -682,7 +674,9 @@ mod tests {
         );
         assert!(lifecycle.try_commit().is_err());
         assert_eq!(
-            lifecycle.wait_for_drain(&|| 0),
+            lifecycle
+                .poll_drain(Duration::from_secs(600), &|| 0)
+                .expect("drains"),
             DrainOutcome {
                 wait_seconds: 10,
                 cut_off: 0
@@ -712,7 +706,13 @@ mod tests {
         );
         assert_eq!(lock(&lifecycle.state).stop_deadline, deadline);
         drop(work);
-        assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
+        assert_eq!(
+            lifecycle
+                .poll_drain(Duration::from_secs(600), &|| 0)
+                .expect("drains")
+                .cut_off,
+            0
+        );
     }
 
     #[test]
@@ -725,7 +725,15 @@ mod tests {
         assert_eq!(lock(&lifecycle.state).stop_deadline, first);
         let (sender, receiver) = mpsc::channel();
         let waiting = Arc::clone(&lifecycle);
-        let waiter = thread::spawn(move || sender.send(waiting.wait_for_drain(&|| 0)).unwrap());
+        let waiter = thread::spawn(move || {
+            sender
+                .send(
+                    waiting
+                        .poll_drain(Duration::from_secs(600), &|| 0)
+                        .expect("drains"),
+                )
+                .unwrap()
+        });
         lifecycle.signal_stop();
         let shortened = lock(&lifecycle.state).stop_deadline;
         assert!(shortened < first);
@@ -742,7 +750,12 @@ mod tests {
         drop(work);
         // Later completion and retirement must not rewrite the stop answer.
         assert_eq!(lifecycle.retire(), outcome);
-        assert_eq!(lifecycle.wait_for_drain(&|| 0), outcome);
+        assert_eq!(
+            lifecycle
+                .poll_drain(Duration::from_secs(600), &|| 0)
+                .expect("drains"),
+            outcome
+        );
         waiter.join().unwrap();
     }
 
@@ -759,7 +772,13 @@ mod tests {
             StopPlan::Drain { wait_seconds: 10 }
         );
         drop(work);
-        assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
+        assert_eq!(
+            lifecycle
+                .poll_drain(Duration::from_secs(600), &|| 0)
+                .expect("drains")
+                .cut_off,
+            0
+        );
     }
 
     #[test]
@@ -796,7 +815,13 @@ mod tests {
             assert_eq!(lifecycle.committed_count(), usize::from(admitted.is_ok()));
             assert!(lifecycle.try_commit().is_err());
             drop(admitted);
-            assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
+            assert_eq!(
+                lifecycle
+                    .poll_drain(Duration::from_secs(600), &|| 0)
+                    .expect("drains")
+                    .cut_off,
+                0
+            );
         }
     }
 
@@ -960,7 +985,13 @@ mod tests {
             panic!("test worker panic");
         }));
         lifecycle.request_stop(Some(StopChoice::Wait), 0);
-        assert_eq!(lifecycle.wait_for_drain(&|| 0).cut_off, 0);
+        assert_eq!(
+            lifecycle
+                .poll_drain(Duration::from_secs(600), &|| 0)
+                .expect("drains")
+                .cut_off,
+            0
+        );
         assert_eq!(client.read(&mut [0]).unwrap(), 0);
         wait_until(|| tracker.workers.iter().all(JoinHandle::is_finished));
         assert_eq!(

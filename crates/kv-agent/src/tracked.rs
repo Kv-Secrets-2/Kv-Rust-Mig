@@ -71,10 +71,6 @@ impl Tracked {
         self.lock().gap_since
     }
 
-    pub(crate) fn has_gap(&self) -> bool {
-        !self.lock().gap_roots.is_empty()
-    }
-
     /// A later complete walk closed the gap.
     pub(crate) fn clear_gap(&self) {
         let mut state = self.lock();
@@ -184,7 +180,6 @@ mod tests {
             json!({"tracked": true, "path": file})
         );
         tracked.clear_gap();
-        assert!(!tracked.has_gap());
         assert_eq!(
             tracked.check_file(&other, &vaults, false),
             json!({"tracked": false, "path": other})

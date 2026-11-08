@@ -55,7 +55,6 @@ pub(crate) struct RunSlot {
     pub(crate) secret_scan: bool,
     scanning: bool,
     pub(crate) scanned: bool,
-    reply_claimed: bool,
     pub(crate) late_sent: bool,
     pub(crate) sandboxed: Option<bool>,
     pub(crate) contained: bool,
@@ -114,7 +113,6 @@ pub(crate) fn new_slot(
         secret_scan,
         scanning: false,
         scanned: false,
-        reply_claimed: false,
         late_sent: false,
         sandboxed,
         contained,
@@ -167,17 +165,6 @@ impl Runs {
         true
     }
 
-    /// Python `_claim_run_reply`: exactly one reply per run.
-    pub(crate) fn claim_reply(&self, slot: &Slot) -> bool {
-        let _inner = lock(&self.inner);
-        let mut state = lock(slot);
-        if state.reply_claimed {
-            return false;
-        }
-        state.reply_claimed = true;
-        true
-    }
-
     /// Python `_set_scanning`.
     pub(crate) fn set_scanning(&self, slot: &Slot, scanning: bool) {
         let _inner = lock(&self.inner);
@@ -194,7 +181,7 @@ impl Runs {
         let inner = lock(&self.inner);
         inner.slots.iter().any(|slot| {
             let state = lock(slot);
-            state.secret_scan && !state.reply_claimed
+            state.secret_scan && state.scanning
         })
     }
 
@@ -533,8 +520,6 @@ mod tests {
         );
         assert!(runs.claim_record(&slot));
         assert!(!runs.claim_record(&slot));
-        assert!(runs.claim_reply(&slot));
-        assert!(!runs.claim_reply(&slot));
         assert!(!runs.collected(&slot));
         assert_eq!(runs.count_running(), 0);
         assert_eq!(runs.count_live(), 1);

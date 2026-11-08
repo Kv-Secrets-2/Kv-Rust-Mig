@@ -46,6 +46,8 @@ mod lifecycle;
 #[cfg(unix)]
 mod permits;
 #[cfg(unix)]
+mod run;
+#[cfg(unix)]
 mod runs;
 #[cfg(unix)]
 mod tracked;
@@ -839,15 +841,33 @@ pub fn run_agent_with_api_caller(
         if signal_guard.requested() {
             lifecycle.signal_stop();
         }
-        if let Some(outcome) = lifecycle.poll_drain(Duration::from_millis(20), &|| 0) {
+        if let Some(outcome) =
+            lifecycle.poll_drain(Duration::from_millis(20), &|| shared.runs.count_live())
+        {
             break outcome;
+        }
+        // Live kv_run programs are work this drain waits for too: each is ended
+        // inside the same deadline (Python `_retire_trust_context`).
+        if lifecycle.stop_budget().is_some() {
+            shared.runs.end_due_runs(&lifecycle);
         }
         workers.reap_finished();
     };
+    shared.runs.end_due_runs(&lifecycle);
     if drain.cut_off != 0 {
         workers.shutdown_non_control();
     }
     lifecycle.retire();
+    // Programs the stop ended whose own path did not finish before the service
+    // leaves: one end record each (Python `_fallback_run_records`).
+    for entry in shared.runs.fallback_records() {
+        let mut fields = serde_json::Map::new();
+        fields.insert("program".into(), json!(entry.program));
+        fields.insert("run_id".into(), json!(entry.run_id));
+        fields.insert("ended_by".into(), json!("stop"));
+        fields.insert("cleanup_finished".into(), json!(false));
+        let _ = audit.emit("run_ended_by_stop", fields);
+    }
     // Give the stop answer and already-prepared retirement refusals a separate,
     // bounded delivery allowance. No new data-bearing reply can be committed.
     let answers_until = Instant::now() + Duration::from_secs(2);
@@ -1095,6 +1115,61 @@ fn handle_connection(
             json!({"environments":environments,"invalid_environments":[]})
         }
         "lock" => json!({"locking":true,"ended":true}),
+        "run" => {
+            // Python: the run's work window opens at admission and closes once the
+            // program has started; the hard-lock pin is observed under it.
+            let work = match lifecycle.try_commit_for_with_charge(connection, || {
+                trust.observe_held().map_err(permits::hard_lock_error)
+            }) {
+                Ok(work) => work,
+                Err(CommitError::Stopping) => {
+                    replies.write(
+                        stream,
+                        &json!({
+                            "error":"the agent is stopping; new requests are refused",
+                            "error_code":"agent_stopping",
+                            "exit_code":1,
+                        }),
+                    )?;
+                    return Ok(());
+                }
+                Err(CommitError::Charge(mut refusal)) => {
+                    if refusal.is_object() {
+                        refusal["exit_code"] = json!(1);
+                    }
+                    replies.write(stream, &refusal)?;
+                    return Ok(());
+                }
+            };
+            let env = request
+                .get("env")
+                .and_then(Value::as_str)
+                .or_else(|| approved.get("default_env").and_then(Value::as_str))
+                .unwrap_or("dev");
+            let outcome = run::handle_run(run::RunCtx {
+                root,
+                root_text,
+                store,
+                cache,
+                trust,
+                approved,
+                providers,
+                audit,
+                lifecycle,
+                shared,
+                env,
+                request,
+                known_commands: &known,
+                work: Some(work),
+            });
+            if outcome.control {
+                // A stop-time answer rides the control lane, as Python's does.
+                connection.mark_control();
+                kv_proto::write_reply(stream, &outcome.response)?;
+                return Ok(());
+            }
+            outcome.response
+        }
         "permit_requests" => json!({
             "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
             "pauses": [],
