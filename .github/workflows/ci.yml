@@ -64,7 +64,7 @@ jobs:
               source_lines = {}
               for path in tracked:
                   if path.endswith(".rs"):
-                      source = subprocess.check_output(["git", "show", "HEAD:" + path], text=True)
+                      source = subprocess.check_output(["git", "show", "HEAD:" + path], text=True, encoding="utf-8", errors="replace")
                       source_lines[path] = len(source.splitlines())
                       public_functions.update(re.findall(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", source))
               failed = set(re.findall(r"^test ([A-Za-z_][A-Za-z0-9_:]*) \.\.\. FAILED$", text, re.MULTILINE))
