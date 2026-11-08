@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 106,
+  "minimum_comparisons": 107,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -100,6 +100,9 @@
     "kv-cli/approval_mode": [
       "approval_mode_owner_sequence_matches_python",
       "approval_mode_storage_and_authorization_lock_match_python"
+    ],
+    "kv-cli/approvals_permit_parity": [
+      "approving_a_one_call_permit_matches_python"
     ],
     "kv-cli/cli_blackbox": [
       "owner_flow_matches_python_reference"

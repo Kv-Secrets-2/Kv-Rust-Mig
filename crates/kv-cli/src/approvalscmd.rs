@@ -57,7 +57,11 @@ fn approve(p: &Palette, request_id: &str, run_grant_flags: bool) -> CmdResult {
     audit_fields.insert("request_id".into(), json!(request_id));
     let mut event = "call_permit_abandoned";
     let outcome = (|| -> CmdResult {
-        let (identity, _passphrase) = project::prompt_verified_passphrase(p, &root)?;
+        // `_owner_getpass` then `prompt_unwrapped`: one attempt, no "verified" line.
+        let passphrase =
+            project::read_owner_secret(p, &format!("  {}Passphrase{}: ", p.yellow, p.reset))?;
+        let identity = project::unlock_identity(&root, passphrase.as_bytes())
+            .map_err(|e| project::fail(p, &e))?;
         let ctx =
             PermitSigningContext::begin(&root, identity).map_err(|e| signing_failure(p, e))?;
         let record = ctx

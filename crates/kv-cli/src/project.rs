@@ -218,7 +218,7 @@ pub fn unlock_identity(root: &Path, passphrase: &[u8]) -> Result<kv_crypto::Iden
     Ok(identity)
 }
 
-fn read_owner_secret(p: &Palette, prompt: &str) -> CmdResult<Zeroizing<String>> {
+pub fn read_owner_secret(p: &Palette, prompt: &str) -> CmdResult<Zeroizing<String>> {
     match terminal::owner_read_secret(prompt) {
         Ok(text) => Ok(Zeroizing::new(text)),
         Err(PromptError::Eof) => Err(quiet_error(p, "")),
