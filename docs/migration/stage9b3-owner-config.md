@@ -178,8 +178,7 @@ All seven owner-command help pages match byte-for-byte. Global `-h` / `--help`
 text differs only in the existing build-version footer, which is explicitly
 checked and normalized in the comparison, not changed in the binary. Top-level
 argument-error usage preserves the implemented-command subset, in Python's
-relative order; the test compares it with Python's list filtered to the Rust
-parser's implemented commands. The separate Rust `mcp-server` entry point is
-unchanged and is not advertised as an argparse choice, since Python's top-level
-parser has no such choice. Existing version/subset conventions are not new
-stage-specific hardening differences.
+relative order, followed by the Rust-only `mcp-server` entry point as before.
+The test compares it with Python's list filtered to the Rust parser's implemented
+commands plus that trailing `mcp-server`. Existing version/subset conventions
+are not new stage-specific hardening differences.

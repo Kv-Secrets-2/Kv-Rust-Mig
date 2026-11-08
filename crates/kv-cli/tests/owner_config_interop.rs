@@ -281,9 +281,10 @@ fn owner_config_top_level_help_matches_python() {
                 python
                     .split(',')
                     .filter(|name| implemented.contains(name))
+                    .chain(std::iter::once("mcp-server"))
                     .collect::<Vec<_>>()
             );
-            assert_eq!(rust.split(',').count(), implemented.len());
+            assert_eq!(rust.split(',').count(), implemented.len() + 1);
             outputs[0].2 = outputs[0]
                 .2
                 .replace(&format!("{{{rust}}}"), "{IMPLEMENTED}");
