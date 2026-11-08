@@ -472,15 +472,21 @@ fn int_or_none(value: Option<&Value>) -> Value {
             }
         }
         Some(Value::String(text)) => {
-            let trimmed = py_strip(text).replace('_', "");
-            let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(&trimmed);
-            if digits.is_empty()
-                || !digits.chars().all(|c| c.is_ascii_digit())
-                || trimmed.contains("__")
-            {
-                Value::Null
+            // Python's int(): optional sign, digits, single underscores only between digits.
+            let stripped = py_strip(text);
+            let digits = stripped.strip_prefix(['+', '-']).unwrap_or(stripped);
+            let well_formed = !digits.is_empty()
+                && !digits.starts_with('_')
+                && !digits.ends_with('_')
+                && !digits.contains("__")
+                && digits.chars().all(|c| c.is_ascii_digit() || c == '_');
+            if well_formed {
+                stripped
+                    .replace('_', "")
+                    .parse::<i64>()
+                    .map_or(Value::Null, |int| json!(int))
             } else {
-                trimmed.parse::<i64>().map_or(Value::Null, |int| json!(int))
+                Value::Null
             }
         }
         Some(_) => Value::Null,
