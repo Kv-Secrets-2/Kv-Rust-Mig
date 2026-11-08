@@ -483,7 +483,9 @@ impl Ledger {
         {
             return Err(other);
         }
-        Ok(())
+        // `_charge_service` before the debit: an exhausted service refuses here, with the
+        // permit still unspent.
+        pass.charge_service(Some(capability)).map(|_| ())
     }
 
     pub fn time_over(&self, token_hash: &str, now_epoch: i64) -> bool {
