@@ -868,7 +868,7 @@ fn grants_and_tokens_match_python() {
         let base = tmp.path().canonicalize().unwrap();
         let home = base.join("home");
         std::fs::create_dir(&home).unwrap();
-        let status = Command::new(std::env::current_exe().unwrap())
+        let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "grants_and_tokens_match_python",
@@ -880,9 +880,15 @@ fn grants_and_tokens_match_python() {
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("KV_PY_REF", python)
             .env("KV_GRANTS_PARITY_BASE", &base)
-            .status()
+            .output()
+
             .unwrap();
-        assert!(status.success(), "the comparison failed (see above)");
+        assert!(
+            output.status.success(),
+            "the comparison failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     };
     let base = PathBuf::from(base);
