@@ -925,6 +925,7 @@ dependencies = [
  "kv-sandbox",
  "kv-store",
  "kv-test-support",
+ "rcgen",
  "rustix",
  "serde_json",
  "sha2",

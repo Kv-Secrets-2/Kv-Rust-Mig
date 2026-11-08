@@ -36,6 +36,10 @@ rustix = { version = "1", features = ["fs", "process", "termios", "stdio"] }
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
+kv-agent = { path = "../kv-agent" }
+kv-broker = { path = "../kv-broker" }
+rcgen = "0.13"
+url = "2.5"
 
 [lints]
 workspace = true
