@@ -427,14 +427,19 @@ fn preflight_matches_python() {
     writer.join().unwrap();
     assert!(output.status.success());
     let reference: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let status = Command::new(std::env::current_exe().unwrap())
+    let output = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "isolated_preflight_probe"])
         .env("HOME", &home)
         .env("KV_PREFLIGHT_INPUT", &rust_input)
         .env("KV_PREFLIGHT_OUTPUT", &rust_output)
-        .status()
+        .output()
         .unwrap();
-    assert!(status.success());
+    assert!(
+        output.status.success(),
+        "isolated preflight failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let rust_results: Vec<Value> =
         serde_json::from_slice(&std::fs::read(rust_output).unwrap()).unwrap();
     assert_eq!(json!(PROVIDERS), reference["providers"]);

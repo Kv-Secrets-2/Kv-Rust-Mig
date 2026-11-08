@@ -15,5 +15,5 @@ for case in data["cases"]:
                                   secret_scope="capability", run_id="run_shared")
     card = build_run_risk_card(case["argv"], cwd=case["cwd"], run_identity=identity,
                               **case["options"])
-    results.append({"identity": identity, "card": card})
+    results.append({"identity": identity, "card": card, "python_version": list(sys.version_info[:2])})
 json.dump(results, sys.stdout)

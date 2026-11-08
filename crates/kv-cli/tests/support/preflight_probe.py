@@ -13,6 +13,7 @@ import termios
 import time
 
 from kv.vault_origin import record_created
+from kv.cli import build_parser
 
 data = json.load(sys.stdin)
 root = Path(data["root"])
@@ -30,7 +31,11 @@ for i, source in enumerate(sources):
     (root / f"s{i}.py").write_text(source)
 (root / "nul.py").write_bytes(b"x=1\x00")
 (root / "overflow.py").write_text(f"for x in range({10**400}):\n api_call('openai')")
+(root / "infinity.py").write_text(f"for x in range({17 * 10**307}):\n api_call('openai')")
 (root / "deep.py").write_text("x=" + "-" * 600 + "1")
+(root / "loop-a").symlink_to("loop-b")
+(root / "loop-b").symlink_to("loop-a")
+(root / "odd'\u2028\x85file").write_text("pass")
 project = root / "project"
 secrets = project / ".secrets"
 secrets.mkdir(parents=True, mode=0o700)
@@ -40,6 +45,18 @@ config.chmod(0o600)
 for name in ["allowed.py", "blocked.py"]:
     (project / name).write_text("api_call('openai')")
 record_created(str(project))
+error_projects = []
+for name, value in [("attribute-error", {"security": None}),
+                    ("type-error", {"security": {"kv_run_policy": "allowlist", "allowed_commands": None}}),
+                    ("missing-config", None)]:
+    path = root / name
+    (path / ".secrets").mkdir(parents=True, mode=0o700)
+    if value is not None:
+        cfg = path / ".secrets/config.json"
+        cfg.write_text(json.dumps(value))
+        cfg.chmod(0o600)
+    record_created(str(path))
+    error_projects.append(path)
 
 cases = [(f"script-{i}-{form}", ["preflight", *(["--json"] if form == "json" else []), "--", "python3", f"s{i}.py"], root, "same")
          for i in range(len(sources)) for form in ["text", "json"]]
@@ -66,6 +83,10 @@ extras = [
     ("blocked", ["preflight", "curl", "https://example.com"]),
     ("allowlist-blocked", ["preflight", "--cwd", str(project), "python3", "blocked.py"]),
     ("nul", ["preflight", "python3", "nul.py"]), ("overflow", ["preflight", "python3", "overflow.py"]),
+    ("infinity-overflow", ["preflight", "python3", "infinity.py"]),
+    ("identity-not-directory", ["preflight", "--cwd", str(root / "s0.py/child"), "python3", "app.py"]),
+    ("identity-loop", ["preflight", "--cwd", str(root / "loop-a"), "python3", "app.py"]),
+    ("identity-escaped-path", ["preflight", "--cwd", str(root / "odd'\u2028\x85file/child"), "python3", "app.py"]),
     ("hidden", ["preflight", "python3", "s2.py", "a\n世界", "a'\\b", ""]),
     ("long", ["preflight", "python3", "s2.py", "x" * 9000]),
     ("request-no-project", ["preflight", "--request", "python3", "s2.py"]),
@@ -73,6 +94,7 @@ extras = [
     ("metadata", ["preflight", "--env", "dev", "--source", "mcp", "--client", "codex", "--session-id", "1", "--reason", "test", "python3", "s2.py"]),
 ]
 cases += [(name, argv, root, "same") for name, argv in extras]
+cases += [(path.name, ["preflight", "--cwd", str(path), "python3", "app.py"], root, "same") for path in error_projects]
 cases += [("depth", ["preflight", "python3", "deep.py"], root, "depth")]
 cases += [("request-project", ["preflight", "--cwd", str(project), "--request", "python3", "allowed.py"], root, "request")]
 cases += [("request-project-empty", ["preflight", "--cwd", str(project), "--request"], root, "request")]
@@ -121,7 +143,13 @@ def mask(result):
     return (result[0], *(re.sub(rb'("run_id": ")run_[a-f0-9]{24}(")', rb'\1RUN_ID\2', stream) for stream in result[1:]))
 
 
-count = requests = 0
+def error_result(message, tty, colour):
+    red, reset = ("\x1b[38;2;255;100;100m", "\x1b[0m") if colour else ("", "")
+    error = f"  {red}✗ {message}{reset}\n".encode()
+    return (1, error.replace(b"\n", b"\r\n"), b"") if tty else (1, b"", error)
+
+
+count = requests = nul_differences = runtime_differences = 0
 failures = []
 for tty in [False, True]:
     for colour in [False, True]:
@@ -131,14 +159,39 @@ for tty in [False, True]:
             if kind == "request":
                 requests += 1
                 message = "kv preflight --request is not supported by this kv build yet; run kv preflight without --request"
-                red, reset = ("\x1b[38;2;255;100;100m", "\x1b[0m") if colour else ("", "")
-                error = f"  {red}✗ {message}{reset}\n".encode()
-                expected = (1, error.replace(b"\n", b"\r\n"), b"") if tty else (1, b"", error)
+                expected = error_result(message, tty, colour)
                 assert got == expected, (name, tty, colour, got, expected)
                 after = {str(p.relative_to(project)): p.read_bytes() for p in project.rglob("*") if p.is_file()}
                 assert before == after, "--request wrote project state"
                 continue
             want = run([sys.executable, "-I", "-m", "kv"], argv, cwd, tty, colour)
+            if name == "help":
+                reference_help = want
+            if name == "attached-help-value" and want[0] == 0:
+                assert want == reference_help
+                legacy_error = run([sys.executable, "-I", "-m", "kv"], ["preflight", "--help=foo"], cwd, tty, colour)
+                assert got == legacy_error and got[0] == 2, (got, legacy_error)
+                runtime_differences += 1
+                continue
+            if name == "unknown" and want[0] == 1:
+                branded = run([sys.executable, "-I", "-m", "kv"], ["unknown-preflight-command"], cwd, tty, colour)
+                assert want == branded
+                error = (build_parser().format_usage() + "kv: error: unrecognized arguments: --wat\n").encode()
+                expected = (2, error.replace(b"\n", b"\r\n"), b"") if tty else (2, b"", error)
+                assert got == expected, (got, expected)
+                runtime_differences += 1
+                continue
+            if name in {"identity-not-directory", "identity-escaped-path"} and hasattr(os.path, "ALLOW_MISSING") and sys.version_info < (3, 13):
+                candidate = root / ("s0.py" if name == "identity-not-directory" else "odd'\u2028\x85file")
+                assert got == error_result(str(NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(candidate))), tty, colour)
+                assert want == error_result(str(NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(candidate / "child"))), tty, colour)
+                runtime_differences += 1
+                continue
+            if name == "nul" and sys.version_info >= (3, 12):
+                assert want[0] == 0 and b"Python script could not be parsed; estimates are incomplete." in want[1] and want[2] == b""
+                assert got == error_result("source code string cannot contain null bytes", tty, colour), got
+                nul_differences += 1
+                continue
             if name == "top-help":
                 assert got[0] == want[0] == 0 and got[2] == want[2] == b""
                 delimiter = b"Use 'kv COMMAND --help' for per-command flags. Version: "
@@ -152,7 +205,7 @@ for tty in [False, True]:
                 continue
             if kind == "depth":
                 assert want[0] == 1 and b"recursion depth" in b"".join(want[1:]), want
-                assert got[0] == 1 and b"Python script is nested too deeply for static preflight" in b"".join(got[1:]), got
+                assert got == error_result("Python script is nested too deeply for static preflight", tty, colour), got
                 continue
             if mask(got) != mask(want):
                 failures.append((name, tty, colour, got, want))
@@ -164,4 +217,4 @@ for tty in [False, True]:
                 assert b"The full command is too long to show here; kv preflight --json shows it, and kv preflight --request files it." in got[1]
             count += 1
 assert not failures, failures
-print(f"preflight CLI parity: {count} exact transcripts, {len(sources)} scripts, {requests} fail-closed requests; 4 depth differences; 4 help listings with distinct package-version footers; pipe/pty x plain/ANSI")
+print(f"preflight CLI parity: {count} exact transcripts, {len(sources)} scripts, {requests} fail-closed requests; 4 depth differences; {nul_differences} version-specific NUL differences; {runtime_differences} argparse/resolver runtime differences; 4 help listings with distinct package-version footers; pipe/pty x plain/ANSI")

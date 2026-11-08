@@ -409,7 +409,7 @@ pub fn preflight_command(
         &format!("run_{}", hex::encode(nonce)),
         &[],
     )
-    .map_err(|e| PreflightError::ValueError(e.to_string()))?;
+    .map_err(|e| crate::errors::identity_error(&cwd, e))?;
     let path = script_path(argv, &cwd);
     let mut m = PreflightManifest {
         argv: argv.to_vec(), cwd, command_display: format_argv(argv),

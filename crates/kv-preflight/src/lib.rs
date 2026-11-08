@@ -1,5 +1,6 @@
 pub mod agent_code;
 mod analysis;
+mod errors;
 mod manifest;
 
 pub use manifest::{
@@ -16,8 +17,8 @@ pub fn build_run_risk_card(
     cwd: Option<&str>,
     options: &RunRiskCardOptions<'_>,
 ) -> Result<serde_json::Value, PreflightError> {
-    let cwd = kv_sandbox::paths::resolve(cwd.filter(|s| !s.is_empty()).unwrap_or("."))
-        .map_err(|error| PreflightError::other("OSError", error.to_string()))?;
+    let cwd = cwd.filter(|s| !s.is_empty()).unwrap_or(".");
+    let cwd = kv_sandbox::paths::resolve(cwd).map_err(|error| errors::resolve_error(cwd, error))?;
     Ok(kv_approvals::risk_card::build_run_risk_card(
         argv,
         &cwd,

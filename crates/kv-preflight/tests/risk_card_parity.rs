@@ -186,20 +186,49 @@ fn run_risk_cards_match_python() {
         serde_json::to_vec(&json!({"cases":cases,"reference":reference})).unwrap(),
     )
     .unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "isolated_risk_card_probe"])
+        .env("HOME", &home)
+        .env("KV_RISK_INPUT", rust_input)
+        .env("KV_RISK_OUTPUT", &rust_output)
+        .output()
+        .unwrap();
     assert!(
-        Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "isolated_risk_card_probe"])
-            .env("HOME", &home)
-            .env("KV_RISK_INPUT", rust_input)
-            .env("KV_RISK_OUTPUT", &rust_output)
-            .status()
-            .unwrap()
-            .success()
+        output.status.success(),
+        "isolated risk-card probe failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     let got: Vec<Value> = serde_json::from_slice(&std::fs::read(rust_output).unwrap()).unwrap();
     let mut differences = 0;
+    let mut nul_differences = 0;
+    let nul_script = format!(
+        "script-{}.py",
+        sources.iter().position(|s| s.contains('\0')).unwrap()
+    );
     for ((case, got), want) in cases.iter().zip(got).zip(reference.as_array().unwrap()) {
+        let newer_nul = want["python_version"][1].as_u64().unwrap() >= 12;
         let mut want = want["card"].clone();
+        if case["argv"][1] == nul_script && newer_nul {
+            assert_eq!(want["extraction_status"], "complete");
+            assert!(
+                want["limits"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|s| s == "Python script could not be parsed; estimates are incomplete.")
+            );
+            want["extraction_status"] = json!("limited");
+            want["facts"] =
+                json!({"preflight_error":"source code string cannot contain null bytes"});
+            want["uncertainty"] = json!([
+                "static-analysis-only",
+                "runtime-enforcement-remains-authoritative",
+                "preflight-analysis-failed"
+            ]);
+            want["limits"] = json!(["KV could not complete static preflight for this command."]);
+            nul_differences += 1;
+        }
         if case["argv"][1] == "deep.py" {
             assert!(
                 want["facts"]["preflight_error"]
@@ -219,7 +248,7 @@ fn run_risk_cards_match_python() {
         assert_eq!(got, want, "case {case}");
     }
     eprintln!(
-        "run-risk-card parity: {} cases, {} scripts, {differences} documented depth difference",
+        "run-risk-card parity: {} cases, {} scripts, {differences} documented depth difference, {nul_differences} version-specific NUL differences",
         cases.len(),
         sources.len() + 2
     );
