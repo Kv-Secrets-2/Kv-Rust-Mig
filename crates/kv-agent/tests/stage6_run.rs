@@ -245,6 +245,10 @@ run_agent(store,get_default_env(root))
     ChildGuard(child)
 }
 
+fn bwrap_installed() -> bool {
+    Path::new("/usr/bin/bwrap").exists() || Path::new("/usr/local/bin/bwrap").exists()
+}
+
 fn stop_daemon(root: &Path) {
     let _ = rust_request(root, "stop", &json!({"choice": "now"}));
     let socket = kv_proto::agent_socket_path(Some(root)).unwrap();
@@ -410,10 +414,14 @@ fn run_replies_match_python_on_the_same_vault() {
             );
         }
     }
-    assert!(
-        filed >= 2,
-        "secrets and capability cases without a grant file requests: {filed}"
-    );
+    // Without bubblewrap both daemons refuse a secret- or capability-bearing run before
+    // admission, so no request is filed; with it, each files its own pending request.
+    if bwrap_installed() {
+        assert!(
+            filed >= 2,
+            "secrets and capability cases without a grant file requests: {filed}"
+        );
+    }
     assert_eq!(
         rust_request(&vault.root, "tracked_files", &json!({})),
         python_tracked
@@ -437,6 +445,10 @@ fn stop_waits_for_a_running_program_and_ends_it_on_now() {
         return;
     };
     let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if !bwrap_installed() {
+        eprintln!("SKIP Stage 6c stop parity: bubblewrap is not installed, so no run starts");
+        return;
+    }
     let vault = prepare_vault(&python, "s6r");
     let project = vault.root.join("project");
     fs::create_dir(&project).unwrap();
@@ -529,7 +541,7 @@ fn secret_bearing_run_with_an_owner_grant_matches_python() {
         eprintln!("SKIP Stage 6c grant run parity: set KV_PY_REF");
         return;
     };
-    if !Path::new("/usr/bin/bwrap").exists() && !Path::new("/usr/local/bin/bwrap").exists() {
+    if !bwrap_installed() {
         eprintln!("SKIP Stage 6c grant run parity: bubblewrap is not installed");
         return;
     }
