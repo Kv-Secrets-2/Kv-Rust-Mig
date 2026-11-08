@@ -943,6 +943,12 @@ fn handle_connection(
         replies.write(stream, &json!({"error":error}))?;
         return Ok(());
     }
+    if cmd == "run"
+        && let Err(error) = validate_run_request(request)
+    {
+        replies.write(stream, &json!({"error":error,"exit_code":1}))?;
+        return Ok(());
+    }
     if cmd.is_empty() || cmd.len() > 32 {
         replies.write(stream, &json!({"error":"cmd must be a string"}))?;
         return Ok(());
@@ -1473,6 +1479,113 @@ fn status_response(
 }
 
 #[cfg(unix)]
+/// Python `_validate_request` for `run`: `_validate_argv`, `_validate_str_list`
+/// and `_validate_str` with the reference's limits and wording.
+fn validate_run_request(request: &serde_json::Map<String, Value>) -> Result<(), String> {
+    const MAX_ARGV_COUNT: usize = 50;
+    const MAX_ARGV_LEN: usize = 4096;
+    const MAX_ENV_NAMES_COUNT: usize = 1000;
+    const MAX_SECRET_NAME_LEN: usize = 256;
+    const MAX_CAPABILITY_NAMES_COUNT: usize = 16;
+    const MAX_CAPABILITY_NAME_LEN: usize = 256;
+    const MAX_CWD_LEN: usize = 4096;
+
+    fn check_str(
+        value: Option<&Value>,
+        field: &str,
+        max_len: usize,
+        required: bool,
+        allow_empty: bool,
+    ) -> Result<(), String> {
+        let value = match value {
+            None | Some(Value::Null) => {
+                return if required {
+                    Err(format!("{field} is required"))
+                } else {
+                    Ok(())
+                };
+            }
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(format!("{field} must be a string"));
+        };
+        if !allow_empty && text.is_empty() {
+            return Err(format!("{field} must not be empty"));
+        }
+        if text.len() > max_len {
+            return Err(format!("{field} exceeds {max_len} bytes"));
+        }
+        Ok(())
+    }
+
+    fn check_str_list(
+        value: Option<&Value>,
+        field: &str,
+        max_items: usize,
+        max_item_len: usize,
+    ) -> Result<(), String> {
+        let items = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(Value::Array(items)) => items,
+            Some(_) => return Err(format!("{field} must be a list")),
+        };
+        if items.len() > max_items {
+            return Err(format!("{field} has too many items (max {max_items})"));
+        }
+        for (i, item) in items.iter().enumerate() {
+            check_str(
+                Some(item),
+                &format!("{field}[{i}]"),
+                max_item_len,
+                true,
+                false,
+            )?;
+        }
+        Ok(())
+    }
+
+    let argv = match request.get("argv") {
+        None | Some(Value::Null) => return Err("argv is required".into()),
+        Some(Value::Array(items)) => items,
+        Some(_) => return Err("argv must be a list".into()),
+    };
+    if argv.is_empty() {
+        return Err("argv must not be empty".into());
+    }
+    if argv.len() > MAX_ARGV_COUNT {
+        return Err(format!("argv has too many items (max {MAX_ARGV_COUNT})"));
+    }
+    for (i, item) in argv.iter().enumerate() {
+        check_str(Some(item), &format!("argv[{i}]"), MAX_ARGV_LEN, true, i > 0)?;
+    }
+    check_str_list(
+        request.get("env_names"),
+        "env_names",
+        MAX_ENV_NAMES_COUNT,
+        MAX_SECRET_NAME_LEN,
+    )?;
+    check_str_list(
+        request.get("capability_names"),
+        "capability_names",
+        MAX_CAPABILITY_NAMES_COUNT,
+        MAX_CAPABILITY_NAME_LEN,
+    )?;
+    let raw_secrets =
+        matches!(request.get("env_names"), Some(Value::Array(items)) if !items.is_empty());
+    let capabilities =
+        matches!(request.get("capability_names"), Some(Value::Array(items)) if !items.is_empty());
+    if raw_secrets && capabilities {
+        return Err("kv_run cannot mix raw secrets and capabilities".into());
+    }
+    check_str(request.get("cwd"), "cwd", MAX_CWD_LEN, false, false)?;
+    match request.get("private_cwd") {
+        None | Some(Value::Null) | Some(Value::Bool(_)) => {}
+        Some(_) => return Err("private_cwd must be a boolean".into()),
+    }
+    Ok(())
+}
+
 fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), String> {
     fn string_field<'a>(
         request: &'a serde_json::Map<String, Value>,
