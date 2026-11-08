@@ -140,6 +140,7 @@ fn approval_mode_owner_sequence_matches_python() {
         vec!["approval-mode", "status", "-h"],
     ] {
         let before = std::fs::read(scratch.proj().join(".secrets/config.json")).unwrap();
+        let files = scratch.policy_files();
         let mut outputs = Vec::new();
         for command in [
             vec![kv_bin()],
@@ -155,8 +156,22 @@ fn approval_mode_owner_sequence_matches_python() {
                 .output()
                 .unwrap();
             outputs.push((out.status.code(), out.stdout, out.stderr));
+            assert_eq!(files, scratch.policy_files(), "{args:?}");
         }
-        assert_eq!(outputs[0], outputs[1], "{args:?}");
+        assert_eq!(outputs[0].0, outputs[1].0, "{args:?}");
+        if owner::argparse_text_compared()
+            || (outputs[0].0 != Some(2) && !(outputs[0].0 == Some(0) && args.contains(&"-h")))
+        {
+            assert_eq!(outputs[0], outputs[1], "{args:?}");
+        } else if outputs[0].0 == Some(2) {
+            assert_eq!(outputs[0].1, outputs[1].1, "{args:?}");
+            for output in &outputs {
+                assert!(output.2.starts_with(b"usage: "));
+                assert!(String::from_utf8_lossy(&output.2).contains(": error: "));
+            }
+        } else {
+            assert_eq!(outputs[0].2, outputs[1].2, "{args:?}");
+        }
         assert_eq!(
             before,
             std::fs::read(scratch.proj().join(".secrets/config.json")).unwrap()

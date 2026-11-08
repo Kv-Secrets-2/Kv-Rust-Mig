@@ -243,6 +243,10 @@ fn owner_config_top_level_help_matches_python() {
         cases.push(vec![command, "-h"]);
     }
     for args in cases {
+        if args == ["--owner-config-unknown-option"] && !owner::argparse_text_compared() {
+            continue;
+        }
+        let files = scratch.policy_files();
         let mut outputs = Vec::new();
         for cmd in [
             vec![kv_bin()],
@@ -251,6 +255,7 @@ fn owner_config_top_level_help_matches_python() {
             let output = Command::new(cmd[0])
                 .args(&cmd[1..])
                 .args(&args)
+                .current_dir(scratch.proj())
                 .env("HOME", scratch.home())
                 .env("NO_COLOR", "1")
                 .stdin(Stdio::null())
@@ -261,8 +266,23 @@ fn owner_config_top_level_help_matches_python() {
                 String::from_utf8(output.stdout).unwrap(),
                 String::from_utf8(output.stderr).unwrap(),
             ));
+            assert_eq!(files, scratch.policy_files(), "{args:?}");
         }
         let usage_error = args == ["--owner-config-unknown-option"];
+        assert_eq!(outputs[0].0, outputs[1].0, "{args:?}");
+        assert_eq!(outputs[0].0, Some(if usage_error { 2 } else { 0 }));
+        if !owner::argparse_text_compared() {
+            if usage_error {
+                assert_eq!(outputs[0].1, outputs[1].1, "{args:?}");
+                for output in &outputs {
+                    assert!(output.2.starts_with("usage: "));
+                    assert!(output.2.contains(": error: "));
+                }
+            } else {
+                assert_eq!(outputs[0].2, outputs[1].2, "{args:?}");
+            }
+            continue;
+        }
         if usage_error {
             let choices = |text: &str| -> String {
                 text.lines()

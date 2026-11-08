@@ -24,6 +24,21 @@ impl Scratch {
     pub fn proj(&self) -> PathBuf {
         self.root.join("proj")
     }
+    #[allow(dead_code)]
+    pub fn policy_files(&self) -> [Option<Vec<u8>>; 2] {
+        ["config.json", "policy_requests.json"].map(|name| {
+            match std::fs::read(self.proj().join(".secrets").join(name)) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => panic!("cannot read {name}: {error}"),
+            }
+        })
+    }
+}
+
+#[allow(dead_code)]
+pub fn argparse_text_compared() -> bool {
+    std::env::var("KV_PARITY_MODE").as_deref() != Ok("semantic")
 }
 
 impl Drop for Scratch {
