@@ -418,9 +418,7 @@ fn http_policy_parser_matches_python() {
         }
         assert_eq!(outputs[0], outputs[1], "{args:?}");
     }
-    for action in [
-        "", "list", "allow", "block", "prune", "watch", "request", "deny",
-    ] {
+    for action in ["watch", "request"] {
         let mut command = Command::new(kv_bin());
         command.arg("policy");
         if !action.is_empty() {

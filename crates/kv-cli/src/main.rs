@@ -4,6 +4,7 @@
 mod allowcmd;
 mod args;
 mod backup;
+mod command_policy;
 mod envcmd;
 mod fsutil;
 mod help;

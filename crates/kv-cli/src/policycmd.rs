@@ -9,6 +9,7 @@ use kv_store::config;
 use serde_json::{Map, Value, json};
 
 pub enum PolicyAction {
+    Command(crate::command_policy::CommandPolicyAction),
     Unavailable,
     HttpList(Option<String>),
     HttpAdd {
@@ -203,6 +204,9 @@ fn print_provider(p: &Palette, name: &str, entry: &Value) -> CmdResult {
 }
 
 pub fn cmd_policy(p: &Palette, action: PolicyAction) -> CmdResult {
+    if let PolicyAction::Command(action) = action {
+        return crate::command_policy::run(p, action);
+    }
     if matches!(action, PolicyAction::Unavailable) {
         return Err(project::fail(
             p,
@@ -375,7 +379,7 @@ pub fn cmd_policy(p: &Palette, action: PolicyAction) -> CmdResult {
             );
             reload_note(p);
         }
-        PolicyAction::Unavailable => unreachable!(),
+        PolicyAction::Unavailable | PolicyAction::Command(_) => unreachable!(),
     }
     Ok(())
 }

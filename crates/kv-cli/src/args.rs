@@ -364,7 +364,10 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                         match rest.get(i) {
                             Some(value)
                                 if !(value.starts_with('-') && value.len() > 1)
-                                    || (spec.name == "provider add" && negative_number(value)) =>
+                                    || (matches!(
+                                        spec.name,
+                                        "provider add" | "policy watch" | "policy request"
+                                    ) && negative_number(value)) =>
                             {
                                 value.clone()
                             }
@@ -382,6 +385,27 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                 };
                 if spec.name == "provider add" {
                     validate_provider_option(spec, option, &value)?;
+                }
+                if matches!(spec.name, "policy watch" | "policy request")
+                    && matches!(*option, "--interval" | "--ttl")
+                {
+                    let raw = value.trim();
+                    let digits = raw.strip_prefix(['+', '-']).unwrap_or(raw).as_bytes();
+                    if digits.is_empty()
+                        || !digits.iter().enumerate().all(|(i, b)| {
+                            b.is_ascii_digit()
+                                || (*b == b'_'
+                                    && i > 0
+                                    && i + 1 < digits.len()
+                                    && digits[i - 1].is_ascii_digit()
+                                    && digits[i + 1].is_ascii_digit())
+                        })
+                    {
+                        return Err(spec_error(
+                            spec,
+                            &format!("argument {option}: invalid int value: '{value}'"),
+                        ));
+                    }
                 }
                 if spec.name == "policy http add" && matches!(*option, "--path" | "--path-prefix") {
                     let other = if *option == "--path" {
@@ -940,7 +964,7 @@ fn parse_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
         )));
     }
     if rest.first().map(String::as_str) != Some("http") {
-        return Ok(Some(Command::Policy(PolicyAction::Unavailable)));
+        return parse_command_policy(rest);
     }
     let rest = &rest[1..];
     let Some(action) = rest.first() else {
@@ -997,6 +1021,145 @@ fn parse_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
             provider: provider.unwrap_or_default(),
             id: pos.next().unwrap_or_default(),
         },
+    };
+    Ok(Some(Command::Policy(action)))
+}
+
+fn parse_command_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::command_policy::CommandPolicyAction as Action;
+    let Some(name) = rest.first() else {
+        return Ok(Some(Command::Policy(PolicyAction::Command(Action::List(
+            false,
+        )))));
+    };
+    let mut spec = Spec {
+        name: "policy list",
+        usage: "usage: kv policy list [-h] [--all]\n",
+        help: "\noptions:\n  -h, --help  show this help message and exit\n",
+        env: false,
+        positionals: &[],
+        flags: &[(
+            "--all",
+            "  --all       Include allowed, blocked, and expired requests\n",
+        )],
+        options: &[],
+    };
+    match name.as_str() {
+        "list" => {}
+        "allow" | "block" | "deny" => {
+            spec.name = match name.as_str() {
+                "allow" => "policy allow",
+                "block" => "policy block",
+                _ => "policy deny",
+            };
+            spec.usage = match name.as_str() {
+                "allow" => "usage: kv policy allow [-h] [--reason REASON] request_id\n",
+                "block" => "usage: kv policy block [-h] [--reason REASON] request_id\n",
+                _ => "usage: kv policy deny [-h] [--reason REASON] request_id\n",
+            };
+            spec.help = "\npositional arguments:\n  request_id       Command-policy request ID\n\noptions:\n  -h, --help       show this help message and exit\n";
+            spec.positionals = &["request_id"];
+            spec.flags = &[];
+            spec.options = &[(
+                "--reason",
+                "  --reason REASON  Human note stored with the decision\n",
+            )];
+        }
+        "prune" => {
+            spec.name = "policy prune";
+            spec.usage = "usage: kv policy prune [-h]\n";
+            spec.flags = &[];
+        }
+        "watch" => {
+            spec.name = "policy watch";
+            spec.usage = "usage: kv policy watch [-h] [--all] [--follow] [--interval INTERVAL]\n";
+            spec.help = "\noptions:\n  -h, --help           show this help message and exit\n";
+            spec.flags = &[
+                (
+                    "--all",
+                    "  --all                Include allowed, blocked, and expired requests\n",
+                ),
+                (
+                    "--follow",
+                    "  --follow             Keep refreshing until interrupted\n",
+                ),
+            ];
+            spec.options = &[(
+                "--interval",
+                "  --interval INTERVAL  Refresh interval for --follow\n",
+            )];
+        }
+        "request" => {
+            spec.name = "policy request";
+            spec.usage = "usage: kv policy request [-h] [--ttl TTL] [--cwd CWD] [--source SOURCE]\n                         [--client CLIENT] [--session-id SESSION_ID]\n                         [--reason REASON]\n                         ...\n";
+            spec.help = "\npositional arguments:\n  cmd                   Command requesting policy review\n\noptions:\n  -h, --help            show this help message and exit\n";
+            spec.flags = &[];
+            spec.options = &[
+                (
+                    "--ttl",
+                    "  --ttl TTL             Pending request lifetime in seconds (default: 900)\n",
+                ),
+                (
+                    "--cwd",
+                    "  --cwd CWD             Working directory for the command (default: current\n                        directory)\n",
+                ),
+                (
+                    "--source",
+                    "  --source SOURCE       Optional requester source to bind, such as mcp\n",
+                ),
+                (
+                    "--client",
+                    "  --client CLIENT       Optional client name to bind, such as codex\n",
+                ),
+                (
+                    "--session-id",
+                    "  --session-id SESSION_ID\n                        Optional agent/session ID to bind\n",
+                ),
+                (
+                    "--reason",
+                    "  --reason REASON       Human note stored with the request\n",
+                ),
+            ];
+        }
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{POLICY_USAGE}kv policy: error: argument policy_action: invalid choice: '{name}' (choose from 'http', 'list', 'watch', 'request', 'allow', 'block', 'deny', 'prune')\n"
+            )));
+        }
+    }
+    let mut args = &rest[1..];
+    if name == "request" {
+        let mut i = 0;
+        while i < args.len() {
+            if args[i] == "--" || !args[i].starts_with('-') {
+                break;
+            }
+            if matches!(args[i].as_str(), "-h" | "--help") {
+                i += 1;
+                break;
+            }
+            i += if args[i].contains('=') { 1 } else { 2 };
+        }
+        args = &args[..i.min(args.len())];
+    }
+    let parsed = parse_spec(&spec, args)?;
+    let reason = parsed
+        .options
+        .iter()
+        .rev()
+        .find(|(key, _)| *key == "--reason")
+        .map(|(_, v)| v.clone());
+    let id = parsed.positionals.first().cloned().unwrap_or_default();
+    let action = match name.as_str() {
+        "list" => PolicyAction::Command(Action::List(parsed.flags.contains(&"--all"))),
+        "allow" => PolicyAction::Command(Action::Allow { id, reason }),
+        "block" | "deny" => PolicyAction::Command(Action::Block {
+            id,
+            reason,
+            alias: name == "deny",
+        }),
+        "prune" => PolicyAction::Command(Action::Prune),
+        _ => PolicyAction::Unavailable,
     };
     Ok(Some(Command::Policy(action)))
 }

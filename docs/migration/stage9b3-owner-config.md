@@ -90,7 +90,8 @@ than skipping either case. Live comparisons use a separately installed 3.10.22.
 validation and binding checks. Additions authorize loosening and save the loaded
 snapshot; invalid-entry removal is a protected-mode-blocked loosening repair,
 while ordinary removal remains available in protected mode. Command-policy
-actions deliberately refuse as unavailable until step 6.
+watch/request actions remain parsed but unavailable; command-policy decisions are
+implemented below.
 
 There is no unsafe-method flag: Python automatically stores `approval: per-call`
 for POST, PUT, PATCH, and DELETE rules. Mixing safe and unsafe methods is refused.
@@ -104,3 +105,44 @@ and unsafe rules, repeated methods/query keys/headers, default-policy insertion,
 binding errors, duplicate IDs, route validation, repair, cancellation, protected
 mode, listing, aliases, and argparse help/errors. Pure broker helper comparisons
 also cover empty/default input, unsupported methods, labels, and binding checks.
+
+## Command-policy inbox and owner decisions
+
+Bare `kv policy` and `kv policy list [--all]` show the command-policy inbox.
+`allow`, `block` / `deny`, and `prune` interoperate with Python-created requests.
+`watch` and `request` retain argparse help/usage but refuse as unavailable; tests
+create their requests using Python, not a Rust request command.
+
+The private request store preserves Python's sorted, ASCII-escaped, indented
+JSON format, including its trailing newline and floating-point record fields.
+Decision writes hold Python's stable `storage.lock`; allowing records the
+decision before adding the pattern under that same lock and a checked config
+snapshot. Request fingerprints bind exactly the fields Python reviews and are
+rechecked under the lock, along with status, expiry, and broad-pattern refusal.
+Decided requests never implicitly re-apply missing allowlist shapes.
+
+Owner prompts escape stored values and refuse overlong approval values. Audit
+decisions use the shared audit emitter and requester attribution, explicitly
+marked unverified. Protected mode blocks allow but leaves block and prune open.
+
+Differential tests cover empty/pending/all listings, decisions, aliases,
+already-decided and missing/expired IDs, broad patterns, protected mode,
+passphrase absence, cancellation, prune counts, audit fields, parser/help, and
+cross-implementation reads. Config and request-store bytes are compared; only
+the two decision-generated update timestamps are masked in interactive runs.
+Fixed-clock store comparisons additionally compare request-store bytes without
+masking, fingerprints, stale snapshots, changed review fields, malformed stores,
+and ignore-file maintenance.
+
+Deliberate fail-closed differences: Rust refuses a non-private request store
+without changing its permissions, whereas Python repairs its mode and proceeds.
+The live comparison asserts both outcomes. On Windows, an existing request
+store is refused because private-ACL verification is not implemented, matching
+the existing Rust approval-store restriction rather than trusting unchecked ACLs.
+The prior unsupported-2FA refusal also applies to command-policy allow.
+Non-array argv and non-string cwd fields receive explicit field-type refusals
+instead of Python's coercion or type-error behavior. The live numeric-field
+error cases preserve queue and config in both implementations.
+Numeric options on the unavailable watch/request commands require ASCII decimal
+spellings (signs, whitespace and underscores are accepted). Non-ASCII decimal
+spellings are refused where Python accepts them.

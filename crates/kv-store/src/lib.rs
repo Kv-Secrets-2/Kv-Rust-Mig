@@ -18,6 +18,7 @@ pub mod config;
 pub mod config_authority;
 pub mod envname;
 pub mod fsx;
+pub mod policy_requests;
 pub mod pyjson;
 pub mod vault_origin;
 
