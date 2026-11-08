@@ -46,6 +46,7 @@ pub enum Command {
     NetworkDeny(String),
     Provider(crate::providercmd::ProviderAction),
     Policy(PolicyAction),
+    Approvals(crate::approvalscmd::ApprovalsAction),
     AgentChild,
     Hook {
         mode: String,
@@ -527,6 +528,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "policy" {
         return parse_policy(&argv[1..]);
+    }
+    if first == "approvals" {
+        return parse_approvals(&argv[1..]);
     }
     if first == "history" {
         return parse_history(&argv[1..]);
@@ -1112,6 +1116,75 @@ const HTTP_ADD: Spec = Spec {
         ),
     ],
 };
+
+const APPROVALS_USAGE: &str = "usage: kv approvals [-h]\n                    {list,watch,request,approve,page,pause,deny,prune} ...\n";
+const APPROVALS_CHOICES: &[&str] = &[
+    "list", "watch", "request", "approve", "page", "pause", "deny", "prune",
+];
+const APPROVE_USAGE: &str = "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n";
+
+fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::approvalscmd::ApprovalsAction;
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(
+            "list",
+        ))));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{APPROVALS_USAGE}\npositional arguments:\n  {{list,watch,request,approve,page,pause,deny,prune}}\n    list                List pending approval requests\n    watch               Show the terminal approval inbox\n    request             Create a pending approval request\n    approve             Approve a pending run grant or one-call permit\n    page                Approve requests on a local page in your browser (one-\n                        use link)\n    pause               Pause a running counted job at once (it goes on only\n                        after kv approvals approve); without a job: list the\n                        running jobs\n    deny                Deny a pending request, or refuse a paused job more\n                        calls or time\n    prune               Remove decided request records; missed requests are\n                        kept 24 h after expiry\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    let Some(choice) = APPROVALS_CHOICES.iter().find(|c| *c == action) else {
+        return Err(ParseError::Usage(format!(
+            "{APPROVALS_USAGE}kv approvals: error: argument approvals_action: invalid choice: '{action}' (choose from 'list', 'watch', 'request', 'approve', 'page', 'pause', 'deny', 'prune')\n"
+        )));
+    };
+    if *choice != "approve" {
+        return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(
+            choice,
+        ))));
+    }
+    let rest = &rest[1..];
+    if rest.iter().any(|v| v == "-h" || v == "--help") {
+        return Err(ParseError::Help(format!(
+            "{APPROVE_USAGE}\npositional arguments:\n  request_id            Approval request ID\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    let mut request_id = None;
+    let mut run_grant_flags = false;
+    let mut skip = false;
+    for (i, value) in rest.iter().enumerate() {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if value.starts_with("--") {
+            run_grant_flags = true;
+            if !value.contains('=')
+                && !matches!(value.as_str(), "--reuse" | "--no-call-limit")
+                && i + 1 < rest.len()
+            {
+                skip = true;
+            }
+            continue;
+        }
+        if request_id.replace(value.clone()).is_some() {
+            return Err(ParseError::Usage(format!(
+                "{APPROVE_USAGE}kv approvals approve: error: unrecognized arguments: {value}\n"
+            )));
+        }
+    }
+    let Some(request_id) = request_id else {
+        return Err(ParseError::Usage(format!(
+            "{APPROVE_USAGE}kv approvals approve: error: the following arguments are required: request_id\n"
+        )));
+    };
+    Ok(Some(Command::Approvals(ApprovalsAction::Approve {
+        request_id,
+        run_grant_flags,
+    })))
+}
 
 fn parse_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
     if rest.first().is_some_and(|v| v == "-h" || v == "--help") {

@@ -2,6 +2,7 @@
 //! build carries, plus the MCP server on stdio.
 
 mod allowcmd;
+mod approvalscmd;
 mod args;
 mod backup;
 mod command_policy;
@@ -103,6 +104,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         NetworkDeny(pattern) => allowcmd::cmd_network_deny(p, &pattern),
         Provider(action) => providercmd::cmd_provider(p, action),
         Policy(action) => policycmd::cmd_policy(p, action),
+        Approvals(action) => approvalscmd::cmd_approvals(p, action),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Run {

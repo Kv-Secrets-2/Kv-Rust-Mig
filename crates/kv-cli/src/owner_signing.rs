@@ -1,5 +1,3 @@
-#![allow(dead_code)] // wired by `kv approvals approve` (9b-4a); removed with it
-
 //! Python `owner_approval.PermitSigningContext`: the owner's review of a one-call
 //! permit over the authenticated owner channel. Only a protected session with the
 //! owner key signs anything; every answer from the service is MAC-checked against
