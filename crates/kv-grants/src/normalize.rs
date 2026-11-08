@@ -336,7 +336,10 @@ pub fn normalize_service_calls(
             missing.join(", ")
         ));
     }
-    let total: i64 = per.values().filter_map(as_int).sum();
+    let total: i64 = per
+        .values()
+        .filter_map(as_int)
+        .fold(0i64, |sum, count| sum.saturating_add(count));
     if total > MAX_COUNT {
         return invalid(format!(
             "at most {MAX_COUNT} calls in all per approval ({total} asked)"
