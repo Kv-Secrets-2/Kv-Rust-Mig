@@ -13,6 +13,7 @@ mod init;
 mod lifecycle;
 mod owner_policy;
 mod project;
+mod providercmd;
 mod registry;
 mod render;
 mod reserved_env;
@@ -95,6 +96,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Deny(pattern) => allowcmd::cmd_deny(p, &pattern),
         NetworkAllow(pattern) => allowcmd::cmd_network_allow(p, pattern.as_deref()),
         NetworkDeny(pattern) => allowcmd::cmd_network_deny(p, &pattern),
+        Provider(action) => providercmd::cmd_provider(p, action),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Vault(action) => vaultcmd::cmd_vault(p, action),

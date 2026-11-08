@@ -11,6 +11,15 @@
   strings, and non-string run-policy settings, rather than interpreting or
   displaying them permissively. It leaves the configuration unchanged. Python
   can, for example, display a numeric entry; the live tests cover this refusal.
+- Provider ports must be ASCII decimal integers representable as signed 64-bit
+  values (with Python-style surrounding whitespace, sign and digit separators).
+  Rust refuses non-ASCII decimal spellings and larger integers at argument
+  parsing, without writing configuration. Python accepts these spellings and
+  arbitrary-precision integers. Live tests cover both refusals.
+- Malformed provider containers/entries are refused without mutation. Where
+  Python raises an attribute error during listing or removal, Rust reports a
+  concise object-type error instead of a traceback. Tests compare refusal and
+  unchanged config bytes for these cases rather than traceback text.
 
 ## Approval mode
 
@@ -39,3 +48,20 @@ guard, just like Python; the store's conditional save still rejects stale data.
 including unset-mode warnings, confirmation cancellation, duplicate/missing
 entries, broad-entry repair, protected mode, list/help output, and non-terminal
 refusals. Its storage comparison covers empty patterns and absent settings.
+
+## Providers
+
+`kv provider` / `list`, `add`, and `rm` share broker provider validation and
+owner authorization. HTTP registration validates the origin, resolves all
+addresses through the broker SSRF guard, and appends origin-bound deny-all
+policy entries. Removal deletes the corresponding HTTP policy entry as well.
+Unloaded-provider removal is a loosening repair. Protected approval blocks
+both addition and removal. Non-HTTP providers retain the MCP parked-tool notice.
+
+Provider command comparisons cover auth modes/defaults, insertion-ordered config
+bytes, URL refusals, DB/SSH required fields and defaults, duplicates, removal,
+repair, cancellation, protected approval, malformed provider/policy containers,
+and parser help/errors. Broker comparisons cover validators, provider-table
+loading, default policy, and public/restricted IPv6 literals. The shared URL
+guard now also rejects reserved and special-purpose IPv6 ranges that Python
+rejects; it retains Python's public exceptions.

@@ -1,5 +1,7 @@
 //! `build_parser()` for the commands this build carries, with argparse's messages.
 
+use crate::providercmd::{ProviderAction, ProviderOptions};
+
 pub enum Command {
     Version,
     Init {
@@ -39,6 +41,7 @@ pub enum Command {
     Deny(String),
     NetworkAllow(Option<String>),
     NetworkDeny(String),
+    Provider(crate::providercmd::ProviderAction),
     AgentChild,
     Hook {
         mode: String,
@@ -76,7 +79,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,allow,deny,network-allow,network-deny,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,allow,deny,network-allow,network-deny,provider,version,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -356,7 +359,10 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                     None => {
                         i += 1;
                         match rest.get(i) {
-                            Some(value) if !(value.starts_with('-') && value.len() > 1) => {
+                            Some(value)
+                                if !(value.starts_with('-') && value.len() > 1)
+                                    || (spec.name == "provider add" && negative_number(value)) =>
+                            {
                                 value.clone()
                             }
                             _ => {
@@ -371,6 +377,9 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                         }
                     }
                 };
+                if spec.name == "provider add" {
+                    validate_provider_option(spec, option, &value)?;
+                }
                 parsed.options.push((option, value));
                 i += 1;
                 continue;
@@ -388,8 +397,19 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
         .iter()
         .filter(|name| !name.starts_with('?'))
         .count();
-    if parsed.positionals.len() < required {
-        let missing: Vec<&str> = spec.positionals[parsed.positionals.len()..required].to_vec();
+    let missing_secret =
+        spec.name == "provider add" && !parsed.options.iter().any(|(key, _)| *key == "--secret");
+    if parsed.positionals.len() < required || missing_secret {
+        let mut missing: Vec<&str> = spec
+            .positionals
+            .iter()
+            .copied()
+            .take(required)
+            .skip(parsed.positionals.len())
+            .collect();
+        if missing_secret {
+            missing.push("--secret");
+        }
         return Err(spec_error(
             spec,
             &format!(
@@ -425,6 +445,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "approval-mode" {
         return parse_approval_mode(&argv[1..]);
+    }
+    if first == "provider" {
+        return parse_provider(&argv[1..]);
     }
     if first == "history" {
         return parse_history(&argv[1..]);
@@ -698,6 +721,180 @@ const APPROVAL_MODE_STATUS_SPEC: Spec = Spec {
     flags: &[],
     options: &[],
 };
+
+const PROVIDER_USAGE: &str = "usage: kv provider [-h] {add,list,rm} ...\n";
+const PROVIDER_ADD: Spec = Spec {
+    name: "provider add",
+    usage: "usage: kv provider add [-h] [--type {http,postgres,mysql,redis,ssh}]\n                       [--url URL] [--host HOST] [--port PORT]\n                       [--database DATABASE] [--username USERNAME] --secret\n                       SECRET [--auth {bearer,x-api-key,query,basic,header}]\n                       [--query-param QUERY_PARAM] [--header-name HEADER_NAME]\n                       name\n",
+    help: "\npositional arguments:\n  name                  Provider name (e.g., stripe, twilio)\n\noptions:\n  -h, --help            show this help message and exit\n",
+    positionals: &["name"],
+    env: false,
+    flags: &[],
+    options: &[
+        (
+            "--type",
+            "  --type {http,postgres,mysql,redis,ssh}\n                        Provider type (default: http)\n",
+        ),
+        (
+            "--url",
+            "  --url URL             HTTP base URL (e.g., https://api.stripe.com)\n",
+        ),
+        (
+            "--host",
+            "  --host HOST           Database/Redis/SSH host\n",
+        ),
+        (
+            "--port",
+            "  --port PORT           Database/Redis/SSH port\n",
+        ),
+        (
+            "--database",
+            "  --database DATABASE   Database name or Redis DB number\n",
+        ),
+        (
+            "--username",
+            "  --username USERNAME   Database or SSH username\n",
+        ),
+        (
+            "--secret",
+            "  --secret SECRET       Secret name in vault (e.g., STRIPE_SECRET_KEY,\n                        DB_PASSWORD, SSH_KEY)\n",
+        ),
+        (
+            "--auth",
+            "  --auth {bearer,x-api-key,query,basic,header}\n                        HTTP auth type (default: bearer)\n",
+        ),
+        (
+            "--query-param",
+            "  --query-param QUERY_PARAM\n                        Query param name (for --auth query)\n",
+        ),
+        (
+            "--header-name",
+            "  --header-name HEADER_NAME\n                        Header name (for --auth header)\n",
+        ),
+    ],
+};
+const PROVIDER_RM: Spec = Spec {
+    name: "provider rm",
+    usage: "usage: kv provider rm [-h] name\n",
+    help: "\npositional arguments:\n  name        Provider name to remove\n\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &["name"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const PROVIDER_LIST: Spec = Spec {
+    name: "provider list",
+    usage: "usage: kv provider list [-h]\n",
+    help: "\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &[],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+
+fn negative_number(value: &str) -> bool {
+    let Some(value) = value.strip_prefix('-') else {
+        return false;
+    };
+    if let Some((whole, fraction)) = value.split_once('.') {
+        (whole.is_empty() || whole.bytes().all(|b| b.is_ascii_digit()))
+            && !fraction.is_empty()
+            && fraction.bytes().all(|b| b.is_ascii_digit())
+    } else {
+        !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+    }
+}
+
+fn provider_port(value: &str) -> Option<i64> {
+    let value = value.trim();
+    let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
+    if digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
+        return None;
+    }
+    value.replace('_', "").parse().ok()
+}
+
+fn validate_provider_option(spec: &Spec, key: &str, value: &str) -> Result<(), ParseError> {
+    let choices: &[&str] = match key {
+        "--type" => &["http", "postgres", "mysql", "redis", "ssh"],
+        "--auth" => &["bearer", "x-api-key", "query", "basic", "header"],
+        "--port" => {
+            if provider_port(value).is_none() {
+                return Err(spec_error(
+                    spec,
+                    &format!("argument --port: invalid int value: '{value}'"),
+                ));
+            }
+            return Ok(());
+        }
+        _ => return Ok(()),
+    };
+    if !choices.contains(&value) {
+        return Err(spec_error(
+            spec,
+            &format!(
+                "argument {key}: invalid choice: '{value}' (choose from {})",
+                choices
+                    .iter()
+                    .map(|v| format!("'{v}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Provider(ProviderAction::List)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{PROVIDER_USAGE}\npositional arguments:\n  {{add,list,rm}}\n    add          Add a custom provider\n    list         List all providers\n    rm           Remove a custom provider\n\noptions:\n  -h, --help     show this help message and exit\n"
+        )));
+    }
+    let spec = match action.as_str() {
+        "add" => &PROVIDER_ADD,
+        "rm" => &PROVIDER_RM,
+        "list" => &PROVIDER_LIST,
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{PROVIDER_USAGE}kv provider: error: argument provider_action: invalid choice: '{action}' (choose from 'add', 'list', 'rm')\n"
+            )));
+        }
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let option = |key| {
+        parsed
+            .options
+            .iter()
+            .rev()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+    };
+    let name = parsed.positionals.first().cloned().unwrap_or_default();
+    let action = match action.as_str() {
+        "rm" => ProviderAction::Remove(name),
+        "list" => ProviderAction::List,
+        _ => ProviderAction::Add(Box::new(ProviderOptions {
+            name,
+            provider_type: option("--type").unwrap_or_else(|| "http".into()),
+            url: option("--url"),
+            host: option("--host"),
+            port: option("--port")
+                .and_then(|v| provider_port(&v))
+                .map(serde_json::Value::from),
+            database: option("--database"),
+            username: option("--username"),
+            secret: option("--secret"),
+            auth: option("--auth").unwrap_or_else(|| "bearer".into()),
+            query_param: option("--query-param"),
+            header_name: option("--header-name"),
+        })),
+    };
+    Ok(Some(Command::Provider(action)))
+}
 
 fn parse_approval_mode(rest: &[String]) -> Result<Option<Command>, ParseError> {
     let Some(action) = rest.first() else {

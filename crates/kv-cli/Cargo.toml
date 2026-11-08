@@ -20,6 +20,7 @@ kv-proto = { path = "../kv-proto" }
 kv-broker = { path = "../kv-broker" }
 kv-audit = { path = "../kv-audit" }
 serde_json = "1"
+url = "2"
 caseless = "0.2.2"
 unicode-general-category = "1"
 zeroize = "1"

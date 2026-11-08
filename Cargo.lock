@@ -739,6 +739,7 @@ dependencies = [
  "rustix",
  "serde_json",
  "unicode-general-category",
+ "url",
  "zeroize",
 ]
 
