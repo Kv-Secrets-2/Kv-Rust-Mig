@@ -1798,7 +1798,6 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
 }
 
 /// `_validate_agent_request` for `api` (daemon token) and `cap_api` (capability token).
-#[cfg(unix)]
 fn validate_http_call_request(
     request: &serde_json::Map<String, Value>,
     capability: bool,
