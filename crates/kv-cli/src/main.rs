@@ -1,8 +1,10 @@
 //! The `kv` binary: `kv/cli.py`'s `main()` and `build_parser()` for the commands this
 //! build carries, plus the MCP server on stdio.
 
+mod allowcmd;
 mod args;
 mod backup;
+mod command_policy;
 mod envcmd;
 mod fsutil;
 mod help;
@@ -10,8 +12,11 @@ mod history;
 mod hook;
 mod init;
 mod lifecycle;
+mod owner_policy;
+mod policycmd;
 mod preflight;
 mod project;
+mod providercmd;
 mod registry;
 mod render;
 mod reserved_env;
@@ -90,6 +95,13 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         } => lifecycle::cmd_unlock(p, foreground, install),
         Lock => lifecycle::cmd_lock(p),
         Status => lifecycle::cmd_status(p),
+        ApprovalMode(mode) => owner_policy::cmd_approval_mode(p, mode.as_deref()),
+        Allow(pattern) => allowcmd::cmd_allow(p, pattern.as_deref()),
+        Deny(pattern) => allowcmd::cmd_deny(p, &pattern),
+        NetworkAllow(pattern) => allowcmd::cmd_network_allow(p, pattern.as_deref()),
+        NetworkDeny(pattern) => allowcmd::cmd_network_deny(p, &pattern),
+        Provider(action) => providercmd::cmd_provider(p, action),
+        Policy(action) => policycmd::cmd_policy(p, action),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Run {

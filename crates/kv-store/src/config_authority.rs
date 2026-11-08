@@ -294,7 +294,7 @@ pub fn open(
     open_record(root.as_ref(), master_key, blob)
 }
 
-fn is_key_wrapped(root: &Path, strict: bool) -> Result<bool, AuthorityError> {
+pub fn is_key_wrapped(root: &Path, strict: bool) -> Result<bool, AuthorityError> {
     match fsx::read_regular_limit(&key_path(root), "key file", 64 * 1024 * 1024) {
         Ok(bytes) => Ok(bytes.len() >= 4 && &bytes[..3] == b"KVW"),
         Err(StoreError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),

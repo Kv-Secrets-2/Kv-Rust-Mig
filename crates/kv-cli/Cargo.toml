@@ -16,11 +16,13 @@ kv-agent = { path = "../kv-agent" }
 kv-hook = { path = "../kv-hook" }
 kv-store = { path = "../kv-store" }
 kv-requests = { path = "../kv-requests" }
+kv-sandbox = { path = "../kv-sandbox" }
 kv-crypto = { path = "../kv-crypto" }
 kv-proto = { path = "../kv-proto" }
 kv-broker = { path = "../kv-broker" }
 kv-audit = { path = "../kv-audit" }
 serde_json = "1"
+url = "2"
 caseless = "0.2.2"
 unicode-general-category = "1"
 zeroize = "1"

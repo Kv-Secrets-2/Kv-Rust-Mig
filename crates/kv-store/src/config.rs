@@ -38,8 +38,173 @@ pub struct ConfigLockGuard {
     _lock: fsx::ConfigLock,
 }
 
+pub struct AuthorizationLockGuard {
+    _lock: Option<fsx::StorageLock>,
+}
+
+pub fn authorization_lock(root: impl AsRef<Path>) -> Result<AuthorizationLockGuard, StoreError> {
+    Ok(AuthorizationLockGuard {
+        _lock: fsx::lock_authorization(&secrets_dir(root.as_ref()))?,
+    })
+}
+
+pub fn approval_mode(config: &Value) -> &str {
+    match config
+        .get("security")
+        .and_then(|s| s.get("approval_mode"))
+        .and_then(Value::as_str)
+    {
+        Some(mode @ ("local-convenience" | "protected-approval" | "unsafe-convenience")) => mode,
+        _ => "unset",
+    }
+}
+
+pub fn get_approval_mode(root: impl AsRef<Path>) -> Result<String, StoreError> {
+    let snapshot = load_config(root)?;
+    let object = |value: &Value| {
+        if value.is_object() {
+            Ok(())
+        } else {
+            let kind = match value {
+                Value::Null => "NoneType",
+                Value::Bool(_) => "bool",
+                Value::Number(n) if n.is_f64() => "float",
+                Value::Number(_) => "int",
+                Value::String(_) => "str",
+                Value::Array(_) => "list",
+                Value::Object(_) => unreachable!(),
+            };
+            Err(StoreError::ConfigConflict(format!(
+                "'{kind}' object has no attribute 'get'"
+            )))
+        }
+    };
+    object(&snapshot.value)?;
+    if let Some(security) = snapshot.value.get("security") {
+        object(security)?;
+        if let Some(mode @ (Value::Array(_) | Value::Object(_))) = security.get("approval_mode") {
+            let kind = if mode.is_array() { "list" } else { "dict" };
+            return Err(StoreError::ConfigConflict(format!(
+                "unhashable type: '{kind}'"
+            )));
+        }
+    }
+    Ok(approval_mode(&snapshot.value).to_owned())
+}
+
+pub fn set_approval_mode(root: impl AsRef<Path>, mode: &str) -> Result<bool, StoreError> {
+    if ![
+        "local-convenience",
+        "protected-approval",
+        "unsafe-convenience",
+    ]
+    .contains(&mode)
+    {
+        return Err(StoreError::ConfigConflict(format!(
+            "invalid approval mode: {mode}"
+        )));
+    }
+    let root = root.as_ref();
+    let _authorization = authorization_lock(root)?;
+    config_transaction(root, |config| {
+        let security = config
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("config must be an object".into()))?
+            .entry("security")
+            .or_insert_with(|| json!({}));
+        let security = security
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("security must be an object".into()))?;
+        if security.get("approval_mode").and_then(Value::as_str) == Some(mode) {
+            return Ok(false);
+        }
+        security.insert("approval_mode".into(), Value::String(mode.into()));
+        Ok(true)
+    })
+}
+
 fn secrets_dir(root: &Path) -> PathBuf {
     root.join(".secrets")
+}
+
+pub fn command_patterns(config: &Value, field: &str) -> Result<Vec<String>, StoreError> {
+    if !config.is_object() {
+        return Err(StoreError::ConfigConflict(
+            "config must be an object".into(),
+        ));
+    }
+    let Some(security) = config.get("security") else {
+        return Ok(Vec::new());
+    };
+    let security = security
+        .as_object()
+        .ok_or_else(|| StoreError::ConfigConflict("security must be an object".into()))?;
+    let Some(patterns) = security.get(field) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_value(patterns.clone()).map_err(|_| {
+        StoreError::ConfigConflict(format!(
+            "security.{field} must be a list of command strings"
+        ))
+    })
+}
+
+pub fn get_run_policy(root: impl AsRef<Path>) -> Result<(String, Vec<String>), StoreError> {
+    let config = load_config(root)?;
+    let policy = config
+        .value
+        .get("security")
+        .and_then(|s| s.get("kv_run_policy"))
+        .map(|v| {
+            v.as_str().map(str::to_owned).ok_or_else(|| {
+                StoreError::ConfigConflict("security.kv_run_policy must be a string".into())
+            })
+        })
+        .transpose()?
+        .unwrap_or_else(|| "blocklist".into());
+    Ok((policy, command_patterns(&config.value, "allowed_commands")?))
+}
+
+fn add_command(root: &Path, command: &str, field: &str) -> Result<bool, StoreError> {
+    config_transaction(root, |config| {
+        let mut patterns = command_patterns(config, field)?;
+        if patterns.iter().any(|entry| entry == command) {
+            return Ok(false);
+        }
+        patterns.push(command.to_owned());
+        let security = config
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("config must be an object".into()))?
+            .entry("security")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("security must be an object".into()))?;
+        security.insert(field.into(), json!(patterns));
+        if field == "allowed_commands" {
+            security.insert("kv_run_policy".into(), json!("allowlist"));
+        }
+        Ok(true)
+    })
+}
+
+pub fn add_allowed_command(root: impl AsRef<Path>, command: &str) -> Result<bool, StoreError> {
+    add_command(root.as_ref(), command, "allowed_commands")
+}
+
+pub fn add_network_command(root: impl AsRef<Path>, command: &str) -> Result<bool, StoreError> {
+    add_command(root.as_ref(), command, "network_commands")
+}
+
+pub fn remove_allowed_command(root: impl AsRef<Path>, command: &str) -> Result<bool, StoreError> {
+    config_transaction(root, |config| {
+        let mut patterns = command_patterns(config, "allowed_commands")?;
+        let Some(index) = patterns.iter().position(|entry| entry == command) else {
+            return Ok(false);
+        };
+        patterns.remove(index);
+        config["security"]["allowed_commands"] = json!(patterns);
+        Ok(true)
+    })
 }
 
 fn config_path(root: &Path) -> PathBuf {
