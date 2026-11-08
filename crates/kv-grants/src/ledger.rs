@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use kv_approvals::verify::{AdmissionRefused, VerifiedGrant, from_payload};
-use serde_json::{Map, Value};
+use kv_approvals::verify::{AdmissionRefused, VerifiedGrant, from_payload, valid_entry_counts};
+use serde_json::{Map, Value, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunState {
@@ -30,6 +30,135 @@ struct Inner {
     grant_mono_end: BTreeMap<String, Instant>,
     /// Grant id -> the latest wall-clock end an extension gave its pass.
     extended_until: BTreeMap<String, i64>,
+    /// Token hash -> the live state of a capability pass minted this session.
+    passes: BTreeMap<String, PassState>,
+}
+
+/// A capability pass as the daemon counts it: calls left in all and, for a
+/// several-service or wallet pass, per service or entry.
+#[derive(Debug, Clone)]
+struct PassState {
+    record: Map<String, Value>,
+    left: i64,
+    revoked: bool,
+    time_over: bool,
+    mono_end: Instant,
+    /// Service or entry key -> calls left (`null`: no limit for that service).
+    left_by: Option<Map<String, Value>>,
+    used_unlimited: i64,
+    wallet: bool,
+}
+
+impl PassState {
+    fn time_over(&mut self, now_epoch: i64) -> bool {
+        let signed_end = self
+            .record
+            .get("expires_at_epoch")
+            .and_then(Value::as_i64)
+            .unwrap_or(i64::MIN);
+        if self.time_over || signed_end <= now_epoch || Instant::now() >= self.mono_end {
+            self.time_over = true;
+        }
+        self.time_over
+    }
+
+    fn unlimited(&self) -> bool {
+        self.left_by
+            .as_ref()
+            .is_some_and(|by| by.values().any(Value::is_null))
+    }
+
+    fn public(&self, capability: Option<&str>) -> Map<String, Value> {
+        let mut result = self.record.clone();
+        let max_calls = self
+            .record
+            .get("max_calls")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        result.insert("remaining_calls".into(), json!(self.left));
+        result.insert(
+            "consumed_calls".into(),
+            json!(max_calls - self.left + self.used_unlimited),
+        );
+        let unlimited = self.unlimited();
+        if let Some(left_by) = &self.left_by {
+            result.insert(
+                "remaining_calls_by_service".into(),
+                Value::Object(left_by.clone()),
+            );
+            if let Some(left) = capability.and_then(|c| left_by.get(c)) {
+                result.insert("remaining_calls".into(), left.clone());
+            } else if unlimited {
+                result.insert("remaining_calls".into(), Value::Null);
+            }
+        }
+        if self.revoked {
+            result.insert("status".into(), json!("revoked"));
+        } else if self.left == 0 && !unlimited {
+            result.insert("status".into(), json!("consumed"));
+        }
+        result
+    }
+
+    /// Which count this call is charged to, or why it cannot be charged.
+    fn charge_service(&self, capability: Option<&str>) -> Result<Option<String>, AdmissionRefused> {
+        let Some(left_by) = &self.left_by else {
+            return Ok(None);
+        };
+        let Some(left) = capability.and_then(|c| left_by.get(c)) else {
+            return Err(AdmissionRefused::new(if self.wallet {
+                "outside this run's POST wallet"
+            } else {
+                "token is scoped to a different provider"
+            }));
+        };
+        let capability = capability.expect("found above").to_owned();
+        if left.is_null() {
+            return Ok(Some(capability));
+        }
+        if left.as_i64().unwrap_or(0) <= 0 {
+            return Err(AdmissionRefused::new(format!(
+                "call budget exhausted for {capability}"
+            )));
+        }
+        Ok(Some(capability))
+    }
+
+    fn debit(&mut self, service: Option<&str>) {
+        if let Some(service) = service {
+            let left_by = self
+                .left_by
+                .as_mut()
+                .expect("service passes count by service");
+            let left = left_by.get_mut(service).expect("charged service exists");
+            if left.is_null() {
+                self.used_unlimited += 1;
+                return;
+            }
+            *left = json!(left.as_i64().unwrap_or(0) - 1);
+        }
+        self.left -= 1;
+    }
+}
+
+fn valid_service_counts(per_service: &Value, max_calls: i64) -> bool {
+    let Some(counts) = per_service.as_object() else {
+        return false;
+    };
+    if counts.is_empty() || (counts.len() < 2 && !counts.values().any(Value::is_null)) {
+        return false;
+    }
+    let mut total: i64 = 0;
+    for value in counts.values() {
+        if value.is_null() {
+            continue;
+        }
+        match value.as_i64() {
+            Some(count) if count >= 1 => total = total.saturating_add(count),
+            _ => return false,
+        }
+    }
+    total == max_calls
 }
 
 #[derive(Default)]
@@ -208,6 +337,170 @@ impl Ledger {
         {
             state.revoked = Some(mode.to_owned());
         }
+    }
+
+    /// Register a freshly minted capability pass (`add_pass`).
+    pub fn add_pass(
+        &self,
+        record: &Map<String, Value>,
+        now_epoch: i64,
+    ) -> Result<(), AdmissionRefused> {
+        let text = |key: &str| {
+            record
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        };
+        let Some(token_hash) = text("token_hash") else {
+            return Err(AdmissionRefused::new("duplicate capability admission"));
+        };
+        let mut inner = self.lock();
+        let duplicate = inner.passes.contains_key(token_hash)
+            || inner.passes.values().any(|pass| {
+                pass.record.get("token_id") == record.get("token_id")
+                    || text("admission_id").is_some_and(|id| {
+                        pass.record.get("admission_id").and_then(Value::as_str) == Some(id)
+                    })
+            });
+        if duplicate {
+            return Err(AdmissionRefused::new("duplicate capability admission"));
+        }
+        let Some(max_calls) = record.get("max_calls").and_then(Value::as_i64) else {
+            return Err(AdmissionRefused::new("invalid per-service call counts"));
+        };
+        let start = record
+            .get("created_at_epoch")
+            .and_then(Value::as_i64)
+            .unwrap_or(now_epoch);
+        let span = record
+            .get("expires_at_epoch")
+            .and_then(Value::as_i64)
+            .map(|ends| ends.saturating_sub(start).max(0))
+            .unwrap_or(0);
+        let mut mono_end = Instant::now() + std::time::Duration::from_secs(span as u64);
+        if let Some(grant_end) = record
+            .get("grant_id")
+            .and_then(Value::as_str)
+            .and_then(|id| inner.grant_mono_end.get(id))
+        {
+            mono_end = mono_end.min(*grant_end);
+        }
+        let per_service = record.get("calls_per_service").filter(|v| !v.is_null());
+        let per_entry = record.get("calls_per_entry").filter(|v| !v.is_null());
+        let (left_by, wallet) = if let Some(per_entry) = per_entry {
+            if per_service.is_some() || !valid_entry_counts(per_entry, record) {
+                return Err(AdmissionRefused::new("invalid per-entry call counts"));
+            }
+            (per_entry.as_object().cloned(), true)
+        } else if let Some(per_service) = per_service {
+            if !valid_service_counts(per_service, max_calls) {
+                return Err(AdmissionRefused::new("invalid per-service call counts"));
+            }
+            (per_service.as_object().cloned(), false)
+        } else {
+            (None, false)
+        };
+        inner.passes.insert(
+            token_hash.to_owned(),
+            PassState {
+                record: record.clone(),
+                left: max_calls,
+                revoked: false,
+                time_over: false,
+                mono_end,
+                left_by,
+                used_unlimited: 0,
+                wallet,
+            },
+        );
+        Ok(())
+    }
+
+    /// The pass's record with its live counts and status (`pass_record`).
+    pub fn pass_record(
+        &self,
+        token_hash: &str,
+        capability: Option<&str>,
+    ) -> Option<Map<String, Value>> {
+        self.lock()
+            .passes
+            .get(token_hash)
+            .map(|pass| pass.public(capability))
+    }
+
+    /// Whether the pass's time is over by its signed end or the monotonic clock.
+    pub fn time_over(&self, token_hash: &str, now_epoch: i64) -> bool {
+        self.lock()
+            .passes
+            .get_mut(token_hash)
+            .is_some_and(|pass| pass.time_over(now_epoch))
+    }
+
+    /// Charge one call to the pass (`spend_pass`) and return its record.
+    pub fn spend_pass(
+        &self,
+        token_hash: &str,
+        now_epoch: i64,
+        capability: Option<&str>,
+    ) -> Result<Map<String, Value>, AdmissionRefused> {
+        let mut inner = self.lock();
+        let parent_revoked = |inner: &Inner, pass: &PassState| {
+            pass.record
+                .get("grant_id")
+                .and_then(Value::as_str)
+                .and_then(|id| inner.runs.get(id))
+                .is_some_and(|run| run.revoked.as_deref() == Some("immediate"))
+        };
+        let Some(pass) = inner.passes.get(token_hash).filter(|pass| !pass.revoked) else {
+            return Err(AdmissionRefused::new("token is missing or revoked"));
+        };
+        let parent_revoked = parent_revoked(&inner, pass);
+        let pass = inner.passes.get_mut(token_hash).expect("found above");
+        if pass.time_over(now_epoch) {
+            return Err(AdmissionRefused::new("token expired"));
+        }
+        if parent_revoked {
+            return Err(AdmissionRefused::new("parent grant revoked immediately"));
+        }
+        if pass.left <= 0 && pass.left_by.is_none() {
+            return Err(AdmissionRefused::new("call budget exhausted"));
+        }
+        let service = pass.charge_service(capability)?;
+        pass.debit(service.as_deref());
+        Ok(pass.public(capability))
+    }
+
+    pub fn revoke_pass(&self, token_hash: &str) {
+        if let Some(pass) = self.lock().passes.get_mut(token_hash) {
+            pass.revoked = true;
+        }
+    }
+
+    /// Token hashes of passes whose grant was extended and that are still live.
+    pub fn extended_live_tokens(&self, now: i64) -> BTreeSet<String> {
+        let inner = self.lock();
+        let grants: BTreeSet<&str> = inner
+            .extended_until
+            .iter()
+            .filter(|(_, ends)| **ends > now)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        inner
+            .passes
+            .iter()
+            .filter(|(_, pass)| {
+                pass.record
+                    .get("grant_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| grants.contains(id))
+                    && pass
+                        .record
+                        .get("expires_at_epoch")
+                        .and_then(Value::as_i64)
+                        .is_some_and(|ends| ends > now)
+            })
+            .map(|(hash, _)| hash.clone())
+            .collect()
     }
 
     /// Remember that an extension moved `grant_id`'s pass to end at `ends`.
