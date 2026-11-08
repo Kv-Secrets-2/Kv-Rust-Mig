@@ -166,8 +166,8 @@ mod tests {
             tracked.tracked_files(false),
             json!({"files": [file.clone()], "count": 1})
         );
-        tracked.note_gap(&[root.clone()], 5.0);
-        tracked.note_gap(&[root.clone()], 3.0);
+        tracked.note_gap(std::slice::from_ref(&root), 5.0);
+        tracked.note_gap(std::slice::from_ref(&root), 3.0);
         assert_eq!(tracked.gap_since(), Some(3.0));
         let other = format!("{root}/other.txt");
         assert_eq!(

@@ -554,7 +554,7 @@ mod tests {
         {
             let mut state = lock(&slot);
             assert!(kill_run(&mut state).is_err());
-            assert_eq!(term_run(&mut state).unwrap(), false);
+            assert!(!term_run(&mut state).unwrap());
         }
         assert_eq!(runs.fallback_records().len(), 1);
         assert!(runs.fallback_records().is_empty());

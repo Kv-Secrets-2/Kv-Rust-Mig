@@ -489,6 +489,7 @@ enum GrantLookup {
 }
 
 /// Python `_find_run_grant` with `admit=True`.
+#[allow(clippy::too_many_arguments)]
 fn find_run_grant(
     ctx: &RunCtx<'_>,
     identity: &Map<String, Value>,
@@ -1180,13 +1181,12 @@ fn run_admitted(ctx: &mut RunCtx<'_>, redaction: &mut Redaction, plan: RunPlan<'
                     Some(&Value::Object(plan.actor.clone())),
                     Some(&json!(env)),
                 )
-                .map(|vars| {
+                .inspect(|_| {
                     capability_redaction.push(("KV_CAP_TOKEN".into(), token.clone()));
                     capability_token_id = record
                         .get("token_id")
                         .and_then(Value::as_str)
                         .map(str::to_owned);
-                    vars
                 })
                 .map_err(|e| e.message().to_owned())
             }

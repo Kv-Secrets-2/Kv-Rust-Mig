@@ -463,11 +463,12 @@ impl From<std::io::Error> for ApprovalKeyReadError {
     }
 }
 
+/// The pinned approval signing key file and, when it parsed, the key itself.
 #[cfg(unix)]
-fn pin_approval_signing_key(
-    root: &Path,
-    folder: &File,
-) -> Result<(ApprovalKeyPin, Option<Zeroizing<[u8; 32]>>), AgentError> {
+type PinnedApprovalKey = (ApprovalKeyPin, Option<Zeroizing<[u8; 32]>>);
+
+#[cfg(unix)]
+fn pin_approval_signing_key(root: &Path, folder: &File) -> Result<PinnedApprovalKey, AgentError> {
     match ensure_approval_signing_key(root, folder) {
         Ok(()) | Err(EnsureApprovalKeyError::Ignorable) => {}
         Err(EnsureApprovalKeyError::Structural(error)) => return Err(error),
