@@ -78,10 +78,11 @@ The canonical tables also reject **`3fff::/20`** (RFC 9637); Step 5 adds that
 missing range, with both boundary and neighboring-address parity cases.
 The installed 3.10.12 runtime's tables did not contain this range. This is a
 maintenance-version difference, not simply a Python 3.10-versus-3.13 distinction.
-Step 5 also corrects the broad reserved-space gate to preserve 3.10.22's public
-IPv4-mapped IPv6 delegation and its treatment of `fec0::/10`, rather than using
-3.10.12's IPv4-mapped reserved classification. Private mapped addresses remain
-blocked. Live comparisons for this step use a separately installed 3.10.22.
+All IPv4-mapped IPv6 addresses and `fec0::/10` remain refused, including addresses
+that CPython 3.10.22 admits. These are deliberate fail-closed differences: parity
+does not justify loosening an existing URL guard. The live comparison asserts
+both Python admission and Rust refusal for `::ffff:1.1.1.1` and `fec0::1`, rather
+than skipping either case. Live comparisons use a separately installed 3.10.22.
 
 ## HTTP policy CLI
 

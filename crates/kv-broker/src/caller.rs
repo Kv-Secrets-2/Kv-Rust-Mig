@@ -685,15 +685,12 @@ fn is_global(ip: IpAddr) -> bool {
             })
         }
         IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4_mapped() {
-                return is_global(IpAddr::V4(mapped));
-            }
             let segments = ip.segments();
             let special_public = matches!(ip.to_string().as_str(), "2001:1::1" | "2001:1::2")
                 || (segments[0] == 0x2001 && segments[1] == 3)
                 || (segments[0] == 0x2001 && segments[1] == 4 && segments[2] == 0x112)
                 || (segments[0] == 0x2001 && matches!(segments[1] & 0xfff0, 0x20 | 0x30));
-            (segments[0] & 0xe000 == 0x2000 || segments[0] & 0xffc0 == 0xfec0)
+            segments[0] & 0xe000 == 0x2000
                 && (segments[0] != 0x2001 || segments[1] & 0xfe00 != 0 || special_public)
                 && segments[0] != 0x2002
                 && !(segments[0] == 0x3fff && segments[1] & 0xf000 == 0)
@@ -896,7 +893,23 @@ print(json.dumps([_check_url_safety(url) for url in json.load(sys.stdin)]))
                 Ok(ip) => json!([true, "", ip.to_string()]),
                 Err(reason) => json!([false, reason, null]),
             };
-            assert_eq!(actual, expected[index], "URL safety case: {url}");
+            if matches!(*url, "https://[::ffff:1.1.1.1]/" | "https://[fec0::1]/") {
+                let url::Host::Ipv6(ip) = parsed.host().unwrap() else {
+                    panic!("IPv6 fixture")
+                };
+                assert_eq!(
+                    expected[index],
+                    json!([true, "", ip.to_string()]),
+                    "Python admission: {url}"
+                );
+                assert_eq!(
+                    actual,
+                    json!([false, format!("non-global IP blocked: {ip} ({ip})"), null]),
+                    "Rust hardening: {url}"
+                );
+            } else {
+                assert_eq!(actual, expected[index], "URL safety case: {url}");
+            }
         }
     }
 }
