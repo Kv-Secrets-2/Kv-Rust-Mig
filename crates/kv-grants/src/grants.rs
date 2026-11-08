@@ -90,7 +90,12 @@ const VALID_APPROVAL_MODES: [&str; 4] = [
 /// daemon session the grants must be signed for, and the daemon's ledger.
 pub struct GrantContext<'a> {
     pub root: &'a Path,
+    /// The vault's approval signing key (`.secrets/approval_signing_key`):
+    /// approval artifacts and token seals.
     pub signing_key: &'a [u8],
+    /// The grant-state key: derived from the master key in a protected
+    /// session (`kv-approval:grant-state`), the signing key otherwise.
+    pub state_key: &'a [u8],
     pub binding: &'a SessionBinding,
     pub ledger: &'a Ledger,
     /// Provider name -> digest, as the daemon snapshotted it at unlock.
@@ -331,11 +336,9 @@ pub(crate) fn create_run_grant_locked(
     }
     grant.retain(|_, value| !value.is_null());
     let grant = owner_sign(grant)?;
-    let grant = kv_approvals::artifacts::attach_grant_state_integrity(
-        &Value::Object(grant),
-        ctx.signing_key,
-    )
-    .map_err(|error| GrantError::Invalid(InvalidValue::new(error.to_string())))?;
+    let grant =
+        kv_approvals::artifacts::attach_grant_state_integrity(&Value::Object(grant), ctx.state_key)
+            .map_err(|error| GrantError::Invalid(InvalidValue::new(error.to_string())))?;
     let grant = grant
         .as_object()
         .cloned()
@@ -586,7 +589,7 @@ pub fn valid_grant(
     matches!(
         grant.get("usage_mode").and_then(Value::as_str),
         Some("once" | "reusable")
-    ) && kv_approvals::artifacts::verify_grant_state_integrity(ctx.signing_key, &grant_value)
+    ) && kv_approvals::artifacts::verify_grant_state_integrity(ctx.state_key, &grant_value)
 }
 
 /// What a run asks for, normalized once for matching.
@@ -782,7 +785,7 @@ pub fn revoke_run_grant(
                 return Err(InvalidValue::new("grant approval integrity check failed").into());
             }
             if grant.contains_key("usage_mode")
-                && !kv_approvals::artifacts::verify_grant_state_integrity(ctx.signing_key, &value)
+                && !kv_approvals::artifacts::verify_grant_state_integrity(ctx.state_key, &value)
             {
                 return Err(InvalidValue::new("grant state integrity check failed").into());
             }
@@ -807,7 +810,7 @@ pub fn revoke_run_grant(
         if grant.contains_key("usage_mode") {
             let sealed = kv_approvals::artifacts::attach_grant_state_integrity(
                 &Value::Object(grant.clone()),
-                ctx.signing_key,
+                ctx.state_key,
             )
             .map_err(|error| GrantError::Invalid(InvalidValue::new(error.to_string())))?;
             *grant = sealed
