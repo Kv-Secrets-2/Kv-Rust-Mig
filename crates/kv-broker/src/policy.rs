@@ -7,6 +7,23 @@ use sha2::{Digest, Sha256};
 const SAFE_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS"];
 const UNSAFE_METHODS: &[&str] = &["POST", "PUT", "PATCH", "DELETE"];
 const BUILTIN_NAMES: &[&str] = &["openai", "anthropic", "google", "github", "google-cloud"];
+
+pub fn default_http_policy() -> Value {
+    let providers = crate::providers::snapshot_providers(&json!({}));
+    let mut policy = Map::new();
+    for name in BUILTIN_NAMES {
+        let provider = &providers[*name];
+        policy.insert(
+            (*name).into(),
+            json!({
+                "origin": provider["base_url"].as_str().unwrap_or("").trim_end_matches('/'),
+                "secret_name": provider["secret_name"],
+                "rules": [],
+            }),
+        );
+    }
+    Value::Object(policy)
+}
 const METHOD_OVERRIDE_HEADERS: &[&str] = &[
     "x-http-method-override",
     "x-method-override",
