@@ -44,6 +44,8 @@ mod lifecycle;
 #[cfg(unix)]
 mod permits;
 #[cfg(unix)]
+mod tracked;
+#[cfg(unix)]
 use lifecycle::{
     CommitError, ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker,
 };
