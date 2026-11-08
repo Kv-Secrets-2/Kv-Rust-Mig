@@ -1090,6 +1090,7 @@ fn handle_connection(
                 &cache,
                 providers,
                 http_policy,
+                shared,
             ),
             Err(_) => json!({"error":"secret cache is unavailable"}),
         },
@@ -1592,6 +1593,7 @@ fn status_response(
     cache: &SecretCache,
     provider_snapshot: &kv_broker::ProviderTable,
     http_policy_snapshot: &kv_broker::HttpPolicySnapshot,
+    shared: &Shared,
 ) -> Value {
     let environments = config
         .get("environments")
@@ -1613,7 +1615,7 @@ fn status_response(
     json!({
         "running":true,
         "session_nonce":hex(&trust.session_nonce[..]),
-        "runs_used":{},
+        "runs_used":shared.ledger.run_counts(),
         "pid":std::process::id(),
         "root":root,
         "environments":environments,
@@ -1628,7 +1630,8 @@ fn status_response(
         "enforcement":kv_proto::ENFORCEMENT_GENERATION,
         "session":if trust.protected {"protected"} else {"unprotected"},
         "hard_locked":trust.hard_locked().is_some(),
-        "runs":[]
+        // The live kv_run programs, so a stop can say what it ends.
+        "runs":shared.runs.running_brief()
     })
 }
 
