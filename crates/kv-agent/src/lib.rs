@@ -50,6 +50,8 @@ mod runs;
 #[cfg(unix)]
 mod tracked;
 #[cfg(unix)]
+mod withhold;
+#[cfg(unix)]
 use lifecycle::{
     CommitError, ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker,
 };
