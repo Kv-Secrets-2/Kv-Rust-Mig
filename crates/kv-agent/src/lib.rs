@@ -1103,17 +1103,19 @@ fn handle_connection(
             // Register the reply as control before retirement can close idle
             // sockets. Control answers contain no vault data or work authority.
             connection.mark_control();
-            let response = match lifecycle.request_stop(choice, 0) {
+            let response = match lifecycle.request_stop(choice, shared.runs.count_running()) {
                 StopPlan::AwaitingChoice { in_flight } => {
-                    json!({"in_flight":in_flight,"awaiting_choice":true,"runs":[]})
+                    json!({"in_flight":in_flight,"awaiting_choice":true,
+                        "runs":shared.runs.running_brief()})
                 }
                 StopPlan::AlreadyStopping { wait_seconds } => {
-                    json!({"stopping":true,"wait_seconds":wait_seconds,"runs":[]})
+                    json!({"stopping":true,"wait_seconds":wait_seconds,
+                        "runs":shared.runs.running_brief()})
                 }
                 StopPlan::Drain { .. } => {
-                    let outcome = lifecycle.wait_for_drain(&|| 0);
+                    let outcome = shared.runs.drain(lifecycle);
                     json!({"stopping":true,"wait_seconds":outcome.wait_seconds,
-                        "cut_off":outcome.cut_off,"ended_runs":[]})
+                        "cut_off":outcome.cut_off,"ended_runs":shared.runs.ended_brief()})
                 }
             };
             kv_proto::write_reply(stream, &response)?;
