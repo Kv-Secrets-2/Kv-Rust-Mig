@@ -207,7 +207,7 @@ fn run_risk_cards_match_python() {
         sources.iter().position(|s| s.contains('\0')).unwrap()
     );
     for ((case, got), want) in cases.iter().zip(got).zip(reference.as_array().unwrap()) {
-        let newer_nul = want["python_version"][1].as_u64().unwrap() >= 12;
+        let newer_nul = want["nul_error"] == "SyntaxError";
         let mut want = want["card"].clone();
         if case["argv"][1] == nul_script && newer_nul {
             assert_eq!(want["extraction_status"], "complete");

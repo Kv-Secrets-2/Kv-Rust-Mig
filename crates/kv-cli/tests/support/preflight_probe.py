@@ -1,4 +1,5 @@
 """Byte-exact CLI transcripts; only the manifest's random run ID is masked."""
+import ast
 import errno
 import fcntl
 import json
@@ -16,6 +17,10 @@ from kv.vault_origin import record_created
 from kv.cli import build_parser
 
 data = json.load(sys.stdin)
+try:
+    ast.parse("x\0")
+except (ValueError, SyntaxError) as exc:
+    nul_error = type(exc).__name__
 root = Path(data["root"])
 sources = [
     "pass", "import openai", "from kv.cap_client import api_call\napi_call('openai')",
@@ -176,7 +181,9 @@ for tty in [False, True]:
             if name == "unknown" and want[0] == 1:
                 branded = run([sys.executable, "-I", "-m", "kv"], ["unknown-preflight-command"], cwd, tty, colour)
                 assert want == branded
-                error = (build_parser().format_usage() + "kv: error: unrecognized arguments: --wat\n").encode()
+                choices = next(action.choices for action in build_parser()._actions if action.choices)
+                usage = "usage: kv [-h] [--version]\n          {" + ",".join(choices) + "}\n          ...\n"
+                error = (usage + "kv: error: unrecognized arguments: --wat\n").encode()
                 expected = (2, error.replace(b"\n", b"\r\n"), b"") if tty else (2, b"", error)
                 assert got == expected, (got, expected)
                 runtime_differences += 1
@@ -187,7 +194,7 @@ for tty in [False, True]:
                 assert want == error_result(str(NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(candidate / "child"))), tty, colour)
                 runtime_differences += 1
                 continue
-            if name == "nul" and sys.version_info >= (3, 12):
+            if name == "nul" and nul_error == "SyntaxError":
                 assert want[0] == 0 and b"Python script could not be parsed; estimates are incomplete." in want[1] and want[2] == b""
                 assert got == error_result("source code string cannot contain null bytes", tty, colour), got
                 nul_differences += 1

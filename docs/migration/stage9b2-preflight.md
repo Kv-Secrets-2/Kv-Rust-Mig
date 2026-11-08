@@ -30,10 +30,11 @@ Like Python, this command does not prepare vault access before dispatch.
   close known Ruff/CPython disagreements rather than accepting newer syntax.
   Both Ruff parse errors and unsupported-target diagnostics must be empty.
 - **NUL and arithmetic errors.** A decoded source NUL raises ValueError with
-  `source code string cannot contain null bytes`, matching CPython 3.10/3.11.
-  Newer references can classify it as SyntaxError; Rust retains the older
-  contract. Integer-to-float overflow and infinity-to-integer overflow preserve
-  Python's exact messages. Unix identity resolution errors preserve exception
+  `source code string cannot contain null bytes`, matching CPython 3.10.
+  References including current 3.11 classify it as SyntaxError; probes check the
+  actual parser behavior rather than assuming a minor-version cutoff. Rust
+  retains the older contract. Integer-to-float overflow and infinity-to-integer
+  overflow preserve Python's exact messages. Unix identity resolution errors preserve exception
   kinds and Python exception spelling, with the runtime filename fork below.
 - **No traceback paths.** The CLI prints one error line and exits 1 for
   ValueError, OverflowError, TooDeep and other preflight failures. Python's
@@ -54,7 +55,9 @@ Like Python, this command does not prepare vault access before dispatch.
 - **Reference-runtime differences.** Keep the CPython 3.10.12 argparse contract:
   unknown preflight options exit 2 with usage, and `-hfoo` is an invalid attached
   help value. Newer argparse can instead return branded help (exit 1) or help
-  (exit 0). These complete alternative transcripts are asserted separately.
+  (exit 0), and 3.13 wraps the top-level usage remainder differently. These
+  complete alternative transcripts and the fixed legacy layout are asserted
+  separately.
   The existing Rust resolver follows Python's `_resolve_walk` fallback and
   identifies the non-directory component in ENOTDIR. CPython before 3.13 with
   `os.path.ALLOW_MISSING` can instead name the following child component;

@@ -469,7 +469,7 @@ fn preflight_matches_python() {
             syntax += 1;
             continue;
         }
-        if case.name == nul_name && version >= 12 {
+        if case.name == nul_name && reference["nul_error"] == "SyntaxError" {
             // NUL changed from ValueError to SyntaxError.
             assert_eq!(
                 got["error"]["message"],
