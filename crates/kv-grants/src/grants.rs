@@ -126,6 +126,15 @@ pub struct CreateGrant {
 /// the vault has no passphrase and nothing can be approved.
 pub type OwnerSign<'a> = &'a dyn Fn(Map<String, Value>) -> Result<Map<String, Value>, InvalidValue>;
 
+impl GrantContext<'_> {
+    /// Hold the vault's storage lock for one read-modify-write of the stores
+    /// (Python's `@transaction`); dropped at the end of the operation.
+    pub fn transaction(&self) -> Result<kv_store::fsx::StorageLock, GrantError> {
+        kv_store::fsx::lock_storage(&crate::store::secrets_dir(self.root))
+            .map_err(|error| GrantError::Store(StoreFault::Io(error.to_string())))
+    }
+}
+
 /// The approval security mode the owner selected (`config.get_approval_mode`).
 pub fn approval_mode(root: &Path) -> Result<String, GrantError> {
     let config = kv_store::config::load_config(root)
@@ -168,6 +177,7 @@ pub fn create_run_grant(
     owner_sign: Option<OwnerSign<'_>>,
     now: i64,
 ) -> Result<Map<String, Value>, GrantError> {
+    let _transaction = ctx.transaction()?;
     refuse_if_protected(ctx.root)?;
     create_run_grant_locked(ctx, run_identity, request, None, owner_sign, now)
 }
@@ -774,6 +784,7 @@ pub fn revoke_run_grant(
     if mode != "immediate" && mode != "future" {
         return Err(InvalidValue::new("revoke mode must be immediate or future").into());
     }
+    let _transaction = ctx.transaction()?;
     let mut grants = read_records(ctx.root, StoreKind::Grants)?;
     for grant in grants.iter_mut() {
         if grant_id_of(grant) != grant_id {
@@ -1090,6 +1101,7 @@ pub fn token_parent_denial(
 /// `prune_expired_run_grants`: drop expired grants nobody still needs;
 /// returns how many remain.
 pub fn prune_expired_run_grants(ctx: &GrantContext<'_>, now: i64) -> Result<usize, GrantError> {
+    let _transaction = ctx.transaction()?;
     let grants = read_records(ctx.root, StoreKind::Grants)?;
     let kept = extended(ctx, now)?;
     let before = grants.len();
@@ -1132,6 +1144,7 @@ pub fn admit_run_grant(
     env_name: Option<&str>,
     now: i64,
 ) -> Result<Option<Admission>, GrantError> {
+    let _transaction = ctx.transaction()?;
     if !request.capability_names.is_empty() && env_name.map(str::trim).is_none_or(str::is_empty) {
         return Err(InvalidValue::new("capability admission requires an environment").into());
     }
@@ -1196,7 +1209,7 @@ pub fn admit_run_grant(
         };
         let mut services = request.capability_names.clone();
         services.sort();
-        match crate::capabilities::mint_capability_token(
+        match crate::capabilities::mint_capability_token_locked(
             ctx,
             &Value::Object(request.identity.clone()),
             &services[0],

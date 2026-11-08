@@ -7,7 +7,7 @@ use crate::StoreError;
 
 pub const VAULT_FILE_LIMIT: usize = 64 * 1024 * 1024;
 
-pub(crate) struct StorageLock {
+pub struct StorageLock {
     identity: PathBuf,
     _file: File,
 }
@@ -478,7 +478,7 @@ pub fn write_atomic_limit(
     Ok(())
 }
 
-pub(crate) fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
+pub fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
     if !check_directory(secrets_dir)? {
         return Err(StoreError::Structure(format!(
             "{} must be a real directory",

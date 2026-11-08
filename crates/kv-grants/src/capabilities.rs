@@ -340,6 +340,17 @@ pub fn mint_capability_token(
     request: &MintRequest<'_>,
     now: i64,
 ) -> Result<Map<String, Value>, GrantError> {
+    let _transaction = ctx.transaction()?;
+    mint_capability_token_locked(ctx, run_identity, capability_name, request, now)
+}
+
+pub(crate) fn mint_capability_token_locked(
+    ctx: &GrantContext<'_>,
+    run_identity: &Value,
+    capability_name: &str,
+    request: &MintRequest<'_>,
+    now: i64,
+) -> Result<Map<String, Value>, GrantError> {
     let default_max = json!(DEFAULT_CAPABILITY_MAX_CALLS);
     let max_calls = request.max_calls.as_ref().unwrap_or(&default_max);
     let mut per_service: Option<Map<String, Value>> = None;
@@ -607,6 +618,7 @@ pub fn consume_capability_token(
     now: i64,
     options: ConsumeOptions<'_>,
 ) -> Result<Consumed, GrantError> {
+    let _transaction = ctx.transaction()?;
     let hash = token_hash(validate_token(token)?);
     let identity = normalize_run_identity(run_identity)?;
     let capability = normalize_capability_name(capability_name)?;
@@ -832,6 +844,7 @@ pub fn revoke_capability_token(
     let Some(token_id) = token_id.as_str().map(py_strip).filter(|t| !t.is_empty()) else {
         return Err(InvalidValue::new("token_id is required").into());
     };
+    let _transaction = ctx.transaction()?;
     let mut tokens = read_records(ctx.root, StoreKind::Tokens)?;
     let mut changed = None;
     for (index, record) in tokens.iter_mut().enumerate() {
@@ -881,6 +894,7 @@ pub fn extend_token_record(
     token_hash: &str,
     expires_at_epoch: &Value,
 ) -> Result<bool, GrantError> {
+    let _transaction = ctx.transaction()?;
     let mut tokens = read_records(ctx.root, StoreKind::Tokens)?;
     for record in tokens.iter_mut() {
         if record.get("token_hash").and_then(Value::as_str) != Some(token_hash) {
