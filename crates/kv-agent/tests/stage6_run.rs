@@ -245,8 +245,9 @@ run_agent(store,get_default_env(root))
     ChildGuard(child)
 }
 
+/// Whether the daemon will find a trusted bubblewrap (the same lookup it makes).
 fn bwrap_installed() -> bool {
-    Path::new("/usr/bin/bwrap").exists() || Path::new("/usr/local/bin/bwrap").exists()
+    kv_sandbox::bwrap::bwrap_path().is_some()
 }
 
 fn stop_daemon(root: &Path) {
