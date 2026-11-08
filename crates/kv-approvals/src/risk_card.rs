@@ -1,8 +1,6 @@
 //! Risk cards: the owner-facing summary stored in a grant (`kv/risk_card.py`).
 //!
-//! Only `minimal_risk_card`, `normalize_risk_card` and `summarize_risk_card` are
-//! ported here. `build_run_risk_card` reads a static preflight of the command,
-//! which belongs to the `kv preflight` stage.
+//! Static preflight is supplied by the caller to avoid a dependency cycle.
 
 use serde_json::{Map, Value, json};
 
@@ -16,6 +14,137 @@ pub const MAX_LIMITS: usize = 16;
 
 const MINIMAL_LIMIT: &str = "This grant was created without command text, so KV could only sign \
                              the exact run identity and scope.";
+
+pub struct RunRiskCardOptions<'a> {
+    pub run_identity: &'a Value,
+    pub secret_names: Option<&'a Value>,
+    pub capability_names: Option<&'a Value>,
+    pub max_calls: Option<&'a Value>,
+    pub source: Option<&'a Value>,
+}
+
+/// Build a risk card using an already-resolved cwd and an injected static preflight.
+pub fn build_run_risk_card(
+    argv: &[String],
+    cwd: &str,
+    options: &RunRiskCardOptions<'_>,
+    preflight: impl FnOnce(&[String], &str) -> Result<Value, String>,
+) -> Value {
+    let argv = normalize_argv(Some(&json!(argv)));
+    let secret_scope = scope_list(options.secret_names.unwrap_or(&Value::Null));
+    let capability_scope = scope_list(options.capability_names.unwrap_or(&Value::Null));
+    let mut card = json!({
+        "version": RISK_CARD_VERSION, "generator": RISK_CARD_GENERATOR,
+        "source": text_opt(options.source, 80).unwrap_or_else(|| "approval".into()),
+        "extraction_status": "complete", "cwd": text(&json!(cwd), MAX_TEXT_CHARS),
+        "command": format_argv(&argv), "argv": argv,
+        "identity": identity_summary(options.run_identity),
+        "scope": {
+            "secret_names": secret_scope, "capability_names": capability_scope,
+            "raw_secret_injection": !secret_scope.is_empty(),
+            "broker_capability": !capability_scope.is_empty(),
+        },
+        "facts": {},
+        "uncertainty": ["static-analysis-only", "runtime-enforcement-remains-authoritative"],
+        "limits": [],
+    });
+    if !capability_scope.is_empty() {
+        card["scope"]["max_calls"] = int_or_none(options.max_calls);
+    }
+    let argv: Vec<String> = argv
+        .iter()
+        .map(|v| v.as_str().unwrap_or("").to_owned())
+        .collect();
+    let manifest = match preflight(&argv, cwd) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            card["extraction_status"] = json!("limited");
+            card["facts"] = json!({"preflight_error": text(&json!(error), MAX_TEXT_CHARS)});
+            card["uncertainty"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("preflight-analysis-failed"));
+            card["limits"] = json!(["KV could not complete static preflight for this command."]);
+            return normalize_risk_card(Some(&card));
+        }
+    };
+    let empty = Map::new();
+    let api = api_summary(
+        manifest
+            .get("api")
+            .and_then(Value::as_object)
+            .unwrap_or(&empty),
+    );
+    let raw = manifest.get("raw_key_findings").unwrap_or(&Value::Null);
+    let ssh = manifest.get("ssh").unwrap_or(&Value::Null);
+    let files = manifest.get("files").unwrap_or(&Value::Null);
+    card["facts"] = json!({
+        "command_allowed": manifest.get("command_allowed").is_some_and(truthy),
+        "command_mode": text_value(manifest.get("command_mode"), 80),
+        "command_reason": text_value(manifest.get("command_reason"), MAX_TEXT_CHARS),
+        "script_path": text_value(manifest.get("script_path"), MAX_TEXT_CHARS),
+        "raw_key_findings": {"count": non_negative_int(raw.get("count")), "codes": string_list(raw.get("codes"), MAX_LIST_ITEMS)},
+        "api": api,
+        "ssh": {"detected": ssh.get("detected").is_some_and(truthy), "hosts": string_list(ssh.get("hosts"), MAX_LIST_ITEMS)},
+        "files": {"writes": string_list(files.get("writes"), MAX_LIST_ITEMS)},
+        "broker_handoff": broker_handoff_summary(manifest.get("broker_handoff")),
+    });
+    card["limits"] = json!(string_list(manifest.get("limits"), MAX_LIMITS));
+    add_uncertainty_from_manifest(&mut card, &api);
+    normalize_risk_card(Some(&card))
+}
+
+fn format_argv(argv: &[Value]) -> String {
+    let command = argv
+        .iter()
+        .map(|v| {
+            let s = v.as_str().unwrap_or("");
+            if !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+            {
+                s.to_owned()
+            } else {
+                format!("'{}'", s.replace('\'', "'\"'\"'"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    text(&json!(command), MAX_TEXT_CHARS).unwrap_or_default()
+}
+
+fn add_uncertainty_from_manifest(card: &mut Value, api: &Value) {
+    let facts = &card["facts"];
+    let mut uncertainty: Vec<String> = card["uncertainty"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(py_str)
+        .collect();
+    if !truthy(&facts["script_path"]) {
+        uncertainty.push("no-script-file-detected".into());
+    }
+    if truthy(&facts["raw_key_findings"]["count"]) {
+        uncertainty.push("raw-key-patterns-detected".into());
+    }
+    let mut providers: Vec<_> = api.as_object().unwrap().iter().collect();
+    providers.sort_by(|a, b| a.0.cmp(b.0));
+    for (provider, info) in providers {
+        if truthy(&info["unknown_call_count"]) {
+            uncertainty.push(format!("{provider}-call-count-unknown"));
+        }
+        if truthy(&info["direct_sdk"]) {
+            uncertainty.push(format!("{provider}-direct-sdk-needs-rewrite"));
+        }
+    }
+    if truthy(&facts["files"]["writes"]) {
+        uncertainty.push("file-write-signals-detected".into());
+    }
+    if truthy(&facts["ssh"]["detected"]) {
+        uncertainty.push("ssh-signals-detected".into());
+    }
+    card["uncertainty"] = json!(unique(uncertainty));
+}
 
 /// `minimal_risk_card`: the card a grant gets when no risk card was supplied.
 pub fn minimal_risk_card(
