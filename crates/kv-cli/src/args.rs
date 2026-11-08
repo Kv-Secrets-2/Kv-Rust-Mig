@@ -1184,18 +1184,43 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
             .unwrap_or("");
         return Err(ParseError::Help(help.to_owned()));
     }
-    if *choice == "list" {
-        let mut all = false;
-        for value in rest {
-            if value == "--all" {
-                all = true;
-            } else {
-                return Err(ParseError::Usage(format!(
-                    "usage: kv approvals list [-h] [--all]\nkv approvals list: error: unrecognized arguments: {value}\n"
-                )));
+    if *choice == "list" || *choice == "watch" {
+        let watch = *choice == "watch";
+        let usage = if watch {
+            "usage: kv approvals watch [-h] [--all] [--follow] [--interval INTERVAL]"
+        } else {
+            "usage: kv approvals list [-h] [--all]"
+        };
+        let (mut all, mut follow, mut interval) = (false, false, 2i64);
+        let mut values = rest.iter();
+        while let Some(value) = values.next() {
+            match value.as_str() {
+                "--all" => all = true,
+                "--follow" if watch => follow = true,
+                "--interval" if watch => {
+                    let Some(raw) = values.next() else {
+                        return Err(ParseError::Usage(format!(
+                            "{usage}\nkv approvals watch: error: argument --interval: expected one argument\n"
+                        )));
+                    };
+                    interval = raw.trim().parse().map_err(|_| {
+                        ParseError::Usage(format!(
+                            "{usage}\nkv approvals watch: error: argument --interval: invalid int value: '{raw}'\n"
+                        ))
+                    })?;
+                }
+                _ => {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}\nkv approvals {choice}: error: unrecognized arguments: {value}\n"
+                    )));
+                }
             }
         }
-        return Ok(Some(Command::Approvals(ApprovalsAction::List { all })));
+        return Ok(Some(Command::Approvals(ApprovalsAction::List {
+            all,
+            follow,
+            interval,
+        })));
     }
     if *choice != "approve" {
         return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(

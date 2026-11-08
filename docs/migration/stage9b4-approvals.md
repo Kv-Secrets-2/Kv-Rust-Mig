@@ -2,10 +2,11 @@
 
 The Rust `kv` can now make the owner decision that a script's or an agent's unsafe API call
 waits for: `kv approvals approve permit_request_<id>` (Python `_approve_call_permit`).
-`kv approvals list [--all]` shows the inbox as Python does: the approval mode, the service's
+`kv approvals list [--all]` and `kv approvals watch [--all] [--follow] [--interval N]` show
+the inbox as Python does: the approval mode, the service's
 pending one-call permits and paused jobs (`permit_requests`), then the approval requests on
 disk (`kv_requests::approvals::list_approval_requests`, rendered as `_print_approval_request`).
-Everything else under `kv approvals` (watch, request, page, pause, deny, prune, and approving
+Everything else under `kv approvals` (request, page, pause, deny, prune, and approving
 a run grant or a paused job) keeps Python's argparse usage and help (`--help` shows Python's
 text) but refuses as not available in this build; `kv grant` is not ported yet.
 
@@ -39,6 +40,8 @@ text) but refuses as not available in this build; `kv grant` is not ported yet.
 - Python signs under the vault's authorization lock; Rust re-checks the approval mode
   right before signing but takes no file lock (the service re-checks the mode when it
   registers, as in Python).
+- `watch --follow` ends on Ctrl-C with the process (Python catches the interrupt and prints a
+  newline first).
 - A wrong passphrase ends the command (Python's `prompt_unwrapped` does the same).
 - A lost registration answer reports Python's `_permit_outcome_unknown_text` and audits
   `call_permit_outcome_unknown`; the expiry time is shown in UTC (Python: local zone).

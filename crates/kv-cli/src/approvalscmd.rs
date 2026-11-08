@@ -12,6 +12,8 @@ use serde_json::{Map, Value, json};
 pub enum ApprovalsAction {
     List {
         all: bool,
+        follow: bool,
+        interval: i64,
     },
     Approve {
         request_id: String,
@@ -30,7 +32,21 @@ pub fn cmd_approvals(p: &Palette, action: ApprovalsAction) -> CmdResult {
             request_id,
             run_grant_flags,
         } => approve(p, &request_id, run_grant_flags),
-        ApprovalsAction::List { all } => list(p, all),
+        ApprovalsAction::List {
+            all,
+            follow,
+            interval,
+        } => {
+            // `watch --follow`: refresh until interrupted (Ctrl-C ends the process here;
+            // Python catches it and prints a newline).
+            if follow {
+                loop {
+                    list(p, all)?;
+                    std::thread::sleep(std::time::Duration::from_secs(interval.max(1) as u64));
+                }
+            }
+            list(p, all)
+        }
     }
 }
 
