@@ -82,7 +82,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,allow,deny,network-allow,network-deny,provider,policy,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,policy,approval-mode,export,envs,env,vault,status,version,unlock,lock,allow,deny,network-allow,network-deny,provider}\n          ...\n";
 
 struct Spec {
     name: &'static str,

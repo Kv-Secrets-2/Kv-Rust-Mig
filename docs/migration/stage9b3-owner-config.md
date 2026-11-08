@@ -20,6 +20,27 @@
   Python raises an attribute error during listing or removal, Rust reports a
   concise object-type error instead of a traceback. Tests compare refusal and
   unchanged config bytes for these cases rather than traceback text.
+- Rust refuses every IPv4-mapped IPv6 address, including public mapped IPv4
+  addresses such as `::ffff:1.1.1.1` that Python 3.10.22 admits. This preserves
+  the existing fail-closed URL guard; the comparison asserts both outcomes.
+- Rust refuses `fec0::/10`, including `fec0::1` that Python 3.10.22 admits.
+  This also preserves the existing URL guard, with explicit asymmetric tests.
+- A non-private policy-request store is refused without changing its mode.
+  Python repairs its permissions and proceeds; the live comparison asserts
+  Rust refusal, Python admission, and the respective permission outcomes.
+- Existing policy-request stores are refused on Windows because private-ACL
+  verification is not implemented. Rust does not trust unchecked ACLs; this
+  follows the existing Rust approval-store restriction.
+- Non-array request argv and non-string request cwd fields receive explicit
+  field-type refusals rather than Python's coercion or type-error behavior.
+  The live numeric-field error cases preserve queue and config in both.
+- Numeric options on unavailable command-policy watch/request commands require
+  ASCII decimal spellings; signs, whitespace, underscores and arbitrary-sized
+  ASCII integers are accepted. Python also accepts non-ASCII decimal spellings,
+  which Rust refuses.
+- Command-policy `watch` and `request` retain parser help/usage but refuse
+  execution as unavailable in this build. Python implements them; they were
+  explicitly excluded from this stage. Test requests are created by Python.
 
 ## Approval mode
 
@@ -134,15 +155,31 @@ Fixed-clock store comparisons additionally compare request-store bytes without
 masking, fingerprints, stale snapshots, changed review fields, malformed stores,
 and ignore-file maintenance.
 
-Deliberate fail-closed differences: Rust refuses a non-private request store
-without changing its permissions, whereas Python repairs its mode and proceeds.
-The live comparison asserts both outcomes. On Windows, an existing request
-store is refused because private-ACL verification is not implemented, matching
-the existing Rust approval-store restriction rather than trusting unchecked ACLs.
-The prior unsupported-2FA refusal also applies to command-policy allow.
-Non-array argv and non-string cwd fields receive explicit field-type refusals
-instead of Python's coercion or type-error behavior. The live numeric-field
-error cases preserve queue and config in both implementations.
-Numeric options on the unavailable watch/request commands require ASCII decimal
-spellings (signs, whitespace and underscores are accepted). Non-ASCII decimal
-spellings are refused where Python accepts them.
+The applicable refusal differences, including unsupported 2FA, are catalogued
+in the consolidated list above.
+
+## Daemon interop and help regression coverage
+
+`kv-cli/tests/owner_config_interop.rs` is Unix-only and release-only, matching
+the existing daemon-start timing convention. Both implementations write the
+same owner configuration sequence on copies of one fresh vault at the same
+absolute project path, sharing HOME and using a short private TMPDIR. The
+sequence sets local-convenience approval, command/network allowlists, HTTP and
+Postgres providers, and GET plus POST per-call HTTP rules. Transcripts and
+config.json bytes match across writers.
+
+Python approves and unlocks Rust-written configuration, and Rust approves and
+unlocks Python-written configuration. Each daemon reports an unlocked/running
+status and is locked again, with cleanup on failure. The Python and Rust broker
+snapshot loaders agree on provider bindings, rules, per-call approval, and policy
+description metadata on the same configuration; no external API call is made.
+
+All seven owner-command help pages match byte-for-byte. Global `-h` / `--help`
+text differs only in the existing build-version footer, which is explicitly
+checked and normalized in the comparison, not changed in the binary. Top-level
+argument-error usage preserves the implemented-command subset, in Python's
+relative order; the test compares it with Python's list filtered to the Rust
+parser's implemented commands. The separate Rust `mcp-server` entry point is
+unchanged and is not advertised as an argparse choice, since Python's top-level
+parser has no such choice. Existing version/subset conventions are not new
+stage-specific hardening differences.

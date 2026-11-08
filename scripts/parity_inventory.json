@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 88,
+  "minimum_comparisons": 90,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -72,6 +72,7 @@
     "kv-cli/providers": ["provider_owner_sequences_match_python", "provider_parser_matches_python"],
     "kv-cli/http_policy": ["http_policy_owner_sequences_match_python", "http_policy_parser_matches_python"],
     "kv-cli/command_policy": ["command_policy_owner_sequences_match_python", "command_policy_parser_matches_python"],
+    "kv-cli/owner_config_interop": ["owner_configs_unlock_in_both_daemons", "owner_config_top_level_help_matches_python"],
     "kv-store/policy_requests": ["policy_request_storage_matches_python"],
     "kv-cli/stage7_mcp_cli": ["mcp_server_command_line_matches_python"],
     "kv-crypto/kv_crypto": ["python_digits::tests::passphrase_strength_matches_python_reference_digit_corpus"],
