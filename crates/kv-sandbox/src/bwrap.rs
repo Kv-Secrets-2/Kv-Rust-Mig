@@ -887,6 +887,51 @@ impl SandboxHost {
     }
 }
 
+/// Python `inject_run_env`: the run argv that delivers `env` to the target only.
+///
+/// The pairs are written as NUL-separated `--setenv NAME VALUE` triples into a
+/// sealed memfd that only the trusted wrapper inherits; the visible argv gains
+/// `--args N` right before the `--` separator that ends the wrapper's own
+/// options. Without the trusted wrapper (no separator kv owns) the argv comes
+/// back unchanged with nothing moved; whether such a run may receive secrets at
+/// all is the launch check's decision (`launch_facts` refuses it). A pair that
+/// cannot be one environment operand is refused before any descriptor is made.
+/// The caller owns the returned descriptor: it must stay open until the child
+/// has started and be closed on every earlier exit.
+#[allow(clippy::type_complexity)]
+pub fn inject_run_env(
+    run_argv: &[String],
+    env: &BTreeMap<String, String>,
+    trusted_bwrap: Option<&str>,
+) -> Result<
+    (
+        Vec<String>,
+        BTreeMap<String, String>,
+        Option<crate::sealed::SealedArgsFd>,
+    ),
+    crate::runenv::RunEnvError,
+> {
+    let argv = run_argv.to_vec();
+    if env.is_empty() {
+        return Ok((argv, BTreeMap::new(), None));
+    }
+    let Some(sep) = wrapper_separator_index(&argv, trusted_bwrap) else {
+        return Ok((argv, BTreeMap::new(), None));
+    };
+    crate::runenv::check_run_env_pairs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))?;
+    let fd = crate::sealed::SealedArgsFd::new(&crate::runenv::expected_run_env_args(
+        env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+    ))?;
+    let Some(number) = fd.raw() else {
+        return Err(crate::runenv::RunEnvError::SealedArgsUnavailable);
+    };
+    let mut launch = argv[..sep].to_vec();
+    launch.push("--args".to_owned());
+    launch.push(number.to_string());
+    launch.extend_from_slice(&argv[sep..]);
+    Ok((launch, env.clone(), Some(fd)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,49 +1024,4 @@ mod tests {
         let parts = temp_name_refusal_parts("TMPDIR", &"a".repeat(80), "why");
         assert_eq!(parts[1].0.len(), 72);
     }
-}
-
-/// Python `inject_run_env`: the run argv that delivers `env` to the target only.
-///
-/// The pairs are written as NUL-separated `--setenv NAME VALUE` triples into a
-/// sealed memfd that only the trusted wrapper inherits; the visible argv gains
-/// `--args N` right before the `--` separator that ends the wrapper's own
-/// options. Without the trusted wrapper (no separator kv owns) the argv comes
-/// back unchanged with nothing moved; whether such a run may receive secrets at
-/// all is the launch check's decision (`launch_facts` refuses it). A pair that
-/// cannot be one environment operand is refused before any descriptor is made.
-/// The caller owns the returned descriptor: it must stay open until the child
-/// has started and be closed on every earlier exit.
-#[allow(clippy::type_complexity)]
-pub fn inject_run_env(
-    run_argv: &[String],
-    env: &BTreeMap<String, String>,
-    trusted_bwrap: Option<&str>,
-) -> Result<
-    (
-        Vec<String>,
-        BTreeMap<String, String>,
-        Option<crate::sealed::SealedArgsFd>,
-    ),
-    crate::runenv::RunEnvError,
-> {
-    let argv = run_argv.to_vec();
-    if env.is_empty() {
-        return Ok((argv, BTreeMap::new(), None));
-    }
-    let Some(sep) = wrapper_separator_index(&argv, trusted_bwrap) else {
-        return Ok((argv, BTreeMap::new(), None));
-    };
-    crate::runenv::check_run_env_pairs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))?;
-    let fd = crate::sealed::SealedArgsFd::new(&crate::runenv::expected_run_env_args(
-        env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-    ))?;
-    let Some(number) = fd.raw() else {
-        return Err(crate::runenv::RunEnvError::SealedArgsUnavailable);
-    };
-    let mut launch = argv[..sep].to_vec();
-    launch.push("--args".to_owned());
-    launch.push(number.to_string());
-    launch.extend_from_slice(&argv[sep..]);
-    Ok((launch, env.clone(), Some(fd)))
 }
