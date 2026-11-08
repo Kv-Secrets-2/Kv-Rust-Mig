@@ -88,6 +88,14 @@ fn approve(p: &Palette, request_id: &str, run_grant_flags: bool) -> CmdResult {
             &record.caller_headers,
         )
         .map_err(|e| project::fail(p, &e))?;
+        // Python asks for a TOTP or backup code here when 2FA is on (a permit is always an
+        // unsafe call); this build has no second factor, so it refuses instead of skipping it.
+        if owner::two_factor_configured(&root) {
+            return Err(project::fail(
+                p,
+                "two-factor approval is not available in this build; nothing was signed",
+            ));
+        }
         if !owner::confirm_decision(p, &lines, "Sign this one-call permit? [y/N] ")? {
             event = "call_permit_denied";
             return Ok(());

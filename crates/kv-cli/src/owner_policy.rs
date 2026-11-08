@@ -160,6 +160,14 @@ fn two_factor_on(value: &Value) -> bool {
     })
 }
 
+/// Python `_two_factor_on`: whether the vault asks for a second factor (an unreadable
+/// config counts as yes, and the check itself then refuses).
+pub fn two_factor_configured(root: &Path) -> bool {
+    config::load_config(root)
+        .map(|s| two_factor_on(&s.value))
+        .unwrap_or(true)
+}
+
 fn loosening_needs_code(root: &Path, snapshot: &Value) -> bool {
     two_factor_on(snapshot)
         || config::load_config(root)
