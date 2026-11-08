@@ -35,6 +35,10 @@ pub enum Command {
     Lock,
     Status,
     ApprovalMode(Option<String>),
+    Allow(Option<String>),
+    Deny(String),
+    NetworkAllow(Option<String>),
+    NetworkDeny(String),
     AgentChild,
     Hook {
         mode: String,
@@ -72,7 +76,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,unlock,lock,status,export,envs,env,history,backup,vault,approval-mode,allow,deny,network-allow,network-deny,version,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -87,6 +91,42 @@ struct Spec {
 const ENV_HELP: &str = "  -e ENV, --env ENV  Environment (default: the project's default)\n";
 
 const SPECS: &[Spec] = &[
+    Spec {
+        name: "allow",
+        usage: "usage: kv allow [-h] [pattern]\n",
+        help: "\npositional arguments:\n  pattern     Command to allow (e.g., 'python3 app.py')\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["?pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "deny",
+        usage: "usage: kv deny [-h] pattern\n",
+        help: "\npositional arguments:\n  pattern     Command to remove\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "network-allow",
+        usage: "usage: kv network-allow [-h] [pattern]\n",
+        help: "\nAllow outbound network access for a kv_run command. With no argument, list the\ncommands allowed. On a vault with a passphrase, kv_run uses a change only\nafter a restart (kv lock, then kv unlock) and a fresh approval of the run.\n\npositional arguments:\n  pattern     Command to allow network (e.g., 'twine upload')\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["?pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "network-deny",
+        usage: "usage: kv network-deny [-h] pattern\n",
+        help: "\npositional arguments:\n  pattern     Command to revoke network from\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
     Spec {
         name: "init",
         usage: "usage: kv init [-h] [--location {global,project,custom}] [--path PATH]\n",
@@ -462,6 +502,10 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
         },
         "lock" => Command::Lock,
         "status" => Command::Status,
+        "allow" => Command::Allow(positionals.next()),
+        "deny" => Command::Deny(positionals.next().unwrap_or_default()),
+        "network-allow" => Command::NetworkAllow(positionals.next()),
+        "network-deny" => Command::NetworkDeny(positionals.next().unwrap_or_default()),
         _ => Command::Version,
     }))
 }

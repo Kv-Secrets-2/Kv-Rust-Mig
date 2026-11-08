@@ -57,7 +57,6 @@ pub fn print_approval_mode(p: &Palette, value: &Value) {
     ));
 }
 
-#[allow(dead_code)]
 pub fn warn_if_approval_mode_unset(p: &Palette, root: &Path) -> CmdResult {
     if config::get_approval_mode(root).map_err(|e| project::fail(p, &e.to_string()))? == "unset" {
         ui::warn(p, "approval mode not chosen");
@@ -67,6 +66,14 @@ pub fn warn_if_approval_mode_unset(p: &Palette, root: &Path) -> CmdResult {
         ));
     }
     Ok(())
+}
+
+pub fn vault_has_passphrase(root: &Path) -> bool {
+    match std::fs::metadata(project::key_path(root)) {
+        Ok(meta) => meta.is_file() && config_authority::is_key_wrapped(root, true).unwrap_or(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    }
 }
 
 pub fn block_local_approval_if_protected(p: &Palette, root: &Path, action: &str) -> CmdResult {

@@ -733,6 +733,7 @@ dependencies = [
  "kv-hook",
  "kv-mcp",
  "kv-proto",
+ "kv-sandbox",
  "kv-store",
  "kv-test-support",
  "rustix",

@@ -127,6 +127,86 @@ fn secrets_dir(root: &Path) -> PathBuf {
     root.join(".secrets")
 }
 
+pub fn command_patterns(config: &Value, field: &str) -> Result<Vec<String>, StoreError> {
+    if !config.is_object() {
+        return Err(StoreError::ConfigConflict(
+            "config must be an object".into(),
+        ));
+    }
+    let Some(security) = config.get("security") else {
+        return Ok(Vec::new());
+    };
+    let security = security
+        .as_object()
+        .ok_or_else(|| StoreError::ConfigConflict("security must be an object".into()))?;
+    let Some(patterns) = security.get(field) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_value(patterns.clone()).map_err(|_| {
+        StoreError::ConfigConflict(format!(
+            "security.{field} must be a list of command strings"
+        ))
+    })
+}
+
+pub fn get_run_policy(root: impl AsRef<Path>) -> Result<(String, Vec<String>), StoreError> {
+    let config = load_config(root)?;
+    let policy = config
+        .value
+        .get("security")
+        .and_then(|s| s.get("kv_run_policy"))
+        .map(|v| {
+            v.as_str().map(str::to_owned).ok_or_else(|| {
+                StoreError::ConfigConflict("security.kv_run_policy must be a string".into())
+            })
+        })
+        .transpose()?
+        .unwrap_or_else(|| "blocklist".into());
+    Ok((policy, command_patterns(&config.value, "allowed_commands")?))
+}
+
+fn add_command(root: &Path, command: &str, field: &str) -> Result<bool, StoreError> {
+    config_transaction(root, |config| {
+        let mut patterns = command_patterns(config, field)?;
+        if patterns.iter().any(|entry| entry == command) {
+            return Ok(false);
+        }
+        patterns.push(command.to_owned());
+        let security = config
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("config must be an object".into()))?
+            .entry("security")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or_else(|| StoreError::ConfigConflict("security must be an object".into()))?;
+        security.insert(field.into(), json!(patterns));
+        if field == "allowed_commands" {
+            security.insert("kv_run_policy".into(), json!("allowlist"));
+        }
+        Ok(true)
+    })
+}
+
+pub fn add_allowed_command(root: impl AsRef<Path>, command: &str) -> Result<bool, StoreError> {
+    add_command(root.as_ref(), command, "allowed_commands")
+}
+
+pub fn add_network_command(root: impl AsRef<Path>, command: &str) -> Result<bool, StoreError> {
+    add_command(root.as_ref(), command, "network_commands")
+}
+
+pub fn remove_allowed_command(root: impl AsRef<Path>, command: &str) -> Result<bool, StoreError> {
+    config_transaction(root, |config| {
+        let mut patterns = command_patterns(config, "allowed_commands")?;
+        let Some(index) = patterns.iter().position(|entry| entry == command) else {
+            return Ok(false);
+        };
+        patterns.remove(index);
+        config["security"]["allowed_commands"] = json!(patterns);
+        Ok(true)
+    })
+}
+
 fn config_path(root: &Path) -> PathBuf {
     secrets_dir(root).join(CONFIG_FILE)
 }

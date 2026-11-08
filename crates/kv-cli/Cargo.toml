@@ -14,6 +14,7 @@ kv-mcp = { path = "../kv-mcp" }
 kv-agent = { path = "../kv-agent" }
 kv-hook = { path = "../kv-hook" }
 kv-store = { path = "../kv-store" }
+kv-sandbox = { path = "../kv-sandbox" }
 kv-crypto = { path = "../kv-crypto" }
 kv-proto = { path = "../kv-proto" }
 kv-broker = { path = "../kv-broker" }
