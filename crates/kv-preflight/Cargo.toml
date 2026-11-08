@@ -13,8 +13,16 @@ kv-sandbox = { path = "../kv-sandbox" }
 kv-hook = { path = "../kv-hook" }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order"] }
+ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
+ruff_python_ast = "=0.0.21"
+unicode-normalization = "0.1"
+num-bigint = "0.4"
+num-traits = "0.2"
+getrandom = "0.2"
+hex = "0.4"
+kv-store = { path = "../kv-store" }
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
-serde_json = "1"
 tempfile = "3"
