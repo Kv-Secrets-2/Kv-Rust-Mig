@@ -1158,6 +1158,26 @@ const APPROVALS_HELP: &[(&str, &str)] = &[
     ),
 ];
 
+/// Python's `int(text)` for an argparse `type=int` value: surrounding whitespace, an optional
+/// sign, and single underscores between digits are accepted.
+fn python_int(text: &str) -> Option<i64> {
+    let trimmed = text.trim();
+    let (negative, digits) = match trimmed.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+        || !digits.chars().all(|c| c.is_ascii_digit() || c == '_')
+    {
+        return None;
+    }
+    let magnitude: i64 = digits.replace('_', "").parse().ok()?;
+    Some(if negative { -magnitude } else { magnitude })
+}
+
 fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::approvalscmd::ApprovalsAction;
     let Some(action) = rest.first() else {
@@ -1206,7 +1226,15 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
                             "{usage}\nkv approvals watch: error: argument --interval: expected one argument\n"
                         )));
                     };
-                    interval = raw.trim().parse().map_err(|_| {
+                    interval = python_int(raw).ok_or_else(|| {
+                        ParseError::Usage(format!(
+                            "{usage}\nkv approvals watch: error: argument --interval: invalid int value: '{raw}'\n"
+                        ))
+                    })?;
+                }
+                inline if watch && inline.starts_with("--interval=") => {
+                    let raw = &inline["--interval=".len()..];
+                    interval = python_int(raw).ok_or_else(|| {
                         ParseError::Usage(format!(
                             "{usage}\nkv approvals watch: error: argument --interval: invalid int value: '{raw}'\n"
                         ))
