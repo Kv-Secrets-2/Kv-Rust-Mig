@@ -233,6 +233,7 @@ fn trust_context() -> TrustContext {
         local_approval_id: Vec::new(),
         location: Vec::new(),
         version: "0.4.0".into(),
+        approval_signing_key: None,
         pin: Arc::new(TrustPin {
             state: Mutex::new(PinState {
                 root: PathBuf::from("."),

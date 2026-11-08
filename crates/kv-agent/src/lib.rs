@@ -125,6 +125,30 @@ impl SecretCache {
         Ok(self.environments[env].keys().cloned().collect())
     }
 
+    /// Python `get_env_secrets`: every secret of one environment.
+    fn env_secrets(
+        &mut self,
+        store: &DrawerStore,
+        env: &str,
+    ) -> Result<BTreeMap<String, Zeroizing<String>>, AgentError> {
+        if !self.environments.contains_key(env) {
+            let secrets = store
+                .list_secrets(env)?
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+            self.environments.insert(env.to_owned(), secrets);
+        }
+        Ok(self.environments[env].clone())
+    }
+
+    /// Python `redaction_secrets`: every cached value, for error text.
+    fn redaction_values(&self) -> Vec<String> {
+        self.environments
+            .values()
+            .flat_map(|items| items.values().map(|v| v.to_string()))
+            .collect()
+    }
+
     fn counts(&self) -> (usize, usize) {
         (
             self.environments.len(),
@@ -186,6 +210,9 @@ pub struct TrustContext {
     pub local_approval_id: Vec<u8>,
     pub location: Vec<u8>,
     pub version: String,
+    /// The pinned approval signing key (`.secrets/approval_signing_key`),
+    /// which seals approval artifacts and capability tokens.
+    pub approval_signing_key: Option<Zeroizing<[u8; 32]>>,
     #[cfg(unix)]
     pin: Arc<TrustPin>,
 }
@@ -258,7 +285,10 @@ impl TrustContext {
             None => false,
         };
         #[cfg(unix)]
-        let approval_key_pin = pin_approval_signing_key(&root_path, &folder)?;
+        let (approval_key_pin, approval_signing_key) =
+            pin_approval_signing_key(&root_path, &folder)?;
+        #[cfg(not(unix))]
+        let approval_signing_key = None;
         let mut nonce = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(&mut nonce[..])
             .map_err(|_| AgentError("operating-system randomness unavailable".into()))?;
@@ -273,6 +303,7 @@ impl TrustContext {
             local_approval_id,
             location,
             version: "0.4.0".to_owned(),
+            approval_signing_key,
             #[cfg(unix)]
             pin: Arc::new(TrustPin {
                 state: std::sync::Mutex::new(PinState {
@@ -431,17 +462,20 @@ impl From<std::io::Error> for ApprovalKeyReadError {
 }
 
 #[cfg(unix)]
-fn pin_approval_signing_key(root: &Path, folder: &File) -> Result<ApprovalKeyPin, AgentError> {
+fn pin_approval_signing_key(
+    root: &Path,
+    folder: &File,
+) -> Result<(ApprovalKeyPin, Option<Zeroizing<[u8; 32]>>), AgentError> {
     match ensure_approval_signing_key(root, folder) {
         Ok(()) | Err(EnsureApprovalKeyError::Ignorable) => {}
         Err(EnsureApprovalKeyError::Structural(error)) => return Err(error),
     }
     match read_approval_signing_key(folder) {
         Ok(Some((blob, file_id))) => {
-            let _ = kv_approvals::artifacts::parse_signing_key(&blob);
-            Ok((Some(file_id), Some(Sha256::digest(&blob).into())))
+            let key = kv_approvals::artifacts::parse_signing_key(&blob).ok();
+            Ok(((Some(file_id), Some(Sha256::digest(&blob).into())), key))
         }
-        Ok(None) | Err(ApprovalKeyReadError::TooLarge) => Ok((None, None)),
+        Ok(None) | Err(ApprovalKeyReadError::TooLarge) => Ok(((None, None), None)),
         Err(ApprovalKeyReadError::NotRegular) => Err(AgentError(
             "the approval signing key must be a regular file".into(),
         )),
@@ -859,6 +893,8 @@ fn stopping_latched(lifecycle: &Lifecycle) -> bool {
 pub(crate) struct Shared {
     pub(crate) tracked: tracked::Tracked,
     pub(crate) runs: runs::Runs,
+    pub(crate) ledger: kv_grants::ledger::Ledger,
+    pub(crate) host: kv_sandbox::bwrap::SandboxHost,
 }
 
 #[cfg(unix)]
@@ -867,6 +903,8 @@ impl Shared {
         Self {
             tracked: tracked::Tracked::new(),
             runs: runs::Runs::new(),
+            ledger: kv_grants::ledger::Ledger::new(),
+            host: kv_sandbox::bwrap::SandboxHost::detect(),
         }
     }
 }
@@ -2249,6 +2287,7 @@ mod tests {
             local_approval_id: Vec::new(),
             location: Vec::new(),
             version: "0.4.0".into(),
+            approval_signing_key: None,
             pin: Arc::new(TrustPin {
                 state: Mutex::new(PinState {
                     root: directory.0.clone(),
@@ -2309,6 +2348,7 @@ mod tests {
             local_approval_id: Vec::new(),
             location: Vec::new(),
             version: "0.4.0".into(),
+            approval_signing_key: None,
             pin: Arc::new(TrustPin {
                 state: std::sync::Mutex::new(PinState {
                     root: std::path::PathBuf::from("."),
@@ -2397,6 +2437,7 @@ mod tests {
             local_approval_id: Vec::new(),
             location: Vec::new(),
             version: "0.4.0".into(),
+            approval_signing_key: None,
             pin: Arc::new(TrustPin {
                 state: std::sync::Mutex::new(PinState {
                     root: std::path::PathBuf::from("."),
