@@ -58,7 +58,8 @@ unlock / kv unlock --foreground" guidance when the daemon is down.
 `scripts/parity_inventory.json` (floor 80 → 83). Each test starts the Python
 0.4.0 daemon and the Rust daemon in turn on the same passphrase vault (Python
 made it) and compares the replies field by field; only `run_id`,
-`audit_warning` and `approval_request` (below) are left out.
+`audit_warning`, and each daemon's own request id and expiry inside
+`approval_request`, are left out.
 
 | Test | What it compares |
 |---|---|
@@ -68,12 +69,15 @@ made it) and compares the replies field by field; only `run_id`,
 
 ## Deliberate differences
 
-- **No pending approval request yet.** When a secret- or capability-bearing run
-  has no matching grant, Python also files a pending approval request and names
-  it in `approval_request`. Rust returns the same refusal and `approval_hint`
-  without filing one until the request stores (`kv-requests`, PR #22) are
-  integrated; the parity test leaves `approval_request` out for that reason.
-  No policy request is filed for an allowlist refusal either, for the same reason.
+- **Pending requests are filed** (stage 6c-2, with `kv-requests` and `kv-preflight`
+  merged in): a protected run refused for a missing grant files Python's pending
+  approval request (`approval_request` in the reply: id, status, expiry, the
+  `kv approvals approve ID` command) with the run's risk card from the static
+  preflight, the daemon's network decision and this session's own-records reuse
+  rule; an allowlist block files the pending command-policy request
+  (`policy_request`). The audit records `approval_request_created` /
+  `policy_request_created` as Python's do. Not ported with them: the saved-pass
+  "part 2" note Python keeps for `kv resume` (stage 6d, with pauses).
 - **Not in this stage** (6d): `cap_api` for scripts, paused jobs and pass
   extensions, POST wallets. A capability-bearing run is admitted and gets its
   token; the broker side that spends it is 6d.

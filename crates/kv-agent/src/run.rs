@@ -871,6 +871,18 @@ pub(crate) fn handle_run(mut ctx: RunCtx<'_>) -> RunOutcome {
         if let Some(handoff) = &decision.broker_handoff {
             response.insert("broker_handoff".into(), Value::Object(handoff.clone()));
         }
+        if protected
+            && let Some(policy_request) = crate::requests::create_run_policy_request(
+                &ctx,
+                &argv,
+                &run_cwd,
+                &decision.reason,
+                decision.mode,
+                &actor,
+            )
+        {
+            response.insert("policy_request".into(), policy_request);
+        }
         let fields = run_blocked_fields(
             &program,
             &decision.reason,
@@ -934,6 +946,19 @@ pub(crate) fn handle_run(mut ctx: RunCtx<'_>) -> RunOutcome {
                     approval_hint(&argv, &run_cwd, env_names.as_deref(), &actor, &capabilities)
             {
                 response.insert("approval_hint".into(), hint);
+            }
+            if approvable
+                && let Some(approval_request) = crate::requests::create_run_approval_request(
+                    &ctx,
+                    &pre_identity,
+                    &argv,
+                    &run_cwd,
+                    env_names.as_deref(),
+                    &capabilities,
+                    &actor,
+                )
+            {
+                response.insert("approval_request".into(), approval_request);
             }
             let mut spent_link = Map::new();
             if let Some((grant_id, was_spent, error_type)) = spent {
