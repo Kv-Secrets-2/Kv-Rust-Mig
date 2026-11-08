@@ -656,7 +656,9 @@ dependencies = [
  "kv-audit",
  "kv-broker",
  "kv-crypto",
+ "kv-grants",
  "kv-proto",
+ "kv-sandbox",
  "kv-store",
  "kv-test-support",
  "libc",
@@ -666,6 +668,7 @@ dependencies = [
  "sha2",
  "signal-hook",
  "subtle",
+ "tempfile",
  "thiserror",
  "url",
 ]
