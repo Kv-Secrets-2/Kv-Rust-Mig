@@ -799,13 +799,16 @@ pub fn revoke_run_grant(
                 return Ok(false);
             }
         }
+        // The reason is checked before anything changes, so a refused call leaves
+        // the grant usable (Python revokes in the ledger first).
+        let revoke_reason = reason.map(|r| normalize_reason(Some(r))).transpose()?;
         grant.insert("status".into(), json!("revoked"));
         grant.insert("revoke_mode".into(), json!(mode));
         grant.insert("revoked_at".into(), json!(iso(now)));
         grant.insert("revoked_at_epoch".into(), json!(now));
         ctx.ledger.revoke(grant_id, mode);
-        if reason.is_some() {
-            grant.insert("revoke_reason".into(), json!(normalize_reason(reason)?));
+        if let Some(revoke_reason) = revoke_reason {
+            grant.insert("revoke_reason".into(), json!(revoke_reason));
         }
         if grant.contains_key("usage_mode") {
             let sealed = kv_approvals::artifacts::attach_grant_state_integrity(
