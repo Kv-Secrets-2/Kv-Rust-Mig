@@ -54,7 +54,7 @@ pub fn normalize_actor(actor: &Value) -> Value {
     result
 }
 
-fn short_text(value: &Value, limit: usize) -> Option<String> {
+pub(crate) fn short_text(value: &Value, limit: usize) -> Option<String> {
     value
         .as_str()
         .map(py_trim)
@@ -62,15 +62,15 @@ fn short_text(value: &Value, limit: usize) -> Option<String> {
         .map(|s| s.chars().take(limit).collect())
 }
 
-fn py_trim(value: &str) -> &str {
+pub(crate) fn py_trim(value: &str) -> &str {
     value.trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'))
 }
 
-fn epoch(now: Option<i64>) -> i64 {
+pub(crate) fn epoch(now: Option<i64>) -> i64 {
     now.unwrap_or_else(|| time::OffsetDateTime::now_utc().unix_timestamp())
 }
 
-fn iso(now: i64) -> Result<String> {
+pub(crate) fn iso(now: i64) -> Result<String> {
     let date = time::OffsetDateTime::from_unix_timestamp(now)
         .map_err(|_| invalid("timestamp out of range"))?;
     Ok(format!(
@@ -84,7 +84,7 @@ fn iso(now: i64) -> Result<String> {
     ))
 }
 
-fn py_int(value: &Value) -> Option<i64> {
+pub(crate) fn py_int(value: &Value) -> Option<i64> {
     match value {
         Value::Bool(v) => Some(i64::from(*v)),
         Value::Number(n) => n.as_i64().or_else(|| {
@@ -145,7 +145,7 @@ fn decimal_digit(c: char) -> Option<char> {
     })
 }
 
-fn truthy(v: &Value) -> bool {
+pub(crate) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -275,7 +275,7 @@ fn scope(value: &Value, field: &str) -> Result<Vec<String>> {
     Ok(result.into_iter().collect())
 }
 
-fn argv(value: &Value) -> Result<Value> {
+pub(crate) fn argv(value: &Value) -> Result<Value> {
     let items = value
         .as_array()
         .filter(|a| !a.is_empty())
@@ -297,7 +297,7 @@ fn argv(value: &Value) -> Result<Value> {
     Ok(value.clone())
 }
 
-fn cwd(value: &Value) -> Result<String> {
+pub(crate) fn cwd(value: &Value) -> Result<String> {
     let text = value
         .as_str()
         .filter(|s| !py_trim(s).is_empty())
@@ -639,7 +639,7 @@ fn store_lock(root: &Path) -> Result<fsx::StorageLock> {
     })
 }
 
-fn check_secrets_dir(root: &Path) -> Result<()> {
+pub(crate) fn check_secrets_dir(root: &Path) -> Result<()> {
     let path = root.join(".secrets");
     let metadata = std::fs::symlink_metadata(&path)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
@@ -659,7 +659,7 @@ fn check_secrets_dir(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn private_read(path: &Path, what: &str, limit: usize) -> Result<Vec<u8>> {
+pub(crate) fn private_read(path: &Path, what: &str, limit: usize) -> Result<Vec<u8>> {
     let before = std::fs::symlink_metadata(path)?;
     if before.file_type().is_symlink() {
         return Err(invalid("a vault file must be a regular file, not a link"));
@@ -739,7 +739,7 @@ fn read_store(root: &Path) -> Result<Vec<Value>> {
     Ok(records.clone())
 }
 
-fn sorted(value: &mut Value) {
+pub(crate) fn sorted(value: &mut Value) {
     match value {
         Value::Object(map) => {
             map.sort_keys();

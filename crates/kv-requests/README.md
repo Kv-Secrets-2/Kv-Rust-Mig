@@ -44,3 +44,33 @@ delegates risk/call-budget dependencies to identical deterministic hooks in both
 languages. It compares results, errors, serialized store bytes and ignore files
 after each operation; separately it exercises independent signing-key creation
 (whose random keys/seals necessarily differ) and bidirectional cross-reads.
+
+## Command-policy requests
+
+These records ask the owner to review command shapes; they never grant access
+to secrets or capabilities. The same conservative storage differences above
+apply to this store.
+
+| Python `kv.policy_requests` | Rust `kv_requests::policy_requests` |
+| --- | --- |
+| `policy_request_store_path`, `policy_pattern_for_argv` | same names |
+| `create_policy_request`, `_find_equivalent_pending` | `create_policy_request` |
+| `list_policy_requests`, `get_policy_request` | same names (polling primitives) |
+| `mark_policy_request_allowed`, `block_policy_request` | same names |
+| `_mark_request_held` | `mark_request_in_held_lock` (requires storage guard) |
+| `prune_policy_requests`, `request_fingerprint` | same names |
+| `_request_status` | `effective_status` |
+| `allow_policy_request` | `allow_policy_request` with `AllowPolicyRequest` options |
+
+`kv-store` has a snapshot guard and config transactions, but no equivalent of
+Python's `add_allowed_command`. Accordingly `allow_policy_request` receives a
+caller-supplied pattern-writing closure. The library verifies same-vault identity,
+the reviewed fingerprint, pending status, pattern narrowness and the original
+config snapshot, marks the request allowed, then invokes the closure while both
+locks remain held. Closure failure leaves the request decided and cannot be
+completed by retrying it. Production config mutation is deliberately left to
+the caller; the differential test supplies a transaction matching Python's
+existing pattern writer and compares config bytes as well as queue/ignore bytes.
+
+Same-vault checks resolve existing vault directories with the OS; unavailable
+directories fail closed rather than accepting a non-strict lexical fallback.

@@ -821,6 +821,7 @@ dependencies = [
  "kv-approvals",
  "kv-crypto",
  "kv-hook",
+ "kv-sandbox",
  "kv-store",
  "kv-test-support",
  "serde_json",

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod approvals;
+pub mod policy_requests;
 
 use kv_store::StoreError;
 
