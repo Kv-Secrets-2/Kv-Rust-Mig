@@ -4,10 +4,10 @@
 //! passes join in the capability-client stage.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use kv_approvals::verify::{AdmissionRefused, VerifiedGrant};
+use kv_approvals::verify::{AdmissionRefused, VerifiedGrant, from_payload};
 use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub struct RunState {
 
 #[derive(Default)]
 struct Inner {
+    /// ("grant" | "request" | "artifact", id) -> the verified grant registered under it.
+    by_key: BTreeMap<(&'static str, String), Arc<VerifiedGrant>>,
     runs: BTreeMap<String, RunState>,
     revocations: BTreeMap<String, String>,
     /// Grant id -> its end on the monotonic clock, so a wall clock moved back
@@ -114,6 +116,68 @@ impl Ledger {
         Ok(())
     }
 
+    /// Register a signed payload under its grant, request and artifact ids;
+    /// the same payload again is fine, a different one under any of those ids
+    /// is a conflict.
+    pub fn insert(
+        &self,
+        payload: &Map<String, Value>,
+        digest: &str,
+        now_epoch: i64,
+    ) -> Result<(&'static str, Arc<VerifiedGrant>), AdmissionRefused> {
+        let id = |field: &str| {
+            payload
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| AdmissionRefused::new("approval changed or revoked"))
+        };
+        let keys = [
+            ("grant", id("grant_id")?),
+            ("request", id("request_id")?),
+            ("artifact", id("artifact_id")?),
+        ];
+        let mut inner = self.lock();
+        let found: Vec<Option<Arc<VerifiedGrant>>> = keys
+            .iter()
+            .map(|key| inner.by_key.get(key).cloned())
+            .collect();
+        if found.iter().all(Option::is_none) {
+            let verified = Arc::new(from_payload(payload, digest)?);
+            for key in keys {
+                inner.by_key.insert(key, Arc::clone(&verified));
+            }
+            if let Some(expires) = payload.get("expires_at_epoch").and_then(Value::as_i64) {
+                let remaining = expires.saturating_sub(now_epoch).max(0);
+                inner.grant_mono_end.insert(
+                    keys_grant_id(&verified),
+                    Instant::now() + std::time::Duration::from_secs(remaining as u64),
+                );
+            }
+            return Ok(("registered", verified));
+        }
+        if let Some(first) = &found[0]
+            && found
+                .iter()
+                .all(|entry| entry.as_ref().is_some_and(|e| Arc::ptr_eq(e, first)))
+            && first.payload_digest == digest
+        {
+            return Ok(("already-registered", Arc::clone(first)));
+        }
+        Err(AdmissionRefused::with_code(
+            "a grant, request or approval id is already registered with different contents",
+            "conflict",
+        ))
+    }
+
+    /// The verified grant registered under `grant_id`, if any.
+    pub fn get(&self, grant_id: &str) -> Option<Arc<VerifiedGrant>> {
+        self.lock()
+            .by_key
+            .get(&("grant", grant_id.to_owned()))
+            .cloned()
+    }
+
     pub fn run_state(&self, grant_id: &str) -> Option<RunState> {
         self.lock().runs.get(grant_id).cloned()
     }
@@ -167,4 +231,8 @@ impl Ledger {
             .map(|(id, _)| id.clone())
             .collect()
     }
+}
+
+fn keys_grant_id(verified: &VerifiedGrant) -> String {
+    verified.grant_id.clone()
 }
