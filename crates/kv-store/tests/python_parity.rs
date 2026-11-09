@@ -93,7 +93,6 @@ fn python_and_rust_drawer_operations_have_matching_storage_and_cross_reads() {
         .arg(&rust_root)
         .arg(hex(master.as_bytes()))
         .arg(&operation_path)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python parity script");
     assert!(
@@ -280,7 +279,6 @@ fn python_and_rust_history_operations_have_matching_results_and_storage() {
         .arg(&rust_root)
         .arg(hex(master.as_bytes()))
         .arg(&operation_path)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python history parity script");
     assert!(
@@ -602,7 +600,6 @@ fn python_and_rust_envtree_copy_checked_copy_and_backup_interoperate() {
         .arg(&rust_root)
         .arg(hex(master.as_bytes()))
         .arg(&operation_path)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python Stage 2c parity script");
     assert!(

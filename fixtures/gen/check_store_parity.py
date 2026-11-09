@@ -8,6 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from kv import backup
+from kv import approval_refs
 from kv import config as kv_config
 from kv.store import CopyChangedError, DrawerUpgradeBackend
 from kv import vault_origin
@@ -232,6 +233,19 @@ def config_writer_parity(root, value):
     )
     print("PASS config writer parity")
 
+def approval_refs_parity(root, env):
+    # The store-level parity check excludes config.secrets_dir's separate repair sweep.
+    repair = kv_config._repair_private_vault_permissions
+    kv_config._repair_private_vault_permissions = lambda _sdir: None
+    try:
+        result = approval_refs.approvals_naming_env(root, env)
+    finally:
+        kv_config._repair_private_vault_permissions = repair
+    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+
+def py_str_parity(values):
+    print(json.dumps([str(value) for value in values], ensure_ascii=False))
+
 
 def stage3a_lifecycle(root, master_key, operations):
     backend = DrawerUpgradeBackend(root, lambda: master_key)
@@ -438,6 +452,12 @@ def main():
         return
     if isinstance(operations, dict) and "config_writer" in operations:
         config_writer_parity(python_root, operations["config_writer"])
+        return
+    if isinstance(operations, dict) and "approval_refs" in operations:
+        approval_refs_parity(python_root, operations["approval_refs"]["env"])
+        return
+    if isinstance(operations, dict) and "py_str" in operations:
+        py_str_parity(operations["py_str"])
         return
     if isinstance(operations, dict) and "stage3a_lifecycle" in operations:
         stage3a_lifecycle(python_root, master_key, operations["stage3a_lifecycle"])
