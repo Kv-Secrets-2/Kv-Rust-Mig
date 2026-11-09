@@ -358,6 +358,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -427,6 +433,17 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "getrandom"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi",
 ]
 
 [[package]]
@@ -634,7 +651,7 @@ name = "kv-agent"
 version = "0.5.0-dev"
 dependencies = [
  "base64",
- "getrandom",
+ "getrandom 0.2.17",
  "kv-approvals",
  "kv-audit",
  "kv-broker",
@@ -661,7 +678,7 @@ dependencies = [
  "base64",
  "caseless",
  "ed25519-dalek",
- "getrandom",
+ "getrandom 0.2.17",
  "hex",
  "hmac",
  "kv-crypto",
@@ -708,7 +725,7 @@ name = "kv-cli"
 version = "0.5.0-dev"
 dependencies = [
  "caseless",
- "getrandom",
+ "getrandom 0.2.17",
  "kv-agent",
  "kv-audit",
  "kv-broker",
@@ -731,7 +748,7 @@ dependencies = [
  "blake2",
  "chacha20poly1305",
  "data-encoding",
- "getrandom",
+ "getrandom 0.2.17",
  "hmac",
  "kv-test-support",
  "scrypt",
@@ -764,7 +781,7 @@ name = "kv-mcp"
 version = "0.5.0-dev"
 dependencies = [
  "base64",
- "getrandom",
+ "getrandom 0.2.17",
  "hex",
  "indexmap",
  "kv-agent",
@@ -781,7 +798,7 @@ dependencies = [
 name = "kv-proto"
 version = "0.5.0-dev"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.17",
  "hex",
  "kv-approvals",
  "kv-crypto",
@@ -794,12 +811,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "kv-sandbox"
+version = "0.5.0-dev"
+dependencies = [
+ "base64",
+ "hex",
+ "hmac",
+ "kv-hook",
+ "kv-store",
+ "kv-test-support",
+ "regex",
+ "rustix",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "kv-store"
 version = "0.5.0-dev"
 dependencies = [
  "caseless",
  "exacl",
- "getrandom",
+ "getrandom 0.2.17",
  "kv-crypto",
  "kv-test-support",
  "rustix",
@@ -980,12 +1014,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "r-efi"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
 name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -1038,7 +1078,7 @@ checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom",
+ "getrandom 0.2.17",
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
@@ -1370,6 +1410,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
