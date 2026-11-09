@@ -657,7 +657,6 @@ fn rust_signed_owner_grant_and_permit_verify_in_python_when_configured() {
     );
     let mut child = Command::new(python)
         .arg(script)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

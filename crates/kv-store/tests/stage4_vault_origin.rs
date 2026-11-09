@@ -46,7 +46,6 @@ fn python(python: &std::ffi::OsStr, code: &str, root: &Path, home: &Path) -> Val
         .arg(code)
         .arg(root)
         .env("HOME", home)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .expect("run Python reference");
     assert!(
@@ -70,7 +69,6 @@ fn python_with_master(
         .arg(code)
         .arg(root)
         .env("HOME", home)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .env("MASTER_KEY", hex(master))
         .output()
         .expect("run Python reference");
@@ -148,7 +146,6 @@ sys.stdout.buffer.write(json.dumps(record,sort_keys=True).encode())
         .arg(py_rewrite)
         .arg(&root)
         .env("HOME", &home)
-        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
         .output()
         .unwrap();
     assert!(
