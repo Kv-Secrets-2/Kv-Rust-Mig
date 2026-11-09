@@ -121,7 +121,8 @@ pub(crate) fn validate_review(
     render_review(facts, body_text, caller_headers).map(|_| ())
 }
 
-pub(crate) fn render_review(
+/// Python `render_permit_request`: the lines the owner reads before signing.
+pub fn render_review(
     facts: &Value,
     body_text: &str,
     caller_headers: &Map<String, Value>,

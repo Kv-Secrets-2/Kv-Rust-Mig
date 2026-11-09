@@ -16,11 +16,17 @@ kv-agent = { path = "../kv-agent" }
 kv-hook = { path = "../kv-hook" }
 kv-store = { path = "../kv-store" }
 kv-requests = { path = "../kv-requests" }
+kv-sandbox = { path = "../kv-sandbox" }
 kv-crypto = { path = "../kv-crypto" }
 kv-proto = { path = "../kv-proto" }
+hex = "0.4"
+sha2 = "0.10"
+time = "0.3"
+kv-approvals = { path = "../kv-approvals" }
 kv-broker = { path = "../kv-broker" }
 kv-audit = { path = "../kv-audit" }
 serde_json = "1"
+url = "2"
 caseless = "0.2.2"
 unicode-general-category = "1"
 zeroize = "1"
@@ -31,6 +37,10 @@ rustix = { version = "1", features = ["fs", "process", "termios", "stdio"] }
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
+kv-agent = { path = "../kv-agent" }
+kv-broker = { path = "../kv-broker" }
+rcgen = "0.13"
+url = "2.5"
 
 [lints]
 workspace = true

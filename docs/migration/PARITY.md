@@ -15,10 +15,18 @@ four passing local lanes and remaining platform/release limits.
 - Canonical transcripts: CPython **3.10.22**. Existing masks for paths, run IDs
   and other generated fields remain in place.
 - Semantic lanes: CPython **3.11, 3.12 and 3.13**. The only additional transcript
-  normalization accepts the interpreter's complete integer-conversion error
-  template with `limit (4300 digits)` in place of `limit (4300)`. Both numerical
+  normalization outside argparse output accepts the interpreter's complete
+  integer-conversion error template with `limit (4300 digits)` in place of
+  `limit (4300)`. Both numerical
   values and all other text must still match. Negative controls reject unrelated
   wording changes. Python versions newer than 3.13 are outside this gate.
+- Semantic lanes omit text assertions for argparse help pages, usage lines and
+  exit-2 argparse errors (`usage: ...` plus `kv ...: error: ...`). These cases
+  still execute and compare exit codes and unchanged config/request-store bytes;
+  other stdout/stderr (including prompts, refusals and listings) stays
+  byte-compared. The top-level unknown-option case is canonical-only because
+  argparse's handling changes to `ArgumentError` on Python 3.12+.
+  Canonical 3.10.22 retains its full transcript assertions.
 - Passphrase policy: Python 3.10 **Unicode 13.0.0** `str.isdigit()` definitions,
   fixed independently of the Rust compiler's Unicode database. Fractions and
   Roman numerals do not trigger the all-digit refusal. Superscript, circled and
@@ -91,7 +99,7 @@ short names and explicitly verify the socket path fits the macOS/Linux limit.
    exactly one validated-reference marker under its test name. Missing tests,
    skipped comparisons, ignored tests, duplicate markers, unexpected comparison
    markers and inconsistent result summaries fail. The inventory currently has
-   **92 comparison tests**; individual tests contain many cases. These include
+   **107 comparison tests**; individual tests contain many cases. These include
    socket framing/timeouts, daemon shutdown, audit-chain interoperability,
    failure accounting, warning delivery, ordinary API one-call permits, and the owner
    CLI flow (init, secrets, history, environments, backups, approve-config, unlock/

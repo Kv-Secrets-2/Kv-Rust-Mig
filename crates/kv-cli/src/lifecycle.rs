@@ -504,46 +504,6 @@ fn print_storage(p: &Palette, health: &StorageHealth, always_messages: bool) {
     }
 }
 
-/// `_print_approval_mode(root)`.
-fn print_approval_mode(p: &Palette, config: &Value) {
-    let mode = config
-        .get("security")
-        .and_then(|s| s.get("approval_mode"))
-        .and_then(Value::as_str)
-        .unwrap_or("unset");
-    let (title, summary, chosen) = match mode {
-        "local-convenience" => (
-            "local convenience",
-            "local terminal/app approvals allowed; use only when agents cannot control this desktop",
-            true,
-        ),
-        "protected-approval" => (
-            "protected approval",
-            "local approval commands are blocked; use an owner-controlled protected channel when available",
-            true,
-        ),
-        "unsafe-convenience" => (
-            "unsafe convenience",
-            "same-session approvals allowed by explicit override; not safe against desktop-controlling agents",
-            false,
-        ),
-        _ => (
-            "not chosen",
-            "approval mode not chosen \u{2014} run kv approval-mode set local-convenience or protected-approval",
-            false,
-        ),
-    };
-    let marker = if chosen {
-        dot_on(p)
-    } else {
-        format!("{}!{}", p.yellow, p.reset)
-    };
-    ui::info(&format!(
-        "  {marker} approval mode {}\u{2014} {title}: {summary}{}",
-        p.dim, p.reset
-    ));
-}
-
 /// `_print_approval_inbox_counts(root)`: pending and missed requests in
 /// `.secrets/approval_requests.json`.
 fn print_approval_inbox(p: &Palette, root: &Path) {
@@ -749,7 +709,7 @@ pub fn cmd_status(p: &Palette) -> CmdResult {
             p.reset
         ));
     }
-    print_approval_mode(p, &config);
+    crate::owner_policy::print_approval_mode(p, &config);
     print_approval_inbox(p, &root);
     if let Some(status) = &agent_status {
         let (ok, label) = memory_hardening_label(status);

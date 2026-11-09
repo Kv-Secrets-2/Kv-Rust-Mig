@@ -1,5 +1,9 @@
 //! `build_parser()` for the commands this build carries, with argparse's messages.
 
+use crate::policycmd::PolicyAction;
+use crate::providercmd::{ProviderAction, ProviderOptions};
+use kv_broker::HttpRuleOptions;
+
 pub enum Command {
     Preflight(crate::preflight::Args),
     Version,
@@ -35,6 +39,14 @@ pub enum Command {
     },
     Lock,
     Status,
+    ApprovalMode(Option<String>),
+    Allow(Option<String>),
+    Deny(String),
+    NetworkAllow(Option<String>),
+    NetworkDeny(String),
+    Provider(crate::providercmd::ProviderAction),
+    Policy(PolicyAction),
+    Approvals(crate::approvalscmd::ApprovalsAction),
     AgentChild,
     Hook {
         mode: String,
@@ -82,7 +94,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,run,unlock,lock,status,export,envs,env,vault,version,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,run,preflight,policy,approval-mode,export,envs,env,vault,status,version,unlock,lock,allow,deny,network-allow,network-deny,provider,mcp-server}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -102,6 +114,42 @@ const SPECS: &[Spec] = &[
         usage: "usage: kv preflight [-h] [--cwd CWD] [--json] [--request]\n                    [--request-ttl REQUEST_TTL] [--env ENV] [--source SOURCE]\n                    [--client CLIENT] [--session-id SESSION_ID]\n                    [--reason REASON]\n                    ...\n",
         help: "\npositional arguments:\n  cmd                   Command to inspect\n\noptions:\n  -h, --help            show this help message and exit\n  --cwd CWD             Working directory for the command (default: current\n                        directory)\n  --json                Emit machine-readable JSON\n  --request             Create pending approval request(s) for brokered\n                        recommendations\n  --request-ttl REQUEST_TTL\n                        Pending request lifetime in seconds (default: 900)\n  --env ENV             Environment the requested run uses (default: the\n                        project's default)\n  --source SOURCE       Optional requester source to bind, such as mcp\n  --client CLIENT       Optional client name to bind, such as codex\n  --session-id SESSION_ID\n                        Optional agent/session ID to bind\n  --reason REASON       Human note stored with created approval requests\n",
         positionals: &[],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "allow",
+        usage: "usage: kv allow [-h] [pattern]\n",
+        help: "\npositional arguments:\n  pattern     Command to allow (e.g., 'python3 app.py')\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["?pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "deny",
+        usage: "usage: kv deny [-h] pattern\n",
+        help: "\npositional arguments:\n  pattern     Command to remove\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "network-allow",
+        usage: "usage: kv network-allow [-h] [pattern]\n",
+        help: "\nAllow outbound network access for a kv_run command. With no argument, list the\ncommands allowed. On a vault with a passphrase, kv_run uses a change only\nafter a restart (kv lock, then kv unlock) and a fresh approval of the run.\n\npositional arguments:\n  pattern     Command to allow network (e.g., 'twine upload')\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["?pattern"],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "network-deny",
+        usage: "usage: kv network-deny [-h] pattern\n",
+        help: "\npositional arguments:\n  pattern     Command to revoke network from\n\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &["pattern"],
         env: false,
         flags: &[],
         options: &[],
@@ -354,7 +402,13 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                     None => {
                         i += 1;
                         match rest.get(i) {
-                            Some(value) if !(value.starts_with('-') && value.len() > 1) => {
+                            Some(value)
+                                if !(value.starts_with('-') && value.len() > 1)
+                                    || (matches!(
+                                        spec.name,
+                                        "provider add" | "policy watch" | "policy request"
+                                    ) && negative_number(value)) =>
+                            {
                                 value.clone()
                             }
                             _ => {
@@ -369,6 +423,43 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                         }
                     }
                 };
+                if spec.name == "provider add" {
+                    validate_provider_option(spec, option, &value)?;
+                }
+                if matches!(spec.name, "policy watch" | "policy request")
+                    && matches!(*option, "--interval" | "--ttl")
+                {
+                    let raw = value.trim();
+                    let digits = raw.strip_prefix(['+', '-']).unwrap_or(raw).as_bytes();
+                    if digits.is_empty()
+                        || !digits.iter().enumerate().all(|(i, b)| {
+                            b.is_ascii_digit()
+                                || (*b == b'_'
+                                    && i > 0
+                                    && i + 1 < digits.len()
+                                    && digits[i - 1].is_ascii_digit()
+                                    && digits[i + 1].is_ascii_digit())
+                        })
+                    {
+                        return Err(spec_error(
+                            spec,
+                            &format!("argument {option}: invalid int value: '{value}'"),
+                        ));
+                    }
+                }
+                if spec.name == "policy http add" && matches!(*option, "--path" | "--path-prefix") {
+                    let other = if *option == "--path" {
+                        "--path-prefix"
+                    } else {
+                        "--path"
+                    };
+                    if parsed.options.iter().any(|(name, _)| *name == other) {
+                        return Err(spec_error(
+                            spec,
+                            &format!("argument {option}: not allowed with argument {other}"),
+                        ));
+                    }
+                }
                 parsed.options.push((option, value));
                 i += 1;
                 continue;
@@ -386,14 +477,41 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
         .iter()
         .filter(|name| !name.starts_with('?'))
         .count();
-    if parsed.positionals.len() < required {
-        let missing: Vec<&str> = spec.positionals[parsed.positionals.len()..required].to_vec();
+    let missing_secret =
+        spec.name == "provider add" && !parsed.options.iter().any(|(key, _)| *key == "--secret");
+    let missing_id =
+        spec.name == "policy http add" && !parsed.options.iter().any(|(key, _)| *key == "--id");
+    if parsed.positionals.len() < required || missing_secret || missing_id {
+        let mut missing: Vec<&str> = spec
+            .positionals
+            .iter()
+            .copied()
+            .take(required)
+            .skip(parsed.positionals.len())
+            .collect();
+        if missing_secret {
+            missing.push("--secret");
+        }
+        if missing_id {
+            missing.push("--id");
+        }
         return Err(spec_error(
             spec,
             &format!(
                 "the following arguments are required: {}",
                 missing.join(", ")
             ),
+        ));
+    }
+    if spec.name == "policy http add"
+        && !parsed
+            .options
+            .iter()
+            .any(|(name, _)| matches!(*name, "--path" | "--path-prefix"))
+    {
+        return Err(spec_error(
+            spec,
+            "one of the arguments --path --path-prefix is required",
         ));
     }
     if parsed.positionals.len() > spec.positionals.len() {
@@ -420,6 +538,18 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "env" {
         return parse_env(&argv[1..]);
+    }
+    if first == "approval-mode" {
+        return parse_approval_mode(&argv[1..]);
+    }
+    if first == "provider" {
+        return parse_provider(&argv[1..]);
+    }
+    if first == "policy" {
+        return parse_policy(&argv[1..]);
+    }
+    if first == "approvals" {
+        return parse_approvals(&argv[1..]);
     }
     if first == "history" {
         return parse_history(&argv[1..]);
@@ -503,6 +633,10 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
         },
         "lock" => Command::Lock,
         "status" => Command::Status,
+        "allow" => Command::Allow(positionals.next()),
+        "deny" => Command::Deny(positionals.next().unwrap_or_default()),
+        "network-allow" => Command::NetworkAllow(positionals.next()),
+        "network-deny" => Command::NetworkDeny(positionals.next().unwrap_or_default()),
         _ => Command::Version,
     }))
 }
@@ -818,6 +952,661 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
 
 const HISTORY_USAGE: &str =
     "usage: kv history [-h] {list,show,restore,undo-rm,replace,forget,keep} ...\n";
+
+const APPROVAL_MODE_USAGE: &str = "usage: kv approval-mode [-h] {status,set} ...\n";
+const APPROVAL_MODE_SET_SPEC: Spec = Spec {
+    name: "approval-mode set",
+    usage: "usage: kv approval-mode set [-h]\n                            {local-convenience,protected-approval,unsafe-convenience}\n",
+    help: "\npositional arguments:\n  {local-convenience,protected-approval,unsafe-convenience}\n                        Approval mode for this project\n\noptions:\n  -h, --help            show this help message and exit\n",
+    positionals: &["mode"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const APPROVAL_MODE_STATUS_SPEC: Spec = Spec {
+    name: "approval-mode status",
+    usage: "usage: kv approval-mode status [-h]\n",
+    help: "\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &[],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+
+const PROVIDER_USAGE: &str = "usage: kv provider [-h] {add,list,rm} ...\n";
+const PROVIDER_ADD: Spec = Spec {
+    name: "provider add",
+    usage: "usage: kv provider add [-h] [--type {http,postgres,mysql,redis,ssh}]\n                       [--url URL] [--host HOST] [--port PORT]\n                       [--database DATABASE] [--username USERNAME] --secret\n                       SECRET [--auth {bearer,x-api-key,query,basic,header}]\n                       [--query-param QUERY_PARAM] [--header-name HEADER_NAME]\n                       name\n",
+    help: "\npositional arguments:\n  name                  Provider name (e.g., stripe, twilio)\n\noptions:\n  -h, --help            show this help message and exit\n",
+    positionals: &["name"],
+    env: false,
+    flags: &[],
+    options: &[
+        (
+            "--type",
+            "  --type {http,postgres,mysql,redis,ssh}\n                        Provider type (default: http)\n",
+        ),
+        (
+            "--url",
+            "  --url URL             HTTP base URL (e.g., https://api.stripe.com)\n",
+        ),
+        (
+            "--host",
+            "  --host HOST           Database/Redis/SSH host\n",
+        ),
+        (
+            "--port",
+            "  --port PORT           Database/Redis/SSH port\n",
+        ),
+        (
+            "--database",
+            "  --database DATABASE   Database name or Redis DB number\n",
+        ),
+        (
+            "--username",
+            "  --username USERNAME   Database or SSH username\n",
+        ),
+        (
+            "--secret",
+            "  --secret SECRET       Secret name in vault (e.g., STRIPE_SECRET_KEY,\n                        DB_PASSWORD, SSH_KEY)\n",
+        ),
+        (
+            "--auth",
+            "  --auth {bearer,x-api-key,query,basic,header}\n                        HTTP auth type (default: bearer)\n",
+        ),
+        (
+            "--query-param",
+            "  --query-param QUERY_PARAM\n                        Query param name (for --auth query)\n",
+        ),
+        (
+            "--header-name",
+            "  --header-name HEADER_NAME\n                        Header name (for --auth header)\n",
+        ),
+    ],
+};
+const PROVIDER_RM: Spec = Spec {
+    name: "provider rm",
+    usage: "usage: kv provider rm [-h] name\n",
+    help: "\npositional arguments:\n  name        Provider name to remove\n\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &["name"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const PROVIDER_LIST: Spec = Spec {
+    name: "provider list",
+    usage: "usage: kv provider list [-h]\n",
+    help: "\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &[],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+
+fn provider_port(value: &str) -> Option<i64> {
+    let value = value.trim();
+    let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
+    if digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
+        return None;
+    }
+    value.replace('_', "").parse().ok()
+}
+
+fn validate_provider_option(spec: &Spec, key: &str, value: &str) -> Result<(), ParseError> {
+    let choices: &[&str] = match key {
+        "--type" => &["http", "postgres", "mysql", "redis", "ssh"],
+        "--auth" => &["bearer", "x-api-key", "query", "basic", "header"],
+        "--port" => {
+            if provider_port(value).is_none() {
+                return Err(spec_error(
+                    spec,
+                    &format!("argument --port: invalid int value: '{value}'"),
+                ));
+            }
+            return Ok(());
+        }
+        _ => return Ok(()),
+    };
+    if !choices.contains(&value) {
+        return Err(spec_error(
+            spec,
+            &format!(
+                "argument {key}: invalid choice: '{value}' (choose from {})",
+                choices
+                    .iter()
+                    .map(|v| format!("'{v}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
+    Ok(())
+}
+
+const POLICY_USAGE: &str =
+    "usage: kv policy [-h] {http,list,watch,request,allow,block,deny,prune} ...\n";
+const HTTP_USAGE: &str = "usage: kv policy http [-h] {list,add,remove,rm} ...\n";
+const HTTP_LIST: Spec = Spec {
+    name: "policy http list",
+    usage: "usage: kv policy http list [-h] [provider]\n",
+    help: "\npositional arguments:\n  provider    Optional provider name\n\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &["?provider"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const HTTP_REMOVE: Spec = Spec {
+    name: "policy http remove",
+    usage: "usage: kv policy http remove [-h] provider rule_id\n",
+    help: "\npositional arguments:\n  provider    HTTP provider name\n  rule_id     Rule id to remove\n\noptions:\n  -h, --help  show this help message and exit\n",
+    positionals: &["provider", "rule_id"],
+    env: false,
+    flags: &[],
+    options: &[],
+};
+const HTTP_ADD: Spec = Spec {
+    name: "policy http add",
+    usage: "usage: kv policy http add [-h] --id RULE_ID [--method METHODS]\n                          (--path PATH | --path-prefix PATH_PREFIX)\n                          [--query-key QUERY_KEYS] [--header ALLOWED_HEADERS]\n                          provider\n",
+    help: "\npositional arguments:\n  provider              HTTP provider name, such as github or a custom\n                        provider\n\noptions:\n  -h, --help            show this help message and exit\n",
+    positionals: &["provider"],
+    env: false,
+    flags: &[],
+    options: &[
+        ("--id", "  --id RULE_ID          Rule id, e.g. user-read\n"),
+        (
+            "--method",
+            "  --method METHODS      Allowed method; repeat to add more (default: GET).\n                        POST, PUT, PATCH or DELETE make an unsafe rule; unsafe\n                        calls need owner approval\n",
+        ),
+        (
+            "--path",
+            "  --path PATH           Exact origin-relative path, e.g. /user\n",
+        ),
+        (
+            "--path-prefix",
+            "  --path-prefix PATH_PREFIX\n                        Segment-aware origin-relative path prefix\n",
+        ),
+        (
+            "--query-key",
+            "  --query-key QUERY_KEYS\n                        Allowed query key; repeat for each key\n",
+        ),
+        (
+            "--header",
+            "  --header ALLOWED_HEADERS\n                        Allowed caller header; repeat for each header\n",
+        ),
+    ],
+};
+
+const APPROVALS_USAGE: &str = "usage: kv approvals [-h]\n                    {list,watch,request,approve,page,pause,deny,prune} ...\n";
+const APPROVALS_CHOICES: &[&str] = &[
+    "list", "watch", "request", "approve", "page", "pause", "deny", "prune",
+];
+const APPROVE_USAGE: &str = "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n";
+
+const APPROVALS_HELP: &[(&str, &str)] = &[
+    (
+        "list",
+        "usage: kv approvals list [-h] [--all]\n\noptions:\n  -h, --help  show this help message and exit\n  --all       Include approved, denied, and expired requests\n",
+    ),
+    (
+        "watch",
+        "usage: kv approvals watch [-h] [--all] [--follow] [--interval INTERVAL]\n\noptions:\n  -h, --help           show this help message and exit\n  --all                Include approved, denied, and expired requests\n  --follow             Keep refreshing until interrupted\n  --interval INTERVAL  Refresh interval for --follow\n",
+    ),
+    (
+        "request",
+        "usage: kv approvals request [-h] [--secret NAME] [--capability api:PROVIDER]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N] [--ttl TTL]\n                            [--suggest-minutes SUGGEST_MINUTES] [--cwd CWD]\n                            [--source SOURCE] [--client CLIENT]\n                            [--session-id SESSION_ID] [--reason REASON]\n                            [--env ENV]\n                            ...\n\npositional arguments:\n  cmd                   Command requesting approval\n\noptions:\n  -h, --help            show this help message and exit\n  --secret NAME         Secret name requested for this run (repeatable)\n  --capability api:PROVIDER\n                        Broker capability requested for this run\n  --max-calls MAX_CALLS\n                        Requested call budget for broker capability\n  --max-calls-for SERVICE=N\n                        Requested calls for one service of several\n                        (repeatable), e.g. api:openai=10\n  --ttl TTL             Pending request lifetime in seconds (default: 900)\n  --suggest-minutes SUGGEST_MINUTES\n                        The time limit the agent suggests for the approval, in\n                        minutes (shown to the owner; the owner decides)\n  --cwd CWD             Working directory for the command (default: current\n                        directory)\n  --source SOURCE       Optional requester source to bind, such as mcp\n  --client CLIENT       Optional client name to bind, such as codex\n  --session-id SESSION_ID\n                        Optional agent/session ID to bind\n  --reason REASON       Human note stored with the request\n  --env ENV             Environment the requested run uses (default: the\n                        project's default)\n",
+    ),
+    (
+        "approve",
+        "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n\npositional arguments:\n  request_id            Approval request ID\n\noptions:\n  -h, --help            show this help message and exit\n  --reuse               Allow matching runs until expiry; call budget is per\n                        run (default: one run)\n  --ttl TTL             Grant lifetime in seconds (default: the agent's\n                        suggestion, else kv's: 300)\n  --no-call-limit       No call count for the service(s) named: any number of\n                        calls until the time limit (the approval screen shows\n                        a red caution)\n  --when-spent {pause,end}\n                        When calls or time run out: pause the job and ask you\n                        (default on a passphrase-protected vault), or end it\n  --wait-minutes WAIT_MINUTES\n                        How long a paused job or a call waits for your answer\n                        (default 60)\n  --wait-seconds WAIT_SECONDS\n                        The same wait, in seconds\n  --add-calls ADD_CALLS\n                        Answering a paused job: calls to add (default: what it\n                        asked)\n  --add-minutes ADD_MINUTES\n                        Answering a paused job: minutes to add (default: what\n                        it asked)\n  --max-calls MAX_CALLS\n                        Override broker capability call budget\n  --max-calls-for SERVICE=N\n                        Calls per run for one service of several (repeatable),\n                        e.g. api:openai=10\n  --post-rule api:PROVIDER/RULE=N\n                        One entry of a POST wallet (repeatable): up to N POST\n                        calls per run to one HTTP rule of one service, with\n                        any body. Every service of the approval needs an\n                        entry; the counts are the entries' (do not use --max-\n                        calls, --max-calls-for or --no-call-limit with it)\n  --max-runs MAX_RUNS   With --reuse: how many runs the grant allows (required\n                        on a passphrase-protected vault)\n  --reason REASON       Human note stored with the grant\n",
+    ),
+    (
+        "page",
+        "usage: kv approvals page [-h] [--no-browser]\n\noptions:\n  -h, --help    show this help message and exit\n  --no-browser  Print the one-time link only; do not open a browser\n",
+    ),
+    (
+        "pause",
+        "usage: kv approvals pause [-h] [job_id]\n\npositional arguments:\n  job_id      The job to pause (from the list)\n\noptions:\n  -h, --help  show this help message and exit\n",
+    ),
+    (
+        "deny",
+        "usage: kv approvals deny [-h] [--reason REASON] request_id\n\npositional arguments:\n  request_id       Approval request ID\n\noptions:\n  -h, --help       show this help message and exit\n  --reason REASON  Human note stored with the denial\n",
+    ),
+    (
+        "prune",
+        "usage: kv approvals prune [-h] [--missed]\n\noptions:\n  -h, --help  show this help message and exit\n  --missed    Also remove requests that expired undecided (missed) now\n",
+    ),
+];
+
+/// Python's `int(text)` for an argparse `type=int` value: surrounding whitespace, an optional
+/// sign, and single underscores between digits are accepted.
+fn python_int(text: &str) -> Option<i64> {
+    let trimmed = text.trim();
+    let (negative, digits) = match trimmed.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+        || !digits.chars().all(|c| c.is_ascii_digit() || c == '_')
+    {
+        return None;
+    }
+    let magnitude: i64 = digits.replace('_', "").parse().ok()?;
+    Some(if negative { -magnitude } else { magnitude })
+}
+
+fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::approvalscmd::ApprovalsAction;
+    let Some(action) = rest.first() else {
+        // Python: `kv approvals` with no action is `kv approvals list`.
+        return Ok(Some(Command::Approvals(ApprovalsAction::List {
+            all: false,
+            follow: false,
+            interval: 2,
+        })));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{APPROVALS_USAGE}\npositional arguments:\n  {{list,watch,request,approve,page,pause,deny,prune}}\n    list                List pending approval requests\n    watch               Show the terminal approval inbox\n    request             Create a pending approval request\n    approve             Approve a pending run grant or one-call permit\n    page                Approve requests on a local page in your browser (one-\n                        use link)\n    pause               Pause a running counted job at once (it goes on only\n                        after kv approvals approve); without a job: list the\n                        running jobs\n    deny                Deny a pending request, or refuse a paused job more\n                        calls or time\n    prune               Remove decided request records; missed requests are\n                        kept 24 h after expiry\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    let Some(choice) = APPROVALS_CHOICES.iter().find(|c| *c == action) else {
+        return Err(ParseError::Usage(format!(
+            "{APPROVALS_USAGE}kv approvals: error: argument approvals_action: invalid choice: '{action}' (choose from 'list', 'watch', 'request', 'approve', 'page', 'pause', 'deny', 'prune')\n"
+        )));
+    };
+    let rest = &rest[1..];
+    if rest.iter().any(|v| v == "-h" || v == "--help") {
+        let help = APPROVALS_HELP
+            .iter()
+            .find(|(name, _)| name == choice)
+            .map(|(_, help)| *help)
+            .unwrap_or("");
+        return Err(ParseError::Help(help.to_owned()));
+    }
+    if *choice == "list" || *choice == "watch" {
+        let watch = *choice == "watch";
+        let usage = if watch {
+            "usage: kv approvals watch [-h] [--all] [--follow] [--interval INTERVAL]"
+        } else {
+            "usage: kv approvals list [-h] [--all]"
+        };
+        let (mut all, mut follow, mut interval) = (false, false, 2i64);
+        let mut values = rest.iter();
+        while let Some(value) = values.next() {
+            match value.as_str() {
+                "--all" => all = true,
+                "--follow" if watch => follow = true,
+                "--interval" if watch => {
+                    let Some(raw) = values.next() else {
+                        return Err(ParseError::Usage(format!(
+                            "{usage}\nkv approvals watch: error: argument --interval: expected one argument\n"
+                        )));
+                    };
+                    interval = python_int(raw).ok_or_else(|| {
+                        ParseError::Usage(format!(
+                            "{usage}\nkv approvals watch: error: argument --interval: invalid int value: '{raw}'\n"
+                        ))
+                    })?;
+                }
+                inline if watch && inline.starts_with("--interval=") => {
+                    let raw = &inline["--interval=".len()..];
+                    interval = python_int(raw).ok_or_else(|| {
+                        ParseError::Usage(format!(
+                            "{usage}\nkv approvals watch: error: argument --interval: invalid int value: '{raw}'\n"
+                        ))
+                    })?;
+                }
+                _ => {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}\nkv approvals {choice}: error: unrecognized arguments: {value}\n"
+                    )));
+                }
+            }
+        }
+        return Ok(Some(Command::Approvals(ApprovalsAction::List {
+            all,
+            follow,
+            interval,
+        })));
+    }
+    if *choice != "approve" {
+        return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(
+            choice,
+        ))));
+    }
+    let mut request_id = None;
+    let mut run_grant_flags = false;
+    let mut skip = false;
+    for (i, value) in rest.iter().enumerate() {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if value.starts_with("--") {
+            run_grant_flags = true;
+            if !value.contains('=')
+                && !matches!(value.as_str(), "--reuse" | "--no-call-limit")
+                && i + 1 < rest.len()
+            {
+                skip = true;
+            }
+            continue;
+        }
+        if request_id.replace(value.clone()).is_some() {
+            return Err(ParseError::Usage(format!(
+                "{APPROVE_USAGE}kv approvals approve: error: unrecognized arguments: {value}\n"
+            )));
+        }
+    }
+    let Some(request_id) = request_id else {
+        return Err(ParseError::Usage(format!(
+            "{APPROVE_USAGE}kv approvals approve: error: the following arguments are required: request_id\n"
+        )));
+    };
+    Ok(Some(Command::Approvals(ApprovalsAction::Approve {
+        request_id,
+        run_grant_flags,
+    })))
+}
+
+fn parse_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    if rest.first().is_some_and(|v| v == "-h" || v == "--help") {
+        return Err(ParseError::Help(format!(
+            "{POLICY_USAGE}\npositional arguments:\n  {{http,list,watch,request,allow,block,deny,prune}}\n    http                Manage HTTP broker route rules\n    list                List pending command-policy requests\n    watch               Show the terminal command-policy inbox\n    request             Create a blocked command-policy request\n    allow               Allow a pending command shape\n    block               Keep a pending command shape blocked\n    deny                ==SUPPRESS==\n    prune               Remove non-pending and expired policy request records\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    if rest.first().map(String::as_str) != Some("http") {
+        return parse_command_policy(rest);
+    }
+    let rest = &rest[1..];
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Policy(PolicyAction::HttpList(None))));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{HTTP_USAGE}\npositional arguments:\n  {{list,add,remove,rm}}\n    list                List HTTP broker route rules\n    add                 Add an HTTP broker route rule; unsafe calls need owner\n                        approval\n    remove (rm)         Remove an HTTP broker route rule\n\noptions:\n  -h, --help            show this help message and exit\n"
+        )));
+    }
+    let spec = match action.as_str() {
+        "list" => &HTTP_LIST,
+        "add" => &HTTP_ADD,
+        "remove" | "rm" => &HTTP_REMOVE,
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{HTTP_USAGE}kv policy http: error: argument http_policy_action: invalid choice: '{action}' (choose from 'list', 'add', 'remove', 'rm')\n"
+            )));
+        }
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let option = |key| {
+        parsed
+            .options
+            .iter()
+            .rev()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+    };
+    let repeated = |key| {
+        parsed
+            .options
+            .iter()
+            .filter(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+            .collect()
+    };
+    let mut pos = parsed.positionals.into_iter();
+    let provider = pos.next();
+    let action = match action.as_str() {
+        "list" => PolicyAction::HttpList(provider),
+        "add" => PolicyAction::HttpAdd {
+            provider: provider.unwrap_or_default(),
+            rule: Box::new(HttpRuleOptions {
+                id: option("--id").unwrap_or_default(),
+                methods: repeated("--method"),
+                path: option("--path"),
+                path_prefix: option("--path-prefix"),
+                query_keys: repeated("--query-key"),
+                allowed_headers: repeated("--header"),
+            }),
+        },
+        _ => PolicyAction::HttpRemove {
+            provider: provider.unwrap_or_default(),
+            id: pos.next().unwrap_or_default(),
+        },
+    };
+    Ok(Some(Command::Policy(action)))
+}
+
+fn parse_command_policy(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::command_policy::CommandPolicyAction as Action;
+    let Some(name) = rest.first() else {
+        return Ok(Some(Command::Policy(PolicyAction::Command(Action::List(
+            false,
+        )))));
+    };
+    let mut spec = Spec {
+        name: "policy list",
+        usage: "usage: kv policy list [-h] [--all]\n",
+        help: "\noptions:\n  -h, --help  show this help message and exit\n",
+        env: false,
+        positionals: &[],
+        flags: &[(
+            "--all",
+            "  --all       Include allowed, blocked, and expired requests\n",
+        )],
+        options: &[],
+    };
+    match name.as_str() {
+        "list" => {}
+        "allow" | "block" | "deny" => {
+            spec.name = match name.as_str() {
+                "allow" => "policy allow",
+                "block" => "policy block",
+                _ => "policy deny",
+            };
+            spec.usage = match name.as_str() {
+                "allow" => "usage: kv policy allow [-h] [--reason REASON] request_id\n",
+                "block" => "usage: kv policy block [-h] [--reason REASON] request_id\n",
+                _ => "usage: kv policy deny [-h] [--reason REASON] request_id\n",
+            };
+            spec.help = "\npositional arguments:\n  request_id       Command-policy request ID\n\noptions:\n  -h, --help       show this help message and exit\n";
+            spec.positionals = &["request_id"];
+            spec.flags = &[];
+            spec.options = &[(
+                "--reason",
+                "  --reason REASON  Human note stored with the decision\n",
+            )];
+        }
+        "prune" => {
+            spec.name = "policy prune";
+            spec.usage = "usage: kv policy prune [-h]\n";
+            spec.flags = &[];
+        }
+        "watch" => {
+            spec.name = "policy watch";
+            spec.usage = "usage: kv policy watch [-h] [--all] [--follow] [--interval INTERVAL]\n";
+            spec.help = "\noptions:\n  -h, --help           show this help message and exit\n";
+            spec.flags = &[
+                (
+                    "--all",
+                    "  --all                Include allowed, blocked, and expired requests\n",
+                ),
+                (
+                    "--follow",
+                    "  --follow             Keep refreshing until interrupted\n",
+                ),
+            ];
+            spec.options = &[(
+                "--interval",
+                "  --interval INTERVAL  Refresh interval for --follow\n",
+            )];
+        }
+        "request" => {
+            spec.name = "policy request";
+            spec.usage = "usage: kv policy request [-h] [--ttl TTL] [--cwd CWD] [--source SOURCE]\n                         [--client CLIENT] [--session-id SESSION_ID]\n                         [--reason REASON]\n                         ...\n";
+            spec.help = "\npositional arguments:\n  cmd                   Command requesting policy review\n\noptions:\n  -h, --help            show this help message and exit\n";
+            spec.flags = &[];
+            spec.options = &[
+                (
+                    "--ttl",
+                    "  --ttl TTL             Pending request lifetime in seconds (default: 900)\n",
+                ),
+                (
+                    "--cwd",
+                    "  --cwd CWD             Working directory for the command (default: current\n                        directory)\n",
+                ),
+                (
+                    "--source",
+                    "  --source SOURCE       Optional requester source to bind, such as mcp\n",
+                ),
+                (
+                    "--client",
+                    "  --client CLIENT       Optional client name to bind, such as codex\n",
+                ),
+                (
+                    "--session-id",
+                    "  --session-id SESSION_ID\n                        Optional agent/session ID to bind\n",
+                ),
+                (
+                    "--reason",
+                    "  --reason REASON       Human note stored with the request\n",
+                ),
+            ];
+        }
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{POLICY_USAGE}kv policy: error: argument policy_action: invalid choice: '{name}' (choose from 'http', 'list', 'watch', 'request', 'allow', 'block', 'deny', 'prune')\n"
+            )));
+        }
+    }
+    let mut args = &rest[1..];
+    if name == "request" {
+        let mut i = 0;
+        while i < args.len() {
+            if args[i] == "--" || !args[i].starts_with('-') {
+                break;
+            }
+            if matches!(args[i].as_str(), "-h" | "--help") {
+                i += 1;
+                break;
+            }
+            i += if args[i].contains('=') { 1 } else { 2 };
+        }
+        args = &args[..i.min(args.len())];
+    }
+    let parsed = parse_spec(&spec, args)?;
+    let reason = parsed
+        .options
+        .iter()
+        .rev()
+        .find(|(key, _)| *key == "--reason")
+        .map(|(_, v)| v.clone());
+    let id = parsed.positionals.first().cloned().unwrap_or_default();
+    let action = match name.as_str() {
+        "list" => PolicyAction::Command(Action::List(parsed.flags.contains(&"--all"))),
+        "allow" => PolicyAction::Command(Action::Allow { id, reason }),
+        "block" | "deny" => PolicyAction::Command(Action::Block {
+            id,
+            reason,
+            alias: name == "deny",
+        }),
+        "prune" => PolicyAction::Command(Action::Prune),
+        _ => PolicyAction::Unavailable,
+    };
+    Ok(Some(Command::Policy(action)))
+}
+
+fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::Provider(ProviderAction::List)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{PROVIDER_USAGE}\npositional arguments:\n  {{add,list,rm}}\n    add          Add a custom provider\n    list         List all providers\n    rm           Remove a custom provider\n\noptions:\n  -h, --help     show this help message and exit\n"
+        )));
+    }
+    let spec = match action.as_str() {
+        "add" => &PROVIDER_ADD,
+        "rm" => &PROVIDER_RM,
+        "list" => &PROVIDER_LIST,
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{PROVIDER_USAGE}kv provider: error: argument provider_action: invalid choice: '{action}' (choose from 'add', 'list', 'rm')\n"
+            )));
+        }
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let option = |key| {
+        parsed
+            .options
+            .iter()
+            .rev()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+    };
+    let name = parsed.positionals.first().cloned().unwrap_or_default();
+    let action = match action.as_str() {
+        "rm" => ProviderAction::Remove(name),
+        "list" => ProviderAction::List,
+        _ => ProviderAction::Add(Box::new(ProviderOptions {
+            name,
+            provider_type: option("--type").unwrap_or_else(|| "http".into()),
+            url: option("--url"),
+            host: option("--host"),
+            port: option("--port")
+                .and_then(|v| provider_port(&v))
+                .map(serde_json::Value::from),
+            database: option("--database"),
+            username: option("--username"),
+            secret: option("--secret"),
+            auth: option("--auth").unwrap_or_else(|| "bearer".into()),
+            query_param: option("--query-param"),
+            header_name: option("--header-name"),
+        })),
+    };
+    Ok(Some(Command::Provider(action)))
+}
+
+fn parse_approval_mode(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let Some(action) = rest.first() else {
+        return Ok(Some(Command::ApprovalMode(None)));
+    };
+    if action == "-h" || action == "--help" {
+        return Err(ParseError::Help(format!(
+            "{APPROVAL_MODE_USAGE}\npositional arguments:\n  {{status,set}}\n    status      Show approval security mode\n    set         Set approval security mode\n\noptions:\n  -h, --help    show this help message and exit\n"
+        )));
+    }
+    let spec = match action.as_str() {
+        "set" => &APPROVAL_MODE_SET_SPEC,
+        "status" => &APPROVAL_MODE_STATUS_SPEC,
+        _ => {
+            return Err(ParseError::Usage(format!(
+                "{APPROVAL_MODE_USAGE}kv approval-mode: error: argument approval_mode_action: invalid choice: '{action}' (choose from 'status', 'set')\n"
+            )));
+        }
+    };
+    let parsed = parse_spec(spec, &rest[1..])?;
+    let mode = parsed.positionals.into_iter().next();
+    if let Some(mode) = mode.as_deref()
+        && ![
+            "local-convenience",
+            "protected-approval",
+            "unsafe-convenience",
+        ]
+        .contains(&mode)
+    {
+        return Err(spec_error(
+            spec,
+            &format!(
+                "argument mode: invalid choice: '{mode}' (choose from 'local-convenience', 'protected-approval', 'unsafe-convenience')"
+            ),
+        ));
+    }
+    Ok(Some(Command::ApprovalMode(mode)))
+}
 
 const HISTORY_HELP_TEXT: &str = "\npositional arguments:\n  {list,show,restore,undo-rm,replace,forget,keep}\n    list                List a secret's versions (no values)\n    show                Print one old value (owner terminal only)\n    restore             Put an old value back as the current one\n    undo-rm             Bring back a removed secret\n    replace             Change a secret and wipe all its old values\n    forget              Wipe old values: one secret, --all in an environment,\n                        or --vault\n    keep                Show or set how many old values to keep (0..100)\n\noptions:\n  -h, --help            show this help message and exit\n";
 
