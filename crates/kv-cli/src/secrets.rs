@@ -147,6 +147,10 @@ pub fn cmd_get(p: &Palette, key: &str, env: Option<&str>) -> CmdResult {
     }
 }
 
+/// `kv env repair-names` (config-only recovery of pre-drawer registrations) is not in this
+/// build, so the advice names the manual route instead.
+pub const REPAIR_NAMES_UNAVAILABLE: &str = "Those registrations predate drawer storage; remove or rename them in .secrets/config.json (kv env repair-names is not in this build).";
+
 /// The names in a daemon `list` reply; `None` for an error reply or one without a
 /// `keys` array, so the caller falls back instead of showing an empty environment.
 fn daemon_names(reply: &Value) -> Option<Vec<String>> {
@@ -268,8 +272,18 @@ pub fn cmd_rm(p: &Palette, key: &str, env: Option<&str>, force: bool) -> CmdResu
     }
 }
 
-fn quote_dotenv_value(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
+/// Python `_quote_dotenv_value`, appended in place so no unzeroized copy of the value
+/// is left behind.
+fn push_quoted_dotenv_value(out: &mut String, value: &str) {
+    out.push('\'');
+    for c in value.chars() {
+        if c == '\'' {
+            out.push_str("'\"'\"'");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
 }
 
 #[cfg(unix)]
@@ -331,11 +345,11 @@ pub fn cmd_export(p: &Palette, env: Option<&str>, output: Option<&str>) -> CmdRe
             ),
         ));
     }
-    let mut content = String::new();
+    let mut content = zeroize::Zeroizing::new(String::new());
     for (key, value) in &sorted {
         content.push_str(key);
         content.push('=');
-        content.push_str(&quote_dotenv_value(value));
+        push_quoted_dotenv_value(&mut content, value);
         content.push('\n');
     }
     match output {
@@ -394,7 +408,7 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
         ui::warn(
             p,
             &format!(
-                "{} (unusable default; run kv env repair-names)",
+                "{} (unusable default; set a listed environment with kv env default)",
                 py_repr(&configured_default)
             ),
         );
@@ -406,19 +420,25 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
         );
     }
     if !invalid.is_empty() {
-        ui::info("Run 'kv env repair-names' to preview config-only recovery.");
+        ui::info(REPAIR_NAMES_UNAVAILABLE);
     }
     if unlocked {
-        let mut failed = false;
-        for env in &envs {
-            let mut fields = Map::new();
-            fields.insert("env".into(), Value::String(env.clone()));
-            match project::agent_request(&root, "list", fields)
-                .as_ref()
-                .and_then(daemon_names)
-            {
-                Some(names) => {
-                    let count = names.len();
+        // Every count is fetched before any row is printed, so a failed `list` for a
+        // later environment cannot leave earlier rows printed twice.
+        let counts: Option<Vec<usize>> = envs
+            .iter()
+            .map(|env| {
+                let mut fields = Map::new();
+                fields.insert("env".into(), Value::String(env.clone()));
+                project::agent_request(&root, "list", fields)
+                    .as_ref()
+                    .and_then(daemon_names)
+                    .map(|names| names.len())
+            })
+            .collect();
+        match counts {
+            Some(counts) => {
+                for (env, count) in envs.iter().zip(counts) {
                     let plural = if count != 1 { "s" } else { "" };
                     ui::info(&format!(
                         "  {} {}{env}{}  {}{count} secret{plural}{}",
@@ -429,15 +449,11 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
                         p.reset
                     ));
                 }
-                None => {
-                    failed = true;
-                    break;
-                }
             }
-        }
-        if failed {
-            for env in &envs {
-                ui::info(&format!("  {} {}{env}{}", ui::dot_on(p), p.green, p.reset));
+            None => {
+                for env in &envs {
+                    ui::info(&format!("  {} {}{env}{}", ui::dot_on(p), p.green, p.reset));
+                }
             }
         }
     } else {

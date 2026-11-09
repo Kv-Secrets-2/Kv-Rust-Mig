@@ -541,19 +541,6 @@ pub fn cmd_init(p: &Palette, location: Option<&str>, path: Option<&str>) -> CmdR
         ));
     }
     ui::blank();
-    ui::boxed(
-        p,
-        &[
-            "Add two-factor to kv's own prompts?",
-            "kv will then ask for a code from your phone as well as your passphrase.",
-            "Two-factor adds a code to kv's own prompts;",
-            "it does not encrypt anything further.",
-            "",
-            "Run: kv 2fa enable",
-        ],
-        BoxStyle::Info,
-    );
-    ui::blank();
     print_recovery_key_box(p, &token, false, &target.root, &wrap)?;
     ui::blank();
     ui::info(&format!("{}Quick start:{}", p.white, p.reset));
@@ -576,15 +563,6 @@ pub fn cmd_init(p: &Palette, location: Option<&str>, path: Option<&str>) -> CmdR
         p.reset
     ));
     ui::info("  Review with kv vault approve-config, then start or restart the daemon.");
-    ui::blank();
-    ui::info(&format!("{}Editor setup is explicit:{}", p.white, p.reset));
-    ui::cmd(
-        p,
-        "kv setup claude-code",
-        "Connect Claude Code for this workspace",
-    );
-    ui::cmd(p, "kv setup cursor", "Connect Cursor for this workspace");
-    ui::cmd(p, "kv setup vscode", "Connect VS Code / Copilot");
     ui::blank();
     ui::info(&format!("{}Environments:{}", p.white, p.reset));
     ui::info(&format!(

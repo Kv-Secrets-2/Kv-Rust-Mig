@@ -294,6 +294,48 @@ struct Parsed {
     options: Vec<(&'static str, String)>,
 }
 
+/// argparse `_parse_optional`: `--name=value` and `-x=value` split at the first `=`
+/// when the left side is an option; otherwise a single-dash argument longer than two
+/// characters whose first two name a value-taking option (`-eprod`, `-oFILE`) carries
+/// the rest as its value. Boolean flags take no attached value: `-fx` stays unknown.
+fn split_option(spec: &Spec, arg: &str) -> (String, Option<String>) {
+    let takes_value = |name: &str| {
+        (spec.env && (name == "-e" || name == "--env"))
+            || spec.options.iter().any(|(option, text)| {
+                *option == name
+                    || text
+                        .trim_start()
+                        .split(',')
+                        .map(|s| s.trim().split(' ').next().unwrap_or(""))
+                        .any(|alias| alias == name)
+            })
+    };
+    let is_option = |name: &str| {
+        takes_value(name)
+            || spec.flags.iter().any(|(flag, text)| {
+                *flag == name
+                    || text
+                        .trim_start()
+                        .split(',')
+                        .map(|s| s.trim().split(' ').next().unwrap_or(""))
+                        .any(|alias| alias == name)
+            })
+    };
+    if let Some((name, value)) = arg.split_once('=')
+        && (arg.starts_with("--") || is_option(name))
+    {
+        return (name.to_owned(), Some(value.to_owned()));
+    }
+    if let (Some(short), Some(value)) = (arg.get(..2), arg.get(2..))
+        && !arg.starts_with("--")
+        && !value.is_empty()
+        && takes_value(short)
+    {
+        return (short.to_owned(), Some(value.to_owned()));
+    }
+    (arg.to_owned(), None)
+}
+
 fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
     let mut parsed = Parsed {
         positionals: Vec::new(),
@@ -325,12 +367,7 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                 }
                 return Err(ParseError::Help(help));
             }
-            let (name, inline) = match arg.split_once('=') {
-                Some((name, value)) if arg.starts_with("--") => {
-                    (name.to_owned(), Some(value.to_owned()))
-                }
-                _ => (arg.clone(), None),
-            };
+            let (name, inline) = split_option(spec, arg);
             if spec.env && (name == "-e" || name == "--env") {
                 let value = match inline {
                     Some(value) => value,
@@ -582,6 +619,7 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
         parsed
             .options
             .iter()
+            .rev()
             .find(|(n, _)| *n == name)
             .map(|(_, v)| v.clone())
     };
@@ -623,6 +661,7 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
             output: parsed
                 .options
                 .into_iter()
+                .rev()
                 .find(|(name, _)| *name == "-o")
                 .map(|(_, value)| value),
         },
@@ -1986,6 +2025,7 @@ mod tests {
                 .ends_with("kv ls: error: argument --reveal: ignored explicit argument 'true'\n")
         );
         assert!(usage_error(&["rm", "KEY", "--force="]).contains("ignored explicit argument ''"));
+        assert!(usage_error(&["rm", "-fx", "KEY"]).contains("unrecognized arguments: -fx KEY"));
         assert!(
             usage_error(&["history", "forget", "KEY", "--all=true"])
                 .contains("error: argument --all: ignored explicit argument 'true'")
@@ -1994,5 +2034,48 @@ mod tests {
             parse(&args(&["rm", "KEY", "--force"])),
             Ok(Some(Command::Rm { force: true, .. }))
         ));
+    }
+
+    #[test]
+    fn value_options_take_attached_values_and_the_last_occurrence_wins_like_argparse() {
+        let parsed = |args: &[&str]| {
+            let argv: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+            match parse(&argv) {
+                Ok(Some(command)) => command,
+                _ => panic!("{args:?} should parse"),
+            }
+        };
+        for args in [
+            &["export", "-eprod", "-oFILE"][..],
+            &["export", "-e=prod", "-o=FILE"],
+            &["export", "-e", "prod", "-o", "FILE"],
+            &["export", "--env=prod", "--output=FILE"],
+            &[
+                "export",
+                "-o",
+                "first.env",
+                "-e",
+                "dev",
+                "-o",
+                "FILE",
+                "-eprod",
+            ],
+        ] {
+            match parsed(args) {
+                Command::Export { env, output } => {
+                    assert_eq!(env.as_deref(), Some("prod"), "{args:?}");
+                    assert_eq!(output.as_deref(), Some("FILE"), "{args:?}");
+                }
+                _ => panic!("{args:?}"),
+            }
+        }
+        match parsed(&["export", "-eprod=x"]) {
+            Command::Export { env, .. } => assert_eq!(env.as_deref(), Some("prod=x")),
+            _ => panic!("-eprod=x"),
+        }
+        match parsed(&["init", "--location", "global", "--location", "project"]) {
+            Command::Init { location, .. } => assert_eq!(location.as_deref(), Some("project")),
+            _ => panic!("--location twice"),
+        }
     }
 }
