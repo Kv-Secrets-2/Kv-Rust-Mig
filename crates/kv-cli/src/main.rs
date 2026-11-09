@@ -10,6 +10,7 @@ mod history;
 mod hook;
 mod init;
 mod lifecycle;
+mod preflight;
 mod project;
 mod registry;
 mod render;
@@ -114,5 +115,6 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
             },
         ),
         Vault(action) => vaultcmd::cmd_vault(p, action),
+        Preflight(args) => preflight::run(p, args),
     }
 }

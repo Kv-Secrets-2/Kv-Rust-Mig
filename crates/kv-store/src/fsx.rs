@@ -7,9 +7,16 @@ use crate::StoreError;
 
 pub const VAULT_FILE_LIMIT: usize = 64 * 1024 * 1024;
 
+/// A storage lock is owned by the thread whose lock stack records it.
+///
+/// ```compile_fail
+/// fn transferable<T: Send>() {}
+/// transferable::<kv_store::fsx::StorageLock>();
+/// ```
 pub struct StorageLock {
     identity: PathBuf,
     _file: File,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 pub(crate) struct ConfigLock {
@@ -550,6 +557,7 @@ pub fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
     Ok(StorageLock {
         identity,
         _file: file,
+        _thread: std::marker::PhantomData,
     })
 }
 
@@ -640,6 +648,22 @@ impl Drop for StorageLock {
 impl Drop for ConfigLock {
     fn drop(&mut self) {
         pop_lock(2, &self.identity);
+    }
+}
+
+pub fn require_storage_lock(secrets_dir: &Path) -> Result<(), StoreError> {
+    let identity = lock_identity(secrets_dir, "storage.lock")?;
+    if LOCK_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .any(|held| held.rank == 1 && held.identity == identity)
+    }) {
+        Ok(())
+    } else {
+        Err(StoreError::LockOrder(
+            "required vault lock is not held by this thread".into(),
+        ))
     }
 }
 

@@ -91,16 +91,18 @@ short names and explicitly verify the socket path fits the macOS/Linux limit.
    exactly one validated-reference marker under its test name. Missing tests,
    skipped comparisons, ignored tests, duplicate markers, unexpected comparison
    markers and inconsistent result summaries fail. The inventory currently has
-   **83 comparison tests**; individual tests contain many cases. These include
+   **90 comparison tests**; individual tests contain many cases. These include
    socket framing/timeouts, daemon shutdown, audit-chain interoperability,
    failure accounting, warning delivery, ordinary API one-call permits, and the owner
    CLI flow (init, secrets, history, environments, backups, approve-config, unlock/
    status/lock) driven on a pseudo-terminal, and the Claude Code hook's
    decisions ([stage 8 notes](stage8-hook.md)), the `kv run` sandbox
    foundations ([stage 6a notes](stage6a-sandbox.md)), the grants and capability
-   tokens, and the daemon's `run` command with `kv run`
-   ([stage 6c notes](stage6c-run.md)). The audit corruption tests also
-   verify the documented conservative handling of a reference exception.
+   tokens, the daemon's `run` command with `kv run`
+   ([stage 6c notes](stage6c-run.md)), and preflight scans, manifests,
+   run risk cards and CLI transcripts ([stage 9b2 notes](stage9b2-preflight.md)).
+   The audit corruption tests also verify the documented conservative handling
+   of a reference exception.
 4. Produce Rust crypto vectors and require Python to open them. On the canonical
    lane, also exhaustively verify the generated Unicode digit table.
 5. Write `report.json` plus build, discovery, test and reverse-check logs. A failed
