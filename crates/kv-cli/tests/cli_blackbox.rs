@@ -252,7 +252,7 @@ fn run_script(python: &str, cmd: &[&str], scratch: &Scratch) -> Vec<(Step, i32, 
 }
 
 fn normalise(text: &str, scratch: &Path) -> String {
-    let mut t = text.replace(scratch.to_str().unwrap(), "SCRATCH");
+    let mut t = drop_unported_guidance(&text.replace(scratch.to_str().unwrap(), "SCRATCH"));
     let rules: [(&str, &str); 6] = [
         (r"\d{4}-\d{2}-\d{2}T[\d:.]+(Z|\+00:00)", "STAMP"),
         (r"PID \d+", "PID N"),
@@ -265,6 +265,51 @@ fn normalise(text: &str, scratch: &Path) -> String {
         t = regex_lite_replace(&t, pattern, replacement);
     }
     t
+}
+
+/// Advice naming commands this build does not carry (`kv run`, `kv 2fa`, `kv setup`,
+/// `kv policy`, `kv env repair-names`) is worded differently on each side: the Python
+/// lines recommend them, the Rust lines say they are not in this build. Such lines are
+/// dropped from both outputs; a box with such a line (the two-factor box after init)
+/// is dropped whole.
+fn drop_unported_guidance(text: &str) -> String {
+    const MARKERS: [&str; 8] = [
+        "kv run",
+        "kv 2fa",
+        "kv setup",
+        "kv policy",
+        "repair-names",
+        "not in this build",
+        "Editor setup is explicit",
+        "kv export",
+    ];
+    let flagged = |line: &str| MARKERS.iter().any(|m| line.contains(m));
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim_start().starts_with('\u{250c}') {
+            let end = lines[i..]
+                .iter()
+                .position(|l| l.trim_start().starts_with('\u{2514}'))
+                .map_or(lines.len(), |k| i + k + 1);
+            if !lines[i..end].iter().any(|l| flagged(l)) {
+                out.extend_from_slice(&lines[i..end]);
+            }
+            i = end;
+            continue;
+        }
+        if !flagged(line) {
+            out.push(line);
+        }
+        i += 1;
+    }
+    let mut joined = out.join("\n");
+    if text.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
 }
 
 /// A tiny regex substitute: only the patterns above are needed, so they are matched

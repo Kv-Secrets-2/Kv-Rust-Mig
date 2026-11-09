@@ -4,6 +4,8 @@
 
 use std::io::{self, BufRead, Read, Write};
 
+use zeroize::Zeroizing;
+
 #[derive(Debug)]
 pub enum PromptError {
     /// Python `EOFError`: the input ended before a line did.
@@ -87,8 +89,8 @@ pub fn input(prompt: &str) -> Result<String, PromptError> {
 }
 
 #[cfg(unix)]
-fn read_line_fd(fd: &impl rustix::fd::AsFd) -> Result<Vec<u8>, PromptError> {
-    let mut answer = Vec::new();
+fn read_line_fd(fd: &impl rustix::fd::AsFd) -> Result<Zeroizing<Vec<u8>>, PromptError> {
+    let mut answer = Zeroizing::new(Vec::new());
     let mut byte = [0u8; 1];
     loop {
         let n = rustix::io::read(fd, &mut byte).map_err(io::Error::from)?;
@@ -136,7 +138,7 @@ pub fn getpass(prompt: &str) -> Result<String, PromptError> {
         let _ = err.write_all(prompt.as_bytes());
         let _ = err.flush();
         drop(err);
-        let mut line = Vec::new();
+        let mut line = Zeroizing::new(Vec::new());
         let read = io::stdin().lock().read_until(b'\n', &mut line)?;
         if read == 0 {
             return Err(PromptError::Eof);
@@ -179,7 +181,9 @@ fn hidden_read(
     if lossy {
         Ok(String::from_utf8_lossy(&answer).into_owned())
     } else {
-        String::from_utf8(answer).map_err(|_| PromptError::Refused(NOT_TEXT.to_owned()))
+        std::str::from_utf8(&answer)
+            .map(str::to_owned)
+            .map_err(|_| PromptError::Refused(NOT_TEXT.to_owned()))
     }
 }
 

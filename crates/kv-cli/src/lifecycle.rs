@@ -746,7 +746,7 @@ pub fn cmd_status(p: &Palette) -> CmdResult {
                 ));
             }
             _ => ui::info(&format!(
-                "  {} backup codes {}\u{2014} kv 2fa backup-codes rotate{}",
+                "  {} backup codes {}\u{2014} none left (kv 2fa is not in this build){}",
                 dot_off(p),
                 p.dim,
                 p.reset
@@ -754,7 +754,7 @@ pub fn cmd_status(p: &Palette) -> CmdResult {
         }
     } else {
         ui::info(&format!(
-            "  {} 2FA {}\u{2014} kv 2fa enable{}",
+            "  {} 2FA {}\u{2014} off (kv 2fa is not in this build){}",
             dot_off(p),
             p.dim,
             p.reset
@@ -805,7 +805,7 @@ pub fn cmd_status(p: &Palette) -> CmdResult {
         ui::warn(p, &format!("'{env}' (invalid registration; unavailable)"));
     }
     if !invalid.is_empty() {
-        ui::info("Run 'kv env repair-names' to preview config-only recovery.");
+        ui::info(crate::secrets::REPAIR_NAMES_UNAVAILABLE);
     }
     if unlocked {
         let mut counts = Vec::with_capacity(valid.len());
