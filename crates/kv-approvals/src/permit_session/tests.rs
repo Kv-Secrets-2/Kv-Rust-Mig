@@ -59,6 +59,9 @@ impl Fixture {
             header_names: &self.names,
             caller_headers: &self.headers,
             body_bytes: Some(b"{\"amount\":1}"),
+            grant_id: None,
+            run_id: None,
+            wait_seconds: None,
         }
     }
     fn request(&self) -> RequestCreated {

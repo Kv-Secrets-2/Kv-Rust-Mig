@@ -1053,6 +1053,9 @@ print(json.dumps({"python":list(sys.version_info[:2]),
             header_names: &[],
             caller_headers: &headers,
             body_bytes: Some(body.as_bytes()),
+            grant_id: None,
+            run_id: None,
+            wait_seconds: None,
         };
         let session = crate::permit_session::SessionPermits::new(binding);
         let error = session

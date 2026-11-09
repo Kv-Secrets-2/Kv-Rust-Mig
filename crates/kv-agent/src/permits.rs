@@ -118,12 +118,23 @@ pub(super) fn owner_register(
     signed_owner(trust, MessageKind::PermitRegisterAckV1, fields)
 }
 
+/// A capability run's one-call permit is signed for its grant and run, and waits
+/// as long as the owner chose for that grant (`_prepare_api_permit`'s keyword
+/// arguments).
+#[derive(Clone, Copy)]
+pub(super) struct RunBinding<'a> {
+    pub(super) grant_id: &'a str,
+    pub(super) run_id: &'a str,
+    pub(super) wait_seconds: Option<i64>,
+}
+
 pub(super) fn call_facts<'a>(
     environment: &'a str,
     provider_name: &'a str,
     provider: &'a Value,
     caller_headers: &'a Map<String, Value>,
     preview: &'a ApiPreview,
+    run: Option<RunBinding<'a>>,
 ) -> CallFacts<'a> {
     CallFacts {
         environment,
@@ -134,6 +145,9 @@ pub(super) fn call_facts<'a>(
         header_names: &preview.header_names,
         caller_headers,
         body_bytes: preview.body_bytes.as_deref(),
+        grant_id: run.map(|run| run.grant_id),
+        run_id: run.map(|run| run.run_id),
+        wait_seconds: run.and_then(|run| run.wait_seconds),
     }
 }
 
@@ -176,6 +190,7 @@ pub(super) fn prepare<'request>(
     caller: &ApiCaller,
     api_request: ApiRequest<'_>,
     policy_rule: Option<&Value>,
+    run: Option<RunBinding<'_>>,
 ) -> Result<&'request str, Value> {
     let permit_id = request.get("permit_id").and_then(Value::as_str);
     if let Some(id) = permit_id
@@ -184,7 +199,7 @@ pub(super) fn prepare<'request>(
         if over == WaitOver::First {
             let mut event = Map::new();
             event.insert("permit_id".into(), json!(id));
-            event.insert("grant_id".into(), Value::Null);
+            event.insert("grant_id".into(), json!(run.map(|run| run.grant_id)));
             event.insert(
                 "capability".into(),
                 json!(format!("api:{}", api_request.provider_name)),
@@ -213,6 +228,7 @@ pub(super) fn prepare<'request>(
         api_request.provider,
         headers,
         &preview,
+        run,
     );
     let Some(id) = permit_id else {
         trust.observe().map_err(hard_lock_error)?;

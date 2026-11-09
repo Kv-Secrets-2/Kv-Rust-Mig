@@ -40,6 +40,8 @@ use thiserror::Error;
 #[cfg(all(unix, test))]
 mod audit_reply_tests;
 #[cfg(unix)]
+mod capapi;
+#[cfg(unix)]
 mod capture;
 #[cfg(unix)]
 mod lifecycle;
@@ -1062,6 +1064,50 @@ fn handle_connection(
         )?;
         return Ok(());
     }
+    // Script-facing broker capabilities are authenticated by the scoped capability token
+    // itself, never by the daemon token: secret-bearing capsules hide ~/.kv.
+    if cmd == "cap_api" {
+        if let Err(error) = validate_http_call_request(request, true) {
+            replies.write(stream, &json!({"error":error}))?;
+            return Ok(());
+        }
+        let env = request
+            .get("env")
+            .and_then(Value::as_str)
+            .or_else(|| approved.get("default_env").and_then(Value::as_str))
+            .unwrap_or("dev");
+        let registered = kv_store::config::list_environments(root).unwrap_or_default();
+        if let Err(error) = kv_store::envname::validate_registered_name(env, &registered) {
+            // `_daemon_env_error`: the reason without the caller's text.
+            let text = error.to_string();
+            let shown = if text.starts_with("ambiguous environment name") {
+                "ambiguous environment name"
+            } else {
+                "invalid environment name"
+            };
+            replies.write(stream, &json!({"error":shown}))?;
+            return Ok(());
+        }
+        let response = capapi::handle(&capapi::CapCtx {
+            root,
+            store,
+            cache,
+            trust,
+            providers,
+            policy: http_policy,
+            caller: api_caller,
+            permits,
+            lifecycle,
+            connection,
+            shared,
+            audit,
+            env,
+            request,
+        });
+        let _ = capapi::audit(audit, providers, permits, request, &response);
+        replies.write(stream, &response)?;
+        return Ok(());
+    }
     let supplied = request.get("token").and_then(Value::as_str).unwrap_or("");
     if supplied.len() > 128 || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
         replies.write(stream, &json!({"error":"authentication required"}))?;
@@ -1779,6 +1825,14 @@ fn validate_run_request(request: &serde_json::Map<String, Value>) -> Result<(), 
 }
 
 fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), String> {
+    validate_http_call_request(request, false)
+}
+
+/// `_validate_agent_request` for `api` (daemon token) and `cap_api` (capability token).
+fn validate_http_call_request(
+    request: &serde_json::Map<String, Value>,
+    capability: bool,
+) -> Result<(), String> {
     fn string_field<'a>(
         request: &'a serde_json::Map<String, Value>,
         field: &str,
@@ -1816,6 +1870,12 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
     }
     if request.contains_key("reason") {
         string_field(request, "reason", 512, false, true)?;
+    }
+    if capability {
+        if request.contains_key("pause_id") {
+            string_field(request, "pause_id", 128, true, false)?;
+        }
+        string_field(request, "capability_token", 256, true, false)?;
     }
     string_field(request, "provider", 128, true, false)?;
     string_field(request, "path", 4096, true, false)?;
@@ -1855,6 +1915,9 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
                 return Err(format!("headers[{index}] value exceeds 4096 bytes"));
             }
         }
+    }
+    if capability && !request.get("run_identity").is_some_and(Value::is_object) {
+        return Err("run_identity must be an object".into());
     }
     Ok(())
 }
@@ -1971,6 +2034,7 @@ fn api_call_response(
             caller,
             api_request.clone(),
             decision.get("policy_rule"),
+            None,
         ) {
             Ok(id) => Some(id),
             Err(response) => return response,
@@ -1995,6 +2059,7 @@ fn api_call_response(
                                 provider,
                                 caller_headers,
                                 preview,
+                                None,
                             ),
                         )
                         .map_err(permits::invalid_error)
