@@ -442,16 +442,21 @@ fn stores_match_python() {
     let rust_in = base.join("rust_in.json");
     let rust_out = base.join("rust_out.json");
     std::fs::write(&rust_in, rust_case.to_string()).unwrap();
-    let status = Command::new(std::env::current_exe().unwrap())
+    let output = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "rust_probe", "--nocapture", "--test-threads=1"])
         .env_clear()
         .env("HOME", &home)
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("KV_GRANTS_STORE_PROBE_IN", &rust_in)
         .env("KV_GRANTS_STORE_PROBE_OUT", &rust_out)
-        .status()
+        .output()
         .unwrap();
-    assert!(status.success(), "rust probe failed");
+    assert!(
+        output.status.success(),
+        "rust probe failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let got: Value = serde_json::from_slice(&std::fs::read(&rust_out).unwrap()).unwrap();
 
     let mut mismatches = Vec::new();

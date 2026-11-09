@@ -102,19 +102,37 @@ impl Drop for StopSignalGuard {
 #[derive(Default)]
 struct SecretCache {
     environments: BTreeMap<String, BTreeMap<String, Zeroizing<String>>>,
+    markers: BTreeMap<String, Option<[u8; 32]>>,
 }
 
 #[cfg(unix)]
 impl SecretCache {
-    fn names(&mut self, store: &DrawerStore, env: &str) -> Result<Vec<String>, AgentError> {
-        if !self.environments.contains_key(env) {
-            let secrets = store
-                .list_secrets(env)?
-                .into_iter()
-                .collect::<BTreeMap<_, _>>();
+    /// `_SecretCache.get_env_secrets`: the cached environment, read again whenever its
+    /// storage marker differs from the one recorded with the values (another `kv set`,
+    /// `kv rm`, history or env command, from either implementation).
+    fn environment(
+        &mut self,
+        store: &DrawerStore,
+        env: &str,
+    ) -> Result<&BTreeMap<String, Zeroizing<String>>, AgentError> {
+        let current = store.env_storage_marker(env);
+        // No marker (no index, or one that cannot be read) is never fresh: read again so
+        // an index that appears corrupt reports its error instead of a cached empty list.
+        let fresh = current.is_some()
+            && self.environments.contains_key(env)
+            && self.markers.get(env).is_some_and(|seen| *seen == current);
+        if !fresh {
+            self.environments.remove(env);
+            self.markers.remove(env);
+            let (secrets, marker) = read_bound(store, env)?;
             self.environments.insert(env.to_owned(), secrets);
+            self.markers.insert(env.to_owned(), marker);
         }
-        Ok(self.environments[env].keys().cloned().collect())
+        Ok(&self.environments[env])
+    }
+
+    fn names(&mut self, store: &DrawerStore, env: &str) -> Result<Vec<String>, AgentError> {
+        Ok(self.environment(store, env)?.keys().cloned().collect())
     }
 
     fn counts(&self) -> (usize, usize) {
@@ -130,19 +148,31 @@ impl SecretCache {
         env: &str,
         name: &str,
     ) -> Result<Option<Zeroizing<String>>, AgentError> {
-        if !self.environments.contains_key(env) {
-            let secrets = store
-                .list_secrets(env)?
-                .into_iter()
-                .collect::<BTreeMap<_, _>>();
-            self.environments.insert(env.to_owned(), secrets);
-        }
-        Ok(self
-            .environments
-            .get(env)
-            .and_then(|items| items.get(name))
-            .cloned())
+        Ok(self.environment(store, env)?.get(name).cloned())
     }
+}
+
+/// `_SecretCache._read_bound`: the values with the marker of the version read; the
+/// marker before and after the read must agree, else it is read again.
+#[cfg(unix)]
+#[allow(clippy::type_complexity)]
+fn read_bound(
+    store: &DrawerStore,
+    env: &str,
+) -> Result<(BTreeMap<String, Zeroizing<String>>, Option<[u8; 32]>), AgentError> {
+    for _ in 0..3 {
+        let before = store.env_storage_marker(env);
+        let secrets = store
+            .list_secrets(env)?
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        if store.env_storage_marker(env) == before {
+            return Ok((secrets, before));
+        }
+    }
+    Err(AgentError(
+        "the environment's storage changed while kv read it".into(),
+    ))
 }
 
 #[derive(Debug, Error)]
@@ -2038,6 +2068,53 @@ fn signal_holder(file: &File, holder: libc::pid_t) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_cache_reloads_after_another_writer_changes_the_environment() {
+        let mut random = [0u8; 16];
+        getrandom::getrandom(&mut random).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "kv-agent-cache-{}",
+            random
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let master = || Key32::new(std::array::from_fn(|index| index as u8));
+        let daemon = DrawerStore::open(&dir, master());
+        let writer = DrawerStore::open(&dir, master());
+        let mut cache = SecretCache::default();
+
+        assert!(cache.names(&daemon, "dev").unwrap().is_empty());
+        writer.set_secret("dev", "A", "one", 10).unwrap();
+        assert_eq!(cache.names(&daemon, "dev").unwrap(), ["A"]);
+        assert_eq!(
+            cache.get(&daemon, "dev", "A").unwrap().unwrap().as_str(),
+            "one"
+        );
+
+        writer.set_secret("dev", "A", "two", 10).unwrap();
+        writer.set_secret("dev", "B", "three", 10).unwrap();
+        assert_eq!(
+            cache.get(&daemon, "dev", "A").unwrap().unwrap().as_str(),
+            "two"
+        );
+        assert_eq!(cache.names(&daemon, "dev").unwrap(), ["A", "B"]);
+
+        assert!(writer.remove_secret("dev", "A", 10).unwrap());
+        assert!(cache.get(&daemon, "dev", "A").unwrap().is_none());
+        assert_eq!(cache.names(&daemon, "dev").unwrap(), ["B"]);
+
+        writer.restore_version("dev", "A", 2, 10).unwrap();
+        assert_eq!(
+            cache.get(&daemon, "dev", "A").unwrap().unwrap().as_str(),
+            "two"
+        );
+        assert_eq!(cache.counts(), (1, 2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn hardening_has_python_memory_status_shape() {

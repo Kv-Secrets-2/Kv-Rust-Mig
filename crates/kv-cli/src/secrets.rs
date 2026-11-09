@@ -147,6 +147,20 @@ pub fn cmd_get(p: &Palette, key: &str, env: Option<&str>) -> CmdResult {
     }
 }
 
+/// The names in a daemon `list` reply; `None` for an error reply or one without a
+/// `keys` array, so the caller falls back instead of showing an empty environment.
+fn daemon_names(reply: &Value) -> Option<Vec<String>> {
+    if reply.get("error").is_some() {
+        return None;
+    }
+    reply
+        .get("keys")?
+        .as_array()?
+        .iter()
+        .map(|key| key.as_str().map(str::to_owned))
+        .collect()
+}
+
 fn print_names(p: &Palette, env: &str, names: &[String]) {
     if names.is_empty() {
         ui::header(p, &format!("{env} {}(empty){}", p.dim, p.reset));
@@ -190,17 +204,10 @@ pub fn cmd_ls(p: &Palette, env: Option<&str>, reveal: bool) -> CmdResult {
     {
         let mut fields = Map::new();
         fields.insert("env".into(), Value::String(env.clone()));
-        if let Some(result) = project::agent_request(&root, "list", fields) {
-            let names: Vec<String> = result
-                .get("keys")
-                .and_then(Value::as_array)
-                .map(|keys| {
-                    keys.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
+        if let Some(names) = project::agent_request(&root, "list", fields)
+            .as_ref()
+            .and_then(daemon_names)
+        {
             print_names(p, &env, &names);
             return Ok(());
         }
@@ -406,12 +413,12 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
         for env in &envs {
             let mut fields = Map::new();
             fields.insert("env".into(), Value::String(env.clone()));
-            match project::agent_request(&root, "list", fields) {
-                Some(result) => {
-                    let count = result
-                        .get("keys")
-                        .and_then(Value::as_array)
-                        .map_or(0, Vec::len);
+            match project::agent_request(&root, "list", fields)
+                .as_ref()
+                .and_then(daemon_names)
+            {
+                Some(names) => {
+                    let count = names.len();
                     let plural = if count != 1 { "s" } else { "" };
                     ui::info(&format!(
                         "  {} {}{env}{}  {}{count} secret{plural}{}",
@@ -450,4 +457,28 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
     ui::cmd(p, "kv run -e <env> CMD", "Run with specific environment");
     ui::blank();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::daemon_names;
+
+    #[test]
+    fn daemon_list_errors_are_not_empty_environments() {
+        assert_eq!(
+            daemon_names(&json!({"keys":["A","B"],"env":"dev"})),
+            Some(vec!["A".to_owned(), "B".to_owned()])
+        );
+        assert_eq!(daemon_names(&json!({"keys":[],"env":"dev"})), Some(vec![]));
+        assert_eq!(
+            daemon_names(&json!({"error":"drawer index is corrupt"})),
+            None
+        );
+        assert_eq!(daemon_names(&json!({"keys":[],"error":"x"})), None);
+        assert_eq!(daemon_names(&json!({"env":"dev"})), None);
+        assert_eq!(daemon_names(&json!({"keys":"A"})), None);
+        assert_eq!(daemon_names(&json!({"keys":["A",1]})), None);
+    }
 }
