@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 base64 = "0.22"
 kv-crypto = { path = "../kv-crypto" }
+kv-store = { path = "../kv-store" }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -16,6 +17,7 @@ url = "2"
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
+rcgen = "0.13"
 
 [lints]
 workspace = true

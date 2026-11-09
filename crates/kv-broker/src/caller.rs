@@ -8,10 +8,13 @@ use url::{Host, Url};
 
 use crate::ERROR_BODY_WITHHELD;
 use crate::policy::{http_headers_security_error, http_request_security_error};
-use crate::providers::{api_body_security_error, build_auth, build_url, validate_http_provider};
-use crate::redact::{hide, hide_cut, hide_value, output_needles};
+use crate::providers::{
+    api_body_security_error, build_auth, build_url, quote_plus, shown_auth_url,
+    validate_http_provider,
+};
+use crate::redact::{hide, hide_cut, hide_value, lowercase_percent_escapes, output_needles};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ApiRequest<'a> {
     pub provider_name: &'a str,
     pub provider: &'a Value,
@@ -23,6 +26,35 @@ pub struct ApiRequest<'a> {
     pub secrets_for_redact: &'a Value,
     pub timeout: Duration,
     pub max_response_bytes: usize,
+}
+
+/// The request facts checked by a one-call permit. Authentication header values
+/// and the credential-bearing query URL are never exposed here. Body bytes are
+/// caller content and must not be logged or included in ordinary daemon replies.
+pub struct ApiPreview {
+    pub method: String,
+    pub url: String,
+    pub header_names: Vec<String>,
+    pub body_bytes: Option<Vec<u8>>,
+}
+
+impl ApiPreview {
+    pub fn body_length(&self) -> usize {
+        self.body_bytes.as_ref().map_or(0, Vec::len)
+    }
+}
+
+// Deliberately no Debug implementation: the actual URL, headers and redaction
+// needles contain authentication material that the preview must never reveal.
+struct PreparedRequest {
+    preview: ApiPreview,
+    url: String,
+    parsed: Url,
+    pinned_ip: Option<IpAddr>,
+    headers: std::collections::BTreeMap<String, String>,
+    timeout: Duration,
+    max_response_bytes: usize,
+    needles: crate::Needles,
 }
 
 #[doc(hidden)]
@@ -114,6 +146,51 @@ impl ApiCaller {
         request: ApiRequest<'_>,
         before_send: impl FnOnce() -> Result<G, Value>,
     ) -> Value {
+        self.call_with_checks(request, |_| Ok(()), |()| before_send())
+    }
+
+    /// Validate and prepare request facts without creating an HTTP transport or
+    /// committing a provider operation. Custom URL safety checks still run.
+    pub fn preview(&self, request: ApiRequest<'_>) -> Result<ApiPreview, Value> {
+        self.prepare(request).map(|prepared| prepared.preview)
+    }
+
+    /// Prepare the request again, check the final facts, then admit it directly
+    /// before the transport. The check's value is passed to admission so callers
+    /// can atomically spend the matched permit and commit the work window. A
+    /// refusal from either callback is returned unchanged and sends nothing.
+    pub fn call_with_checks<C, G>(
+        &self,
+        request: ApiRequest<'_>,
+        request_check: impl FnOnce(&ApiPreview) -> Result<C, Value>,
+        before_send: impl FnOnce(C) -> Result<G, Value>,
+    ) -> Value {
+        let prepared = match self.prepare(request) {
+            Ok(prepared) => prepared,
+            Err(refusal) => return refusal,
+        };
+        let checked = match request_check(&prepared.preview) {
+            Ok(checked) => checked,
+            Err(refusal) => return refusal,
+        };
+        let _committed = match before_send(checked) {
+            Ok(guard) => guard,
+            Err(refusal) => return refusal,
+        };
+        self.send(
+            &prepared.url,
+            &prepared.parsed,
+            prepared.pinned_ip,
+            &prepared.preview.method,
+            prepared.preview.body_bytes.as_deref(),
+            &prepared.headers,
+            prepared.timeout,
+            prepared.max_response_bytes,
+            &prepared.needles,
+        )
+    }
+
+    fn prepare(&self, request: ApiRequest<'_>) -> Result<PreparedRequest, Value> {
         let ApiRequest {
             provider_name,
             provider,
@@ -127,23 +204,25 @@ impl ApiCaller {
             max_response_bytes,
         } = request;
         if provider.is_null() {
-            return json!({"error":format!("unknown provider: {provider_name}. available: ")});
+            return Err(json!({"error":format!("unknown provider: {provider_name}. available: ")}));
         }
         if provider
             .get("provider_type")
             .and_then(Value::as_str)
             .is_some_and(|kind| kind != "http")
         {
-            return json!({"error":format!("provider '{provider_name}' is not an HTTP API provider")});
+            return Err(
+                json!({"error":format!("provider '{provider_name}' is not an HTTP API provider")}),
+            );
         }
         if let Err(error) = validate_http_provider(provider) {
-            return json!({
+            return Err(json!({
                 "error":format!("invalid HTTP provider: {error}"),
                 "error_code":"http_provider_invalid"
-            });
+            }));
         }
         if let Some(error) = api_body_security_error(provider, body) {
-            return json!({"error":error});
+            return Err(json!({"error":error}));
         }
         let empty_headers = Value::Object(Default::default());
         let headers = if extra_headers.is_null() {
@@ -157,14 +236,15 @@ impl ApiCaller {
             body,
             headers,
         ) {
-            return json!({"error":error,"error_code":"http_request_invalid"});
+            return Err(json!({"error":error,"error_code":"http_request_invalid"}));
         }
         let body_bytes = match body {
             None | Some(Value::Null) => None,
             Some(Value::String(text)) => Some(text.as_bytes().to_vec()),
-            Some(value @ (Value::Array(_) | Value::Object(_))) => {
-                Some(python_json(value).into_bytes())
-            }
+            Some(value @ (Value::Array(_) | Value::Object(_))) => Some(
+                kv_store::pyjson::to_vec_python(value, false)
+                    .map_err(|_| json!({"error":"request failed: ValueError"}))?,
+            ),
             Some(_) => None,
         };
         let defaults = provider
@@ -172,7 +252,7 @@ impl ApiCaller {
             .cloned()
             .unwrap_or_else(|| json!({}));
         if let Some(error) = http_headers_security_error(&defaults) {
-            return json!({"error":error,"error_code":"http_request_invalid"});
+            return Err(json!({"error":error,"error_code":"http_request_invalid"}));
         }
         if provider
             .get("auth_type")
@@ -185,20 +265,20 @@ impl ApiCaller {
                 .cloned()
                 .unwrap_or_else(|| Value::String("Authorization".into()));
             let Some(header_name) = header_name.as_str() else {
-                return json!({
+                return Err(json!({
                     "error":"provider auth header name must be a string",
                     "error_code":"http_request_invalid"
-                });
+                }));
             };
             if let Some(error) =
                 http_headers_security_error(&json!({header_name:"broker-owned credential"}))
             {
-                return json!({"error":error,"error_code":"http_request_invalid"});
+                return Err(json!({"error":error,"error_code":"http_request_invalid"}));
             }
         }
         let (mut auth_headers, auth_query) = match build_auth(provider, secret_value) {
             Ok(auth) => auth,
-            Err(error) => return json!({"error":format!("request failed: {error}")}),
+            Err(error) => return Err(json!({"error":format!("request failed: {error}")})),
         };
         let auth_type = provider
             .get("auth_type")
@@ -207,9 +287,9 @@ impl ApiCaller {
         let mut exact = vec![secret_value.to_owned()];
         if auth_type == "query" {
             for value in auth_query.values() {
-                let encoded =
-                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
+                let encoded = quote_plus(value);
                 exact.push(value.clone());
+                exact.push(lowercase_percent_escapes(&encoded));
                 exact.push(encoded);
             }
         } else {
@@ -248,10 +328,10 @@ impl ApiCaller {
             .map(|name| name.to_ascii_lowercase())
             .collect::<std::collections::BTreeSet<_>>();
         if let Some(name) = caller_names.intersection(&provider_names).next() {
-            return json!({
+            return Err(json!({
                 "error":format!("caller header collides with provider-owned header: {name}"),
                 "error_code":"http_request_invalid"
-            });
+            }));
         }
         if caller_names.iter().any(|name| {
             matches!(
@@ -259,10 +339,10 @@ impl ApiCaller {
                 "authorization" | "cookie" | "proxy-authorization" | "x-api-key"
             )
         }) {
-            return json!({
+            return Err(json!({
                 "error":"caller authentication headers are not allowed",
                 "error_code":"http_request_invalid"
-            });
+            }));
         }
         if !auth_query.is_empty() && path.contains('?') {
             let query = path.split_once('?').map_or("", |(_, query)| query);
@@ -273,27 +353,44 @@ impl ApiCaller {
                 .keys()
                 .any(|key| keys.clone().any(|candidate| candidate == key))
             {
-                return json!({
+                return Err(json!({
                     "error":"caller query collides with broker-owned authentication",
                     "error_code":"http_request_invalid"
-                });
+                }));
             }
         }
         let url = match build_url(provider, path, &auth_query) {
             Ok(url) => url,
-            Err(error) => return json!({"error":error}),
+            Err(error) => return Err(json!({"error":error})),
         };
-        let parsed = match Url::parse(&url) {
-            Ok(parsed) => parsed,
-            Err(_) => return json!({"error":"SSRF blocked: empty hostname"}),
+        let shown_url = if auth_query.is_empty() {
+            url.clone()
+        } else {
+            shown_auth_url(provider, path, &auth_query).map_err(|error| json!({"error":error}))?
         };
+        for (name, value) in headers.as_object().into_iter().flatten() {
+            if let Some(value) = value.as_str() {
+                auth_headers.insert(name.clone(), value.to_owned());
+            }
+        }
+        if let Some(error) = http_headers_security_error(&Value::Object(
+            auth_headers
+                .iter()
+                .map(|(name, value)| (name.clone(), Value::String(value.clone())))
+                .collect(),
+        )) {
+            return Err(json!({"error":error,"error_code":"http_request_invalid"}));
+        }
+        let parsed =
+            Url::parse(&url).map_err(|_| json!({"error":"SSRF blocked: empty hostname"}))?;
         let pinned_ip = if is_builtin_url(provider) {
             None
         } else {
-            match self.safety.check(&parsed) {
-                Ok(ip) => Some(ip),
-                Err(error) => return json!({"error":format!("SSRF blocked: {error}")}),
-            }
+            Some(
+                self.safety
+                    .check(&parsed)
+                    .map_err(|error| json!({"error":format!("SSRF blocked: {error}")}))?,
+            )
         };
         let mut redact = secrets_for_redact.clone();
         if !secret_value.is_empty() {
@@ -307,34 +404,26 @@ impl ApiCaller {
         }
         let exact = exact.iter().map(String::as_str).collect::<Vec<_>>();
         let needles = output_needles(&redact, &exact);
-        for (name, value) in headers.as_object().into_iter().flatten() {
-            if let Some(value) = value.as_str() {
-                auth_headers.insert(name.clone(), value.to_owned());
-            }
-        }
-        if let Some(error) = http_headers_security_error(&Value::Object(
-            auth_headers
-                .iter()
-                .map(|(name, value)| (name.clone(), Value::String(value.clone())))
-                .collect(),
-        )) {
-            return json!({"error":error,"error_code":"http_request_invalid"});
-        }
-        let _committed = match before_send() {
-            Ok(guard) => guard,
-            Err(refusal) => return refusal,
-        };
-        self.send(
-            &url,
-            &parsed,
+        let mut header_names = auth_headers
+            .keys()
+            .map(|name| name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        header_names.sort();
+        Ok(PreparedRequest {
+            preview: ApiPreview {
+                method: method.to_ascii_uppercase(),
+                url: shown_url,
+                header_names,
+                body_bytes,
+            },
+            url,
+            parsed,
             pinned_ip,
-            method,
-            body_bytes.as_deref(),
-            &auth_headers,
+            headers: auth_headers,
             timeout,
             max_response_bytes,
-            &needles,
-        )
+            needles,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -690,60 +779,6 @@ fn append_warning(result: &mut Value, warning: &str) {
     });
 }
 
-fn python_json(value: &Value) -> String {
-    match value {
-        Value::Null => "null".into(),
-        Value::Bool(value) => value.to_string(),
-        Value::Number(number) => number.to_string(),
-        Value::String(value) => python_json_string(value),
-        Value::Array(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(python_json)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Object(values) => format!(
-            "{{{}}}",
-            values
-                .iter()
-                .map(|(key, value)| format!("{}: {}", python_json_string(key), python_json(value)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
-}
-
-fn python_json_string(value: &str) -> String {
-    let mut output = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\u{08}' => output.push_str("\\b"),
-            '\u{0c}' => output.push_str("\\f"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            c if (c as u32) < 0x20 || (c as u32) > 0x7e => {
-                let value = c as u32;
-                if value <= 0xffff {
-                    output.push_str(&format!("\\u{value:04x}"));
-                } else {
-                    let adjusted = value - 0x10000;
-                    let high = 0xd800 + (adjusted >> 10);
-                    let low = 0xdc00 + (adjusted & 0x3ff);
-                    output.push_str(&format!("\\u{high:04x}\\u{low:04x}"));
-                }
-            }
-            c => output.push(c),
-        }
-    }
-    output.push('"');
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -752,6 +787,34 @@ mod tests {
     use super::check_url_safety;
     use serde_json::{Value, json};
     use url::Url;
+
+    #[test]
+    fn short_query_credentials_redact_lowercase_percent_escape_spellings() {
+        let provider = json!({
+            "base_url":"https://generativelanguage.googleapis.com",
+            "secret_name":"TOKEN",
+            "auth_type":"query",
+        });
+        let headers = json!({});
+        let caller = super::ApiCaller::new();
+        for (secret, echo) in [("*", "%2a"), ("A+B", "A%2bB"), ("é", "%c3%a9")] {
+            let prepared = caller
+                .prepare(super::ApiRequest {
+                    provider_name: "test",
+                    provider: &provider,
+                    secret_value: secret,
+                    path: "/v1/items",
+                    method: "GET",
+                    body: None,
+                    extra_headers: &headers,
+                    secrets_for_redact: &headers,
+                    timeout: std::time::Duration::from_secs(1),
+                    max_response_bytes: 1024,
+                })
+                .unwrap_or_else(|error| panic!("prepare short-key regression: {error}"));
+            assert_eq!(super::hide(echo, &prepared.needles, None), "[REDACTED]");
+        }
+    }
 
     #[test]
     fn url_safety_matches_python_for_ip_literals_and_localhost() {

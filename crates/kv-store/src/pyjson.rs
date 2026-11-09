@@ -63,10 +63,27 @@ fn write_python(
 }
 
 fn python_number(number: &Number) -> String {
-    if !number.is_f64() {
-        return number.to_string();
-    }
     let raw = number.to_string();
+    if !raw.bytes().any(|byte| matches!(byte, b'.' | b'e' | b'E')) {
+        return if raw == "-0" { "0".into() } else { raw };
+    }
+    // With arbitrary_precision, serde retains a JSON decimal's original text.
+    // Python loads that decimal as binary64 before dumping it. Normalize once
+    // so lexical precision and overflow cannot change approved body bytes.
+    let parsed = raw
+        .parse::<f64>()
+        .expect("valid JSON floating-point number");
+    if parsed.is_infinite() {
+        return if parsed.is_sign_negative() {
+            "-Infinity"
+        } else {
+            "Infinity"
+        }
+        .into();
+    }
+    let raw = Number::from_f64(parsed)
+        .expect("finite JSON number")
+        .to_string();
     let (negative, unsigned) = raw
         .strip_prefix('-')
         .map_or((false, raw.as_str()), |value| (true, value));
@@ -215,7 +232,7 @@ fn write_ascii_string(string: &str, output: &mut Vec<u8>) {
             '\r' => output.extend_from_slice(b"\\r"),
             '\t' => output.extend_from_slice(b"\\t"),
             character if character <= '\u{001f}' => write_escape(character as u16, output),
-            character if character <= '\u{007f}' => output.push(character as u8),
+            character if character <= '\u{007e}' => output.push(character as u8),
             character if character <= '\u{ffff}' => write_escape(character as u16, output),
             character => {
                 let code = character as u32 - 0x1_0000;
@@ -304,6 +321,73 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{to_vec, to_vec_indent2_ascii, to_vec_python, to_vec_python_compact};
+
+    #[test]
+    fn ascii_output_escapes_del_and_normalizes_parsed_decimals() {
+        assert_eq!(
+            to_vec_python(&json!("\u{007f}"), false).unwrap(),
+            b"\"\\u007f\""
+        );
+        assert_eq!(
+            to_vec_python_compact(&json!("\u{007f}"), false).unwrap(),
+            b"\"\\u007f\""
+        );
+        assert_eq!(
+            to_vec_indent2_ascii(&json!("\u{007f}")).unwrap(),
+            b"\"\\u007f\"\n"
+        );
+        let value: Value =
+            serde_json::from_str("[-0,1.00000000000000001,1e999,-1e999,1e-999]").unwrap();
+        assert_eq!(
+            to_vec_python(&value, false).unwrap(),
+            b"[0, 1.0, Infinity, -Infinity, 0.0]"
+        );
+    }
+
+    #[test]
+    fn python_json_body_serialization_matches_reference() {
+        let Some(python) = kv_test_support::python_reference() else {
+            return;
+        };
+        let characters: String = (0..=255)
+            .filter_map(char::from_u32)
+            .chain(['\u{2028}', '\u{2029}', '中', '🙂'])
+            .collect();
+        let raw = vec![
+            serde_json::to_string(&characters).unwrap(),
+            r#"{"z": "\u007f", "é": [1e-6, 1e16, -0.0, 5e-324], "a": {"b": true}}"#.into(),
+            "[-0,1.00000000000000001,1e999,-1e999,1e-999,184467440737095516161234567890]".into(),
+            "[1e-4,1e-5,1e15,1e16,1.7976931348623157e308,2.2250738585072014e-308]".into(),
+        ];
+        let script = r#"import json,sys
+out=[]
+for raw in json.loads(sys.argv[1]):
+ value=json.loads(raw)
+ for sort in (False, True):
+  out.append(json.dumps(value,sort_keys=sort))
+  out.append(json.dumps(value,sort_keys=sort,separators=(',',':')))
+print(json.dumps(out,ensure_ascii=True))"#;
+        let output = std::process::Command::new(python)
+            .args(["-I", "-c", script, &serde_json::to_string(&raw).unwrap()])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let reference: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+        let mut actual = Vec::new();
+        for raw in raw {
+            let value: Value = serde_json::from_str(&raw).unwrap();
+            for sort in [false, true] {
+                actual.push(String::from_utf8(to_vec_python(&value, sort).unwrap()).unwrap());
+                actual
+                    .push(String::from_utf8(to_vec_python_compact(&value, sort).unwrap()).unwrap());
+            }
+        }
+        assert_eq!(actual, reference);
+    }
 
     #[test]
     fn matches_python_string_escaping_and_raw_unicode() {

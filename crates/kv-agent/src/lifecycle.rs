@@ -49,8 +49,15 @@ pub(crate) struct DrainOutcome {
     pub(crate) cut_off: usize,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Stopping;
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum CommitError<E> {
+    Stopping,
+    Charge(E),
+}
 
 #[derive(Clone, Copy)]
 struct Settings {
@@ -126,6 +133,7 @@ impl Lifecycle {
 
     /// The connection becomes active in the same admission step as its window.
     /// No network operation runs while the admission mutex is held.
+    #[cfg(test)]
     pub(crate) fn try_commit_for(
         self: &Arc<Self>,
         connection: &ConnectionGuard,
@@ -133,19 +141,50 @@ impl Lifecycle {
         self.commit(Some(&connection.connection))
     }
 
+    /// Check connection/retirement, debit authority, and publish the window in
+    /// one admission transaction. The charge must not perform network I/O or
+    /// acquire this lifecycle lock again. The daemon's lock order is lifecycle
+    /// -> trust pin -> permit registry.
+    pub(crate) fn try_commit_for_with_charge<E, C>(
+        self: &Arc<Self>,
+        connection: &ConnectionGuard,
+        charge: impl FnOnce() -> Result<C, E>,
+    ) -> Result<WorkGuard, CommitError<E>> {
+        self.commit_charging(Some(&connection.connection), charge)
+    }
+
+    #[cfg(test)]
     fn commit(
         self: &Arc<Self>,
         connection: Option<&Arc<TrackedConnection>>,
     ) -> Result<WorkGuard, Stopping> {
+        self.commit_charging(connection, || Ok::<(), std::convert::Infallible>(()))
+            .map_err(|error| match error {
+                CommitError::Stopping => Stopping,
+                CommitError::Charge(never) => match never {},
+            })
+    }
+
+    fn commit_charging<E, C>(
+        self: &Arc<Self>,
+        connection: Option<&Arc<TrackedConnection>>,
+        charge: impl FnOnce() -> Result<C, E>,
+    ) -> Result<WorkGuard, CommitError<E>> {
         let mut state = lock(&self.state);
         if state.phase != Phase::Running {
-            return Err(Stopping);
+            return Err(CommitError::Stopping);
         }
-        if let Some(connection) = connection {
-            let mut connection_state = lock(&connection.state);
-            if connection_state.finished || connection_state.closed {
-                return Err(Stopping);
-            }
+        let mut connection_state = connection.map(|connection| lock(&connection.state));
+        if connection_state
+            .as_ref()
+            .is_some_and(|connection| connection.finished || connection.closed)
+        {
+            return Err(CommitError::Stopping);
+        }
+        // In particular, a trust-pin guard must survive until the committed
+        // window is visible. Release it before returning to the HTTP transport.
+        let _charge_guard = charge().map_err(CommitError::Charge)?;
+        if let Some(connection_state) = &mut connection_state {
             connection_state.active += 1;
         }
         state.committed += 1;
@@ -734,6 +773,63 @@ mod tests {
             drop(admitted);
             assert_eq!(lifecycle.wait_for_drain().cut_off, 0);
         }
+    }
+
+    #[test]
+    fn refusal_or_closed_connection_never_charges_authority() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let charges = AtomicUsize::new(0);
+        let lifecycle = Lifecycle::new();
+        let mut tracker = WorkerTracker::new();
+        let (_client, server) = UnixStream::pair().unwrap();
+        let connection = tracker.register_connection(&server).unwrap();
+        let refused = lifecycle.try_commit_for_with_charge(&connection, || Err::<(), _>("spent"));
+        assert!(matches!(refused, Err(CommitError::Charge("spent"))));
+        assert_eq!(lifecycle.committed_count(), 0);
+        assert_eq!(lock(&connection.connection.state).active, 0);
+        tracker.shutdown_all();
+        let closed = lifecycle.try_commit_for_with_charge(&connection, || {
+            charges.fetch_add(1, Ordering::SeqCst);
+            Ok::<(), ()>(())
+        });
+        assert!(matches!(closed, Err(CommitError::Stopping)));
+        lifecycle.request_stop(Some(StopChoice::Now));
+        let stopped = lifecycle.commit_charging(None, || {
+            charges.fetch_add(1, Ordering::SeqCst);
+            Ok::<(), ()>(())
+        });
+        assert!(matches!(stopped, Err(CommitError::Stopping)));
+        assert_eq!(charges.load(Ordering::SeqCst), 0);
+        assert_eq!(lifecycle.committed_count(), 0);
+    }
+
+    #[test]
+    fn charge_and_stop_share_the_admission_lock() {
+        let lifecycle = Lifecycle::new();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker_state = Arc::clone(&lifecycle);
+        let worker = thread::spawn(move || {
+            worker_state.commit_charging(None, || {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok::<(), ()>(())
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The callback must run under the admission lock, not before it.
+        assert!(lifecycle.state.try_lock().is_err());
+        let stopper_state = Arc::clone(&lifecycle);
+        let stopper = thread::spawn(move || stopper_state.request_stop(None));
+        release_tx.send(()).unwrap();
+        let work = worker.join().unwrap().unwrap();
+        assert_eq!(
+            stopper.join().unwrap(),
+            StopPlan::AwaitingChoice { in_flight: 1 }
+        );
+        assert_eq!(lifecycle.committed_count(), 1);
+        drop(work);
+        assert_eq!(lifecycle.committed_count(), 0);
     }
 
     #[test]

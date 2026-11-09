@@ -61,11 +61,35 @@ pub fn verified_permit_payload(
 }
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    let compact: String = text
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .collect();
-    hex::decode(compact).ok()
+    let bytes = text.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len() / 2);
+    let mut offset = 0;
+    while offset < bytes.len() {
+        // bytes.fromhex accepts ASCII whitespace between whole bytes, never
+        // between their two nibbles. Its set includes vertical tab.
+        while offset < bytes.len()
+            && matches!(bytes[offset], b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
+        {
+            offset += 1;
+        }
+        if offset == bytes.len() {
+            break;
+        }
+        let high = nibble(*bytes.get(offset)?)?;
+        let low = nibble(*bytes.get(offset + 1)?)?;
+        output.push((high << 4) | low);
+        offset += 2;
+    }
+    Some(output)
+}
+
+fn nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub fn unsigned_payload(payload: &Value) -> Result<Map<String, Value>, ApprovalError> {
@@ -73,4 +97,36 @@ pub fn unsigned_payload(payload: &Value) -> Result<Map<String, Value>, ApprovalE
         .as_object()
         .cloned()
         .ok_or_else(|| ApprovalError::from("payload must be an object"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signature_hex_whitespace_is_only_allowed_between_complete_bytes() {
+        let seed = OwnerSeed::new([37; 32]);
+        let public = crate::owner::owner_public_key(&seed);
+        let artifact =
+            attach_permit_approval(&serde_json::json!({"signer":SIGNER}), &seed).unwrap();
+        let text = artifact["signature"].as_str().unwrap();
+        for space in [" ", "\t", "\r", "\n", "\u{000b}", "\u{000c}"] {
+            let mut changed = artifact.clone();
+            changed["signature"] = Value::String(format!("{}{}{}", &text[..2], space, &text[2..]));
+            assert!(
+                verified_permit_payload(true, &public, &changed).is_some(),
+                "{space:?}"
+            );
+            changed["signature"] = Value::String(format!("{}{}{}", &text[..1], space, &text[1..]));
+            assert!(
+                verified_permit_payload(true, &public, &changed).is_none(),
+                "{space:?}"
+            );
+        }
+        let mut changed = artifact;
+        let signature = changed["signature"].as_str().unwrap().to_owned();
+        changed["signature"] =
+            Value::String(format!("{}\u{00a0}{}", &signature[..2], &signature[2..]));
+        assert!(verified_permit_payload(true, &public, &changed).is_none());
+    }
 }

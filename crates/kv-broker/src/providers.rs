@@ -365,11 +365,13 @@ pub fn build_url(
     );
     if !query_params.is_empty() {
         url.push(if url.contains('?') { '&' } else { '?' });
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        for (name, value) in query_params {
-            serializer.append_pair(name, value);
-        }
-        url.push_str(&serializer.finish());
+        url.push_str(
+            &query_params
+                .iter()
+                .map(|(name, value)| format!("{}={}", quote_plus(name), quote_plus(value)))
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
     }
     Ok(url)
 }
@@ -382,13 +384,34 @@ pub fn shown_auth_url(
     let mut url = build_url(provider, path, &BTreeMap::new())?;
     if !query_params.is_empty() {
         url.push(if url.contains('?') { '&' } else { '?' });
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        for name in query_params.keys() {
-            serializer.append_pair(name, KEY_PLACEHOLDER);
-        }
-        url.push_str(&serializer.finish());
+        url.push_str(
+            &query_params
+                .keys()
+                .map(|name| format!("{}={KEY_PLACEHOLDER}", quote_plus(name)))
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
     }
     Ok(url)
+}
+
+pub(crate) fn quote_plus(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
+                encoded.push(char::from(byte));
+            }
+            b' ' => encoded.push('+'),
+            _ => {
+                encoded.push('%');
+                encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+                encoded.push(char::from(HEX[usize::from(byte & 15)]));
+            }
+        }
+    }
+    encoded
 }
 
 pub fn contains_provider_secret_template(text: &str, provider_secret_name: &str) -> bool {

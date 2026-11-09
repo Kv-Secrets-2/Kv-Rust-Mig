@@ -245,7 +245,7 @@ fn percent_encode(bytes: &[u8], plus_for_space: bool) -> String {
     output
 }
 
-fn lowercase_percent_escapes(value: &str) -> String {
+pub(crate) fn lowercase_percent_escapes(value: &str) -> String {
     let mut output = value.to_owned();
     let bytes = value.as_bytes();
     for index in 0..bytes.len().saturating_sub(2) {

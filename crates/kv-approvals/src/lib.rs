@@ -5,7 +5,15 @@ pub mod canonical;
 pub mod owner;
 pub mod pause;
 pub mod permit;
+mod permit_facts;
+mod permit_render;
+pub mod permit_session;
 pub mod wire;
+
+#[cfg(all(test, unix))]
+#[allow(dead_code)]
+#[path = "../../../tests/support/harness.rs"]
+mod test_harness;
 
 use thiserror::Error;
 

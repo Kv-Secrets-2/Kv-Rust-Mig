@@ -7,6 +7,12 @@ use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
 
 const WITHHELD: &str = "[not recorded: it looks like a key]";
+const AGENT_UNKNOWN: &str = "unknown";
+const AGENT_WITHHELD: &str = "[agent name not recorded: it looks like a key]";
+const REASON_WITHHELD: &str = "[reason not recorded: it looks like a key]";
+const MAX_ATTRIBUTION_LEN: usize = 80;
+const MAX_AGENT_LEN: usize = 160;
+const MAX_AGENT_REASON_LEN: usize = 200;
 const KEY_PREFIXES: &[&str] = &[
     "sk-",
     "sk_",
@@ -47,19 +53,29 @@ fn python_whitespace(character: char) -> bool {
         | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
 }
 
-fn label_text(value: &str) -> String {
-    value
-        .trim_matches(python_whitespace)
-        .chars()
-        .take(80)
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || "._-:/@+".contains(character) {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
+/// Bound caller-supplied identity text using Python's strip and label rules.
+///
+/// Missing, non-string and whitespace-only values return `None`. Each character
+/// outside ASCII letters, digits and `._-:/@+` becomes `_`. The limit counts
+/// characters, not UTF-8 bytes; a nonblank value with a zero limit returns `Some("")`.
+pub fn label_text(value: Option<&Value>, max_len: usize) -> Option<String> {
+    let value = value?.as_str()?.trim_matches(python_whitespace);
+    if value.is_empty() {
+        return None;
+    }
+    Some(
+        value
+            .chars()
+            .take(max_len)
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || "._-:/@+".contains(character) {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect(),
+    )
 }
 
 fn identifier(value: &str, prefix: &str, digits: usize) -> bool {
@@ -71,16 +87,19 @@ fn identifier(value: &str, prefix: &str, digits: usize) -> bool {
     })
 }
 
-fn key_token(token: &str) -> bool {
-    let length = token.chars().count();
-    if length >= 16 {
+fn key_prefix(token: &str, length: usize) -> bool {
+    length >= 16 && {
         let lowered = token.to_lowercase();
-        if KEY_PREFIXES
+        KEY_PREFIXES
             .iter()
             .any(|prefix| lowered.starts_with(prefix))
-        {
-            return true;
-        }
+    }
+}
+
+fn key_token(token: &str) -> bool {
+    let length = token.chars().count();
+    if key_prefix(token, length) {
+        return true;
     }
     if length >= 32 && token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return true;
@@ -98,15 +117,133 @@ fn identity_looks_like_key(key: &str, raw: &str, shown: &str) -> bool {
     if key == "session_id" && identifier(shown, "mcp_", 24) {
         return false;
     }
+    text_has_key_token(raw, key_token)
+}
+
+fn text_has_key_token(raw: &str, is_key: fn(&str) -> bool) -> bool {
     raw.contains("-----BEGIN")
         || raw.split(python_whitespace).any(|token| {
-            key_token(token.trim_matches(|character| ".,;:()[]{}<>\"'`".contains(character)))
+            is_key(token.trim_matches(|character| ".,;:()[]{}<>\"'`".contains(character)))
         })
         || raw
             .split(|character: char| {
                 !character.is_ascii_alphanumeric() && !"_+=-".contains(character)
             })
-            .any(key_token)
+            .any(is_key)
+}
+
+// Reasons use Python's broader shape rule, unlike reported identity labels.
+fn reason_key_token(token: &str) -> bool {
+    let length = token.chars().count();
+    key_prefix(token, length)
+        || (length >= 24
+            && token
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_+/=.".contains(&byte))
+            && token.bytes().any(|byte| byte.is_ascii_digit())
+            && token.bytes().any(|byte| byte.is_ascii_alphabetic()))
+}
+
+fn reason_hidden(character: char) -> bool {
+    // Python _escape_char escapes C* and Zl/Zp, but keeps space separators (Zs).
+    // Reuse the frozen Unicode 13 printability inventory, removing only Zs:
+    // interior tabs/newlines and line/paragraph separators must still escape.
+    python_nonprintable(character)
+        && !matches!(
+            character,
+            ' ' | '\u{00a0}' | '\u{1680}' | '\u{2000}'
+                ..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+        )
+}
+
+fn reason_piece_length(character: char) -> usize {
+    if reason_hidden(character) {
+        if u32::from(character) <= 0xffff {
+            6
+        } else {
+            10
+        }
+    } else {
+        1
+    }
+}
+
+fn safe_reason(value: Option<&Value>) -> Option<String> {
+    let raw = value?.as_str()?;
+    let value = raw.trim_matches(python_whitespace);
+    if value.is_empty() {
+        return None;
+    }
+    // Detection sees the complete raw reason, including text beyond the display
+    // bound. It has no access to vault secrets and cannot be a secret oracle.
+    if text_has_key_token(raw, reason_key_token) {
+        return Some(REASON_WITHHELD.to_owned());
+    }
+    let size: usize = value.chars().map(reason_piece_length).sum();
+    let truncated = size > MAX_AGENT_REASON_LEN;
+    let limit = MAX_AGENT_REASON_LEN - usize::from(truncated);
+    let mut output = String::new();
+    let mut shown = 0;
+    for character in value.chars() {
+        let length = reason_piece_length(character);
+        if shown + length > limit {
+            break;
+        }
+        if reason_hidden(character) {
+            let code = u32::from(character);
+            if code <= 0xffff {
+                output.push_str(&format!("\\u{code:04x}"));
+            } else {
+                output.push_str(&format!("\\U{code:08x}"));
+            }
+        } else {
+            output.push(character);
+        }
+        shown += length;
+    }
+    if truncated {
+        output.push('…');
+    }
+    Some(output)
+}
+
+/// Return the Python-compatible `agent` and `agent_reason` attribution fields.
+///
+/// These are caller-reported claims, not authenticated identities. Credential
+/// withholding uses only the supplied text's shape, never vault secret values.
+/// Reason escaping follows canonical Python 3.10's Unicode 13 categories.
+pub fn requester_fields(actor: Option<&Value>, reason: Option<&Value>) -> Map<String, Value> {
+    let mut labels = Vec::new();
+    let mut withheld = false;
+    if let Some(actor) = actor.and_then(Value::as_object) {
+        for (key, label) in [
+            ("client_name", "client"),
+            ("client_version", "version"),
+            ("source", "source"),
+            ("session_id", "session"),
+        ] {
+            let Some(shown) = label_text(actor.get(key), MAX_ATTRIBUTION_LEN) else {
+                continue;
+            };
+            let raw = actor[key].as_str().expect("label_text accepted a string");
+            withheld |= identity_looks_like_key(key, raw, &shown);
+            labels.push(format!("{label}={shown}"));
+        }
+    }
+    let agent = if withheld {
+        AGENT_WITHHELD.to_owned()
+    } else if labels.is_empty() {
+        AGENT_UNKNOWN.to_owned()
+    } else {
+        labels.join(" ").chars().take(MAX_AGENT_LEN).collect()
+    };
+    let mut fields = Map::new();
+    fields.insert("agent".to_owned(), Value::String(agent));
+    fields.insert(
+        "agent_reason".to_owned(),
+        safe_reason(reason).map_or(Value::Null, Value::String),
+    );
+    fields
 }
 
 pub(crate) fn sanitize_fields(fields: &mut Map<String, Value>) {
@@ -114,7 +251,7 @@ pub(crate) fn sanitize_fields(fields: &mut Map<String, Value>) {
         let Some(Value::String(value)) = fields.get(key) else {
             continue;
         };
-        let shown = label_text(value);
+        let shown = label_text(fields.get(key), MAX_ATTRIBUTION_LEN).unwrap_or_default();
         let replacement = if identity_looks_like_key(key, value, &shown) {
             WITHHELD.to_owned()
         } else {
@@ -405,6 +542,10 @@ fn python_nonprintable(character: char) -> bool {
 }
 
 include!("python_nonprintable.rs");
+
+#[cfg(test)]
+#[path = "codec/requester_tests.rs"]
+mod requester_tests;
 
 #[cfg(test)]
 #[allow(dead_code)]

@@ -694,6 +694,7 @@ version = "0.5.0-dev"
 dependencies = [
  "aes-gcm",
  "base64",
+ "caseless",
  "ed25519-dalek",
  "getrandom",
  "hex",
@@ -704,6 +705,8 @@ dependencies = [
  "sha2",
  "subtle",
  "thiserror",
+ "time",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -725,7 +728,9 @@ version = "0.5.0-dev"
 dependencies = [
  "base64",
  "kv-crypto",
+ "kv-store",
  "kv-test-support",
+ "rcgen",
  "rustls",
  "serde_json",
  "sha2",
