@@ -100,6 +100,26 @@ impl SecretCache {
             self.environments.values().map(BTreeMap::len).sum(),
         )
     }
+
+    fn get(
+        &mut self,
+        store: &DrawerStore,
+        env: &str,
+        name: &str,
+    ) -> Result<Option<Zeroizing<String>>, AgentError> {
+        if !self.environments.contains_key(env) {
+            let secrets = store
+                .list_secrets(env)?
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+            self.environments.insert(env.to_owned(), secrets);
+        }
+        Ok(self
+            .environments
+            .get(env)
+            .and_then(|items| items.get(name))
+            .cloned())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -588,6 +608,24 @@ pub fn run_agent(
     master_key: Key32,
     trust: TrustContext,
 ) -> Result<Value, AgentError> {
+    run_agent_with_api_caller(
+        root,
+        store,
+        master_key,
+        trust,
+        Arc::new(kv_broker::ApiCaller::new()),
+    )
+}
+
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn run_agent_with_api_caller(
+    root: impl AsRef<Path>,
+    store: Arc<DrawerStore>,
+    master_key: Key32,
+    trust: TrustContext,
+    api_caller: Arc<kv_broker::ApiCaller>,
+) -> Result<Value, AgentError> {
     let memory_hardening = protect_process_memory();
     let root = fs::canonicalize(root.as_ref())?;
     let root_text = root
@@ -621,6 +659,8 @@ pub fn run_agent(
     let trust = Arc::new(trust);
     let master_key = Arc::new(master_key);
     let approved = Arc::new(approved.value);
+    let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+    let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
     let mut workers = Vec::new();
 
@@ -634,6 +674,9 @@ pub fn run_agent(
                 let approved = Arc::clone(&approved);
                 let store = Arc::clone(&store);
                 let token = Arc::clone(&token);
+                let providers = Arc::clone(&providers);
+                let http_policy = Arc::clone(&http_policy);
+                let api_caller = Arc::clone(&api_caller);
                 let root = root.clone();
                 let root_text = root_text.clone();
                 let memory_hardening = memory_hardening.clone();
@@ -648,6 +691,9 @@ pub fn run_agent(
                         &trust,
                         &approved,
                         &token,
+                        &providers,
+                        &http_policy,
+                        &api_caller,
                         &stopping,
                         &memory_hardening,
                         CONNECTION_TIMEOUT,
@@ -699,6 +745,9 @@ fn handle_connection(
     trust: &TrustContext,
     approved: &Value,
     token: &Zeroizing<String>,
+    providers: &kv_broker::ProviderTable,
+    http_policy: &kv_broker::HttpPolicySnapshot,
+    api_caller: &kv_broker::ApiCaller,
     stopping: &AtomicBool,
     memory_hardening: &Value,
     request_timeout: Duration,
@@ -734,7 +783,9 @@ fn handle_connection(
         return Ok(());
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
-        let _ = serve_owner_endpoint(stream, cmd, request, trust, root, approved, master_key);
+        let _ = serve_owner_endpoint(
+            stream, cmd, request, trust, root, approved, master_key, providers,
+        );
         return Ok(());
     }
     if cmd != "status"
@@ -762,6 +813,12 @@ fn handle_connection(
     let supplied = request.get("token").and_then(Value::as_str).unwrap_or("");
     if supplied.len() > 128 || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
         kv_proto::write_reply(stream, &json!({"error":"authentication required"}))?;
+        return Ok(());
+    }
+    if cmd == "api"
+        && let Err(error) = validate_api_request(request)
+    {
+        kv_proto::write_reply(stream, &json!({"error":error}))?;
         return Ok(());
     }
     if cmd.is_empty() || cmd.len() > 32 {
@@ -801,9 +858,16 @@ fn handle_connection(
     }
     let response = match cmd {
         "status" => match cache.lock() {
-            Ok(cache) => {
-                status_response(root_text, store, approved, trust, memory_hardening, &cache)
-            }
+            Ok(cache) => status_response(
+                root_text,
+                store,
+                approved,
+                trust,
+                memory_hardening,
+                &cache,
+                providers,
+                http_policy,
+            ),
             Err(_) => json!({"error":"secret cache is unavailable"}),
         },
         "list" => {
@@ -829,6 +893,30 @@ fn handle_connection(
             json!({"environments":environments,"invalid_environments":[]})
         }
         "lock" => json!({"locking":true,"ended":true}),
+        "api" => {
+            let api_started = std::time::Instant::now();
+            let env = request
+                .get("env")
+                .and_then(Value::as_str)
+                .or_else(|| approved.get("default_env").and_then(Value::as_str))
+                .unwrap_or("dev");
+            let response = api_call_response(
+                request,
+                env,
+                store,
+                cache,
+                providers,
+                http_policy,
+                api_caller,
+            );
+            let _ = audit_api_call(
+                request,
+                env,
+                &response,
+                api_started.elapsed().as_millis() as u64,
+            );
+            response
+        }
         "stop" => {
             if request
                 .get("choice")
@@ -887,6 +975,7 @@ fn owner_error(trust: &TrustContext, challenge: Vec<u8>, code: &str) -> Result<V
 }
 
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 fn serve_owner_endpoint(
     stream: &mut std::os::unix::net::UnixStream,
     cmd: &str,
@@ -895,6 +984,7 @@ fn serve_owner_endpoint(
     root: &Path,
     approved: &Value,
     master_key: &Key32,
+    providers: &kv_broker::ProviderTable,
 ) -> Result<(), AgentError> {
     let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
     let hard_locked = owner_error(trust, challenge.clone(), "hard_locked");
@@ -949,7 +1039,12 @@ fn serve_owner_endpoint(
             "daemon_version".into(),
             FieldValue::Text(trust.version.clone()),
         );
-        fields.insert("providers".into(), FieldValue::List(owner_providers(root)));
+        let provider_fields = if request.get("providers").and_then(Value::as_bool) == Some(true) {
+            owner_providers(providers)
+        } else {
+            Vec::new()
+        };
+        fields.insert("providers".into(), FieldValue::List(provider_fields));
         signed_owner(trust, MessageKind::ChannelV1, fields)
     })();
     let answer = match answer {
@@ -974,39 +1069,11 @@ fn serve_owner_endpoint(
 }
 
 #[cfg(unix)]
-fn owner_providers(root: &Path) -> Vec<Vec<FieldValue>> {
-    let mut providers: BTreeMap<String, Value> = BTreeMap::new();
-    providers.insert(
-        "anthropic".into(),
-        json!({"auth_type":"x-api-key","base_url":"https://api.anthropic.com","default_headers":{"Content-Type":"application/json","anthropic-version":"2023-06-01"},"secret_name":"ANTHROPIC_API_KEY"}),
-    );
-    providers.insert(
-        "github".into(),
-        json!({"auth_type":"bearer","base_url":"https://api.github.com","default_headers":{"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},"secret_name":"GITHUB_TOKEN"}),
-    );
-    providers.insert(
-        "google".into(),
-        json!({"auth_query_param":"key","auth_type":"query","base_url":"https://generativelanguage.googleapis.com","default_headers":{"Content-Type":"application/json"},"secret_name":"GOOGLE_API_KEY"}),
-    );
-    providers.insert(
-        "google-cloud".into(),
-        json!({"auth_query_param":"key","auth_type":"query","base_url":"https://www.googleapis.com","default_headers":{"Content-Type":"application/json"},"secret_name":"GOOGLE_CLOUD_API_KEY"}),
-    );
-    providers.insert(
-        "openai".into(),
-        json!({"auth_type":"bearer","base_url":"https://api.openai.com","default_headers":{"Content-Type":"application/json"},"secret_name":"OPENAI_API_KEY"}),
-    );
-    if let Ok(snapshot) = kv_store::config::load_config(root)
-        && let Some(custom) = snapshot.value.get("providers").and_then(Value::as_object)
-    {
-        for (name, value) in custom {
-            providers.insert(name.clone(), value.clone());
-        }
-    }
+fn owner_providers(providers: &kv_broker::ProviderTable) -> Vec<Vec<FieldValue>> {
     providers
-        .into_iter()
+        .iter()
         .filter_map(|(name, value)| {
-            let canonical = kv_approvals::canonical::canonical_json(&value).ok()?;
+            let canonical = kv_approvals::canonical::canonical_json(value).ok()?;
             Some(vec![
                 FieldValue::Text(name.to_owned()),
                 FieldValue::Text(canonical),
@@ -1049,6 +1116,7 @@ fn request_error_response(error: &kv_proto::ProtocolError) -> Value {
 }
 
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 fn status_response(
     root: &str,
     _store: &DrawerStore,
@@ -1056,6 +1124,8 @@ fn status_response(
     trust: &TrustContext,
     memory_hardening: &Value,
     cache: &SecretCache,
+    provider_snapshot: &kv_broker::ProviderTable,
+    http_policy_snapshot: &kv_broker::HttpPolicySnapshot,
 ) -> Value {
     let environments = config
         .get("environments")
@@ -1067,22 +1137,12 @@ fn status_response(
         .and_then(|security| security.get("kv_run_policy"))
         .cloned()
         .unwrap_or_else(|| Value::String("blocklist".into()));
-    let providers = ["anthropic", "github", "google", "google-cloud", "openai"]
-        .into_iter()
+    let providers = provider_snapshot
+        .keys()
+        .cloned()
+        .map(Value::String)
         .collect::<Vec<_>>();
-    let mut providers = providers
-        .into_iter()
-        .map(|name| Value::String(name.into()))
-        .collect::<Vec<_>>();
-    if let Some(custom) = config.get("providers").and_then(Value::as_object) {
-        for name in custom.keys() {
-            if !providers.iter().any(|value| value.as_str() == Some(name)) {
-                providers.push(Value::String(name.clone()));
-            }
-        }
-    }
-    providers.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
-    let http_policy = http_policy_status(config);
+    let http_policy = kv_broker::describe_http_policy_snapshot(http_policy_snapshot);
     let (cached_environments, cached_secrets) = cache.counts();
     json!({
         "running":true,
@@ -1107,32 +1167,337 @@ fn status_response(
 }
 
 #[cfg(unix)]
-fn http_policy_status(config: &Value) -> Value {
-    let configured = config.get("broker_policy").is_some();
-    let providers = config
-        .get("broker_policy")
-        .and_then(Value::as_object)
-        .and_then(|policy| policy.get("http"))
+fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), String> {
+    fn string_field<'a>(
+        request: &'a serde_json::Map<String, Value>,
+        field: &str,
+        max: usize,
+        required: bool,
+        allow_empty: bool,
+    ) -> Result<Option<&'a str>, String> {
+        let Some(value) = request.get(field) else {
+            return if required {
+                Err(format!("{field} is required"))
+            } else {
+                Ok(None)
+            };
+        };
+        if value.is_null() {
+            return if required {
+                Err(format!("{field} is required"))
+            } else {
+                Ok(None)
+            };
+        }
+        let Some(value) = value.as_str() else {
+            return Err(format!("{field} must be a string"));
+        };
+        if !allow_empty && value.is_empty() {
+            return Err(format!("{field} must not be empty"));
+        }
+        if value.len() > max {
+            return Err(format!("{field} exceeds {max} bytes"));
+        }
+        Ok(Some(value))
+    }
+    string_field(request, "provider", 128, true, false)?;
+    string_field(request, "path", 4096, true, false)?;
+    if request.contains_key("permit_id") {
+        string_field(request, "permit_id", 128, true, false)?;
+    }
+    let method = string_field(request, "method", 16, false, false)?.unwrap_or("GET");
+    if !["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
+        .contains(&method.to_ascii_uppercase().as_str())
+    {
+        return Err("unsupported method".into());
+    }
+    if let Some(body) = request.get("body").filter(|body| !body.is_null()) {
+        if !body.is_object() && !body.is_array() && !body.is_string() {
+            return Err("body must be an object, array, or string".into());
+        }
+        if kv_store::pyjson::to_vec_python(body, false).map_or(0, |bytes| bytes.len()) > 512 * 1024
+        {
+            return Err("body exceeds 524288 bytes".into());
+        }
+    }
+    if let Some(headers) = request.get("headers").filter(|headers| !headers.is_null()) {
+        let Some(headers) = headers.as_object() else {
+            return Err("headers must be an object".into());
+        };
+        if headers.len() > 64 {
+            return Err("headers has too many entries (max 64)".into());
+        }
+        for (index, (name, value)) in headers.iter().enumerate() {
+            if name.is_empty() {
+                return Err("header name must not be empty".into());
+            }
+            if name.len() > 128 {
+                return Err("header name exceeds 128 bytes".into());
+            }
+            let Some(value) = value.as_str() else {
+                return Err(format!("headers[{index}] value must be a string"));
+            };
+            if value.len() > 4096 {
+                return Err(format!("headers[{index}] value exceeds 4096 bytes"));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn api_call_response(
+    request: &serde_json::Map<String, Value>,
+    env: &str,
+    store: &DrawerStore,
+    cache: &Mutex<SecretCache>,
+    providers: &kv_broker::ProviderTable,
+    policy: &kv_broker::HttpPolicySnapshot,
+    caller: &kv_broker::ApiCaller,
+) -> Value {
+    let provider_name = request
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if provider_name.is_empty() {
+        return json!({"error":"provider is required (e.g. openai, anthropic, google)"});
+    }
+    let Some(provider) = providers.get(provider_name) else {
+        return json!({
+            "error":format!(
+                "unknown provider: {provider_name}. available: {}",
+                providers.keys().cloned().collect::<Vec<_>>().join(", ")
+            )
+        });
+    };
+    if provider
+        .get("provider_type")
+        .and_then(Value::as_str)
+        .unwrap_or("http")
+        != "http"
+    {
+        return json!({"error":format!("provider '{provider_name}' is not an HTTP API provider")});
+    }
+    if let Some(error) = kv_broker::api_body_security_error(provider, request.get("body")) {
+        return json!({"error":error});
+    }
+    let headers = request.get("headers").cloned().unwrap_or_else(|| json!({}));
+    let method = request
+        .get("method")
         .cloned()
-        .unwrap_or_else(|| json!({}));
-    let provider_count = providers.as_object().map_or(0, serde_json::Map::len);
-    let digest = config_authority::canonical(&providers)
-        .map(|canonical| {
-            use sha2::{Digest, Sha256};
-            Sha256::digest(canonical)
-        })
-        .map(|digest| {
-            digest[..8]
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        })
-        .unwrap_or_default();
-    json!({
-        "configured":configured,
-        "provider_count":provider_count,
-        "digest":digest
-    })
+        .unwrap_or_else(|| json!("GET"));
+    let path = request.get("path").cloned().unwrap_or_else(|| json!("/"));
+    let decision = kv_broker::evaluate_provider_http_request(
+        policy,
+        provider_name,
+        provider,
+        &method,
+        &path,
+        request.get("body"),
+        &headers,
+    );
+    let per_call =
+        decision.get("error_code").and_then(Value::as_str) == Some("http_approval_required");
+    if !decision
+        .get("allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        if per_call && let Some(permit) = request.get("permit_id").and_then(Value::as_str) {
+            if !permit.starts_with("permit_") {
+                return json!({"error":"invalid permit id","error_code":"permit_invalid"});
+            }
+            return json!({
+                "error":"permit request is missing or expired",
+                "error_code":"permit_invalid"
+            });
+        }
+        return strip_allowed(decision);
+    }
+    if request.contains_key("permit_id") {
+        return json!({
+            "error":"this call does not match a one-call permit",
+            "error_code":"permit_invalid"
+        });
+    }
+    let secret_name = provider
+        .get("secret_name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let lookup = match cache.lock() {
+        Ok(mut cache) => cache.get(store, env, secret_name),
+        Err(_) => return json!({"error":"secret cache is unavailable"}),
+    };
+    let secret_value = match lookup {
+        Ok(Some(secret)) if !secret.is_empty() => secret,
+        Ok(_) => return json!({"error":format!("secret '{secret_name}' not found in env '{env}'")}),
+        Err(error) => return json!({"error":error.to_string()}),
+    };
+    let secrets_for_redact = kv_broker::redact_one_secret(secret_name, &secret_value);
+    let mut result = caller.call(kv_broker::ApiRequest {
+        provider_name,
+        provider,
+        secret_value: &secret_value,
+        path: path.as_str().unwrap_or("/"),
+        method: method.as_str().unwrap_or("GET"),
+        body: request.get("body").filter(|body| !body.is_null()),
+        extra_headers: &headers,
+        secrets_for_redact: &secrets_for_redact,
+        timeout: Duration::from_secs(API_TIMEOUT),
+        max_response_bytes: kv_broker::MAX_BROKER_RESPONSE_BYTES,
+    });
+    if let Some(warning) = decision.get("warning").and_then(Value::as_str) {
+        let current = result.get("warning").and_then(Value::as_str).unwrap_or("");
+        result["warning"] = Value::String(if current.is_empty() {
+            warning.to_owned()
+        } else {
+            format!("{current}\n{warning}")
+        });
+    }
+    result
+}
+
+#[cfg(unix)]
+fn strip_allowed(mut decision: Value) -> Value {
+    if let Some(object) = decision.as_object_mut() {
+        object.remove("allowed");
+    }
+    decision
+}
+
+#[cfg(unix)]
+fn audit_api_call(
+    request: &serde_json::Map<String, Value>,
+    env: &str,
+    response: &Value,
+    duration_ms: u64,
+) -> Result<(), AgentError> {
+    use std::fs::{OpenOptions, create_dir_all};
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::os::unix::fs::PermissionsExt;
+
+    static AUDIT_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    let _guard = AUDIT_LOCK
+        .lock()
+        .map_err(|_| AgentError("audit lock is poisoned".into()))?;
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| AgentError("home directory is unavailable".into()))?;
+    let directory = Path::new(&home).join(".kv");
+    create_dir_all(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let path = directory.join("audit.jsonl");
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(&path)?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    let mut existing = String::new();
+    file.seek(SeekFrom::Start(0))?;
+    file.read_to_string(&mut existing)?;
+    let previous = existing
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .and_then(|entry| entry.get("hash").and_then(Value::as_str).map(str::to_owned))
+        .unwrap_or_else(|| "genesis".into());
+    file.seek(SeekFrom::End(0))?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let format = time::format_description::parse_borrowed::<3>(
+        "[year]-[month]-[day]T[hour]:[minute]:[second]Z",
+    )
+    .map_err(|error| AgentError(error.to_string()))?;
+    let timestamp = now
+        .format(&format)
+        .map_err(|error| AgentError(error.to_string()))?;
+    let mut entry = serde_json::Map::new();
+    entry.insert("ts".into(), Value::String(timestamp));
+    entry.insert("event".into(), Value::String("api_call".into()));
+    entry.insert(
+        "provider".into(),
+        request
+            .get("provider")
+            .cloned()
+            .unwrap_or_else(|| json!("?")),
+    );
+    entry.insert(
+        "path".into(),
+        request.get("path").cloned().unwrap_or_else(|| json!("/")),
+    );
+    entry.insert(
+        "method".into(),
+        request
+            .get("method")
+            .cloned()
+            .unwrap_or_else(|| json!("GET")),
+    );
+    entry.insert(
+        "status".into(),
+        response.get("status").cloned().unwrap_or(json!(0)),
+    );
+    entry.insert(
+        "error_code".into(),
+        response.get("error_code").cloned().unwrap_or(Value::Null),
+    );
+    entry.insert(
+        "policy_rule".into(),
+        response.get("policy_rule").cloned().unwrap_or(Value::Null),
+    );
+    entry.insert(
+        "approval_required".into(),
+        response
+            .get("approval_required")
+            .and_then(Value::as_bool)
+            .map_or(Value::Bool(false), Value::Bool),
+    );
+    entry.insert(
+        "policy_warning".into(),
+        response.get("warning").cloned().unwrap_or(Value::Null),
+    );
+    entry.insert("duration_ms".into(), json!(duration_ms));
+    entry.insert("env".into(), json!(env));
+    entry.insert("error".into(), json!(response.get("error").is_some()));
+    if let Some(context) = request.get("audit_ctx").and_then(Value::as_object) {
+        for (key, limit) in [
+            ("source", 24),
+            ("client_name", 80),
+            ("client_version", 40),
+            ("session_id", 80),
+        ] {
+            if let Some(value) = context.get(key).and_then(Value::as_str) {
+                let value = value.trim();
+                if !value.is_empty() {
+                    entry.insert(
+                        key.into(),
+                        Value::String(value.chars().take(limit).collect()),
+                    );
+                }
+            }
+        }
+    }
+    let entry_value = Value::Object(entry);
+    let entry_json =
+        serde_json::to_string(&entry_value).map_err(|error| AgentError(error.to_string()))?;
+    let mut digest = Sha256::new();
+    digest.update(format!("{previous}:{entry_json}").as_bytes());
+    let hash = digest
+        .finalize()
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let mut final_entry = entry_value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| AgentError("audit entry is invalid".into()))?;
+    final_entry.insert("hash".into(), Value::String(hash));
+    final_entry.insert("prev".into(), Value::String(previous));
+    let final_json = serde_json::to_string(&Value::Object(final_entry))
+        .map_err(|error| AgentError(error.to_string()))?;
+    writeln!(file, "{final_json}")?;
+    file.flush()?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -1438,6 +1803,9 @@ mod tests {
         };
         let approved = json!({});
         let token = Zeroizing::new(String::new());
+        let providers = kv_broker::build_provider_table(&approved).0;
+        let http_policy = kv_broker::load_http_policy_snapshot(&approved);
+        let api_caller = kv_broker::ApiCaller::new();
         let stopping = AtomicBool::new(false);
         let memory_hardening = json!({});
         let timeout = Duration::from_millis(100);
@@ -1453,6 +1821,9 @@ mod tests {
                 &trust,
                 &approved,
                 &token,
+                &providers,
+                &http_policy,
+                &api_caller,
                 &stopping,
                 &memory_hardening,
                 timeout,
