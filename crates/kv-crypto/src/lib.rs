@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod python_digits;
+
 use blake2::Blake2bMac;
 use blake2::digest::{
     Mac as BlakeMac,
@@ -798,7 +800,7 @@ pub fn passphrase_strength(passphrase: &str) -> (bool, &'static str) {
     {
         return (false, "passphrase cannot be a single repeated character");
     }
-    if passphrase.chars().all(char::is_numeric) && length < 16 {
+    if passphrase.chars().all(python_digits::is_digit) && length < 16 {
         return (
             false,
             "all-digit passphrases under 16 characters are too weak",

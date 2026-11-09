@@ -23,5 +23,8 @@ rustix = { version = "1", features = ["fs", "process"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 exacl = "0.13"
 
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+
 [lints]
 workspace = true

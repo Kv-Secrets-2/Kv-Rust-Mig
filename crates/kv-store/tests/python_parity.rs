@@ -16,7 +16,7 @@ use common::{
 
 #[test]
 fn python_and_rust_drawer_operations_have_matching_storage_and_cross_reads() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Python drawer parity: set KV_PY_REF to the reference interpreter");
         return;
     };
@@ -125,7 +125,7 @@ fn python_and_rust_drawer_operations_have_matching_storage_and_cross_reads() {
 
 #[test]
 fn python_and_rust_history_operations_have_matching_results_and_storage() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Python drawer history parity: set KV_PY_REF to the reference interpreter");
         return;
     };
@@ -437,7 +437,7 @@ fn normalized_inventory(secrets_dir: &std::path::Path, env: &str, master: &Key32
 
 #[test]
 fn python_and_rust_envtree_copy_checked_copy_and_backup_interoperate() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Python Stage 2c parity: set KV_PY_REF to the reference interpreter");
         return;
     };

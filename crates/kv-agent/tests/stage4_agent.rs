@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+#[path = "../../../tests/support/harness.rs"]
+mod harness;
+
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -19,18 +22,7 @@ struct TestDir(PathBuf);
 
 impl TestDir {
     fn new() -> Self {
-        let mut random = [0u8; 16];
-        getrandom::getrandom(&mut random).expect("test randomness");
-        let path = std::env::temp_dir().join(format!(
-            "kv-agent-stage4-{}-{}",
-            std::process::id(),
-            random
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        ));
-        fs::create_dir(&path).expect("create test directory");
-        Self(path)
+        Self(harness::socket_temp_dir("a4", "home"))
     }
 }
 
@@ -748,7 +740,7 @@ fn rust_daemon_subprocess_helper() {
 
 #[test]
 fn python_client_matches_rust_agent_and_stop_cleans_runtime_files() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 4a daemon parity: set KV_PY_REF");
         return;
     };
@@ -952,7 +944,7 @@ fn python_client_matches_rust_agent_and_stop_cleans_runtime_files() {
 
 #[test]
 fn agent_status_and_commands_match_in_both_directions() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 4a agent parity: set KV_PY_REF");
         return;
     };
@@ -1279,7 +1271,7 @@ print(json.dumps({"lock":locked,"stopped":stopped}))
 
 #[test]
 fn startup_refusals_match_and_held_pid_file_is_rejected() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 4a startup refusal parity: set KV_PY_REF");
         return;
     };
@@ -1420,7 +1412,7 @@ time.sleep(30)
 
 #[test]
 fn approval_signing_key_changes_hard_lock_with_python_reason_parity() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 4b approval-key parity: set KV_PY_REF");
         return;
     };
@@ -1499,7 +1491,7 @@ fn approval_signing_key_changes_hard_lock_with_python_reason_parity() {
 
 #[test]
 fn owner_authority_internal_failures_are_signed_internal() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 4b owner authority error classification: set KV_PY_REF");
         return;
     };

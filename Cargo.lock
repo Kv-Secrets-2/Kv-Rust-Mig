@@ -675,6 +675,7 @@ dependencies = [
  "kv-crypto",
  "kv-proto",
  "kv-store",
+ "kv-test-support",
  "libc",
  "rcgen",
  "rustix",
@@ -698,6 +699,7 @@ dependencies = [
  "hex",
  "hmac",
  "kv-crypto",
+ "kv-test-support",
  "serde_json",
  "sha2",
  "subtle",
@@ -710,6 +712,7 @@ version = "0.5.0-dev"
 dependencies = [
  "base64",
  "kv-crypto",
+ "kv-test-support",
  "rustls",
  "serde_json",
  "sha2",
@@ -725,6 +728,7 @@ dependencies = [
  "kv-crypto",
  "kv-mcp",
  "kv-store",
+ "kv-test-support",
  "serde_json",
 ]
 
@@ -737,6 +741,7 @@ dependencies = [
  "data-encoding",
  "getrandom",
  "hmac",
+ "kv-test-support",
  "scrypt",
  "serde_json",
  "sha1",
@@ -758,6 +763,7 @@ dependencies = [
  "kv-crypto",
  "kv-proto",
  "kv-store",
+ "kv-test-support",
  "rustix",
  "serde_json",
  "unicode-general-category",
@@ -786,6 +792,7 @@ dependencies = [
  "exacl",
  "getrandom",
  "kv-crypto",
+ "kv-test-support",
  "rustix",
  "serde",
  "serde_json",
@@ -795,6 +802,10 @@ dependencies = [
  "unicode-general-category",
  "unicode-normalization",
 ]
+
+[[package]]
+name = "kv-test-support"
+version = "0.5.0-dev"
 
 [[package]]
 name = "libc"

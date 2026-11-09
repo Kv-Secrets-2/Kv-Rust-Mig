@@ -633,7 +633,7 @@ fn hmac_artifact_digest_and_signing_key_vectors_match() {
 
 #[test]
 fn rust_signed_owner_grant_and_permit_verify_in_python_when_configured() {
-    let Ok(python) = std::env::var("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Python approval cross-check: KV_PY_REF is unset");
         return;
     };

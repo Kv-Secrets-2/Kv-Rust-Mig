@@ -18,5 +18,8 @@ sha2 = "0.10"
 subtle = "2"
 thiserror = "2"
 
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+
 [lints]
 workspace = true

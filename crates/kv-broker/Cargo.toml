@@ -14,5 +14,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 ureq = { version = "2", default-features = false, features = ["tls", "native-certs"] }
 url = "2"
 
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+
 [lints]
 workspace = true

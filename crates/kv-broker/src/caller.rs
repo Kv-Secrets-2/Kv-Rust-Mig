@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn url_safety_matches_python_for_ip_literals_and_localhost() {
-        let Some(python) = std::env::var_os("KV_PY_REF") else {
+        let Some(python) = kv_test_support::python_reference() else {
             eprintln!("SKIP URL safety parity: set KV_PY_REF");
             return;
         };

@@ -2,8 +2,10 @@
 //! to the Rust server, against the same vault and the same Rust daemon.
 #![cfg(unix)]
 
+#[path = "../../../tests/support/harness.rs"]
+mod harness;
+
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -23,13 +25,7 @@ struct TestDir(PathBuf);
 
 impl TestDir {
     fn new() -> Self {
-        let mut random = [0u8; 16];
-        getrandom::getrandom(&mut random).expect("test randomness");
-        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-        let path =
-            std::env::temp_dir().join(format!("kv-mcp-stage7-{}-{suffix}", std::process::id()));
-        fs::create_dir(&path).expect("create test directory");
-        Self(path)
+        Self(harness::socket_temp_dir("m7", "home"))
     }
 }
 
@@ -96,14 +92,15 @@ fn fixture_master_key() -> (Key32, String) {
 }
 
 fn run_python(python: &std::ffi::OsStr, code: &str, root: &Path, home: &Path, args: &[&str]) {
-    let output = Command::new(python)
+    let mut command = Command::new(python);
+    command
         .arg("-c")
         .arg(code)
         .args(args)
         .current_dir(root)
-        .env("HOME", home)
-        .output()
-        .expect("run Python");
+        .env("HOME", home);
+    let output = harness::output(command, &[], Duration::from_secs(180))
+        .unwrap_or_else(|error| panic!("run Python: {error}"));
     assert!(
         output.status.success(),
         "{}",
@@ -247,6 +244,38 @@ fn profiles(flags: &[&str]) -> Profiles {
 }
 
 fn normalise_log(log: &[u8]) -> String {
+    normalise_log_for_mode(
+        log,
+        std::env::var("KV_PARITY_MODE").as_deref() == Ok("semantic"),
+    )
+}
+
+fn normalise_integer_limit_log(line: &str) -> String {
+    const PREFIX: &str = "[kv_mcp] read error: Exceeds the limit (";
+    const MIDDLE: &str = " digits) for integer string conversion: value has ";
+    const SUFFIX: &str = " digits; use sys.set_int_max_str_digits() to increase the limit";
+    let Some((limit, rest)) = line
+        .strip_prefix(PREFIX)
+        .and_then(|rest| rest.split_once(MIDDLE))
+    else {
+        return line.to_owned();
+    };
+    let Some(count) = rest.strip_suffix(SUFFIX) else {
+        return line.to_owned();
+    };
+    if limit.is_empty()
+        || count.is_empty()
+        || !limit.bytes().all(|byte| byte.is_ascii_digit())
+        || !count.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return line.to_owned();
+    }
+    // Python 3.11+ adds "digits" inside the limit's parentheses. Preserve
+    // both numbers and all other text, and only match this complete log line.
+    format!("{PREFIX}{limit}) for integer string conversion: value has {count}{SUFFIX}")
+}
+
+fn normalise_log_for_mode(log: &[u8], semantic: bool) -> String {
     let text = String::from_utf8_lossy(log);
     let mut out = String::new();
     let mut rest = &*text;
@@ -258,8 +287,47 @@ fn normalise_log(log: &[u8]) -> String {
     out.push_str(rest);
     out.lines()
         .filter(|line| line.starts_with("[kv_mcp]"))
+        .map(|line| {
+            if semantic {
+                normalise_integer_limit_log(line)
+            } else {
+                line.to_owned()
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn semantic_log_normalization_is_limited_to_integer_error_wording() {
+    let canonical = "[kv_mcp] read error: Exceeds the limit (4300) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit";
+    let newer = canonical.replace("(4300)", "(4300 digits)");
+    assert_eq!(normalise_log_for_mode(newer.as_bytes(), false), newer);
+    assert_eq!(normalise_log_for_mode(newer.as_bytes(), true), canonical);
+    assert_eq!(
+        normalise_log_for_mode(canonical.as_bytes(), true),
+        canonical
+    );
+    for changed in [
+        newer.replace("(4300 digits)", "(6400 digits)"),
+        newer.replace("4301 digits;", "6401 digits;"),
+    ] {
+        assert_ne!(normalise_log_for_mode(changed.as_bytes(), true), canonical);
+    }
+    for unrelated in [
+        newer.replace("read error:", "tool error:"),
+        newer.replace("(4300 digits)", "(unknown digits)"),
+        newer.replace("4301 digits;", "unknown digits;"),
+        newer.replace("(4300 digits)", "( digits)"),
+        newer.replace("4301 digits;", " digits;"),
+        newer.replace("integer string conversion:", "integer parsing:"),
+        format!("{newer} extra detail"),
+    ] {
+        assert_eq!(
+            normalise_log_for_mode(unrelated.as_bytes(), true),
+            unrelated
+        );
+    }
 }
 
 fn run_python_server(
@@ -268,24 +336,23 @@ fn run_python_server(
     flags: &[&str],
     input: &[u8],
 ) -> (Vec<u8>, String) {
-    let mut child = Command::new(python)
+    let mut command = Command::new(python);
+    command
         .args(["-m", "kv_mcp"])
         .args(flags)
         .current_dir(&project.root)
         .env("HOME", &project.home)
-        .env("PYTHONIOENCODING", "utf-8")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("start python -m kv_mcp");
-    let mut stdin = child.stdin.take().unwrap();
-    let input = input.to_vec();
-    let writer = thread::spawn(move || {
-        let _ = stdin.write_all(&input);
-    });
-    let output = child.wait_with_output().unwrap();
-    writer.join().unwrap();
+        .env("PYTHONIOENCODING", "utf-8");
+    let output = harness::output(command, input, Duration::from_secs(180))
+        .unwrap_or_else(|error| panic!("python -m kv_mcp: {error}"));
+    // The reference handles fatal input by logging a read error and returning
+    // normally. An interpreter/import failure must not pass transcript parity.
+    assert!(
+        output.status.success(),
+        "python -m kv_mcp exited {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
     (output.stdout, normalise_log(&output.stderr))
 }
 
@@ -664,7 +731,7 @@ const ALL_FLAGS: [&str; 4] = [
 
 #[test]
 fn transcripts_match_python_with_and_without_the_daemon() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 7 MCP parity: set KV_PY_REF");
         return;
     };
@@ -727,7 +794,7 @@ fn transcripts_match_python_with_and_without_the_daemon() {
 
 #[test]
 fn key_kinds_and_fatal_frames_match_python() {
-    let Some(python) = std::env::var_os("KV_PY_REF") else {
+    let Some(python) = kv_test_support::python_reference() else {
         eprintln!("SKIP Stage 7 MCP key-kind parity: set KV_PY_REF");
         return;
     };
