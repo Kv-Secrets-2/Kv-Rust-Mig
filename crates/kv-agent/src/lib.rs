@@ -46,6 +46,8 @@ mod lifecycle;
 #[cfg(unix)]
 mod permits;
 #[cfg(unix)]
+mod requests;
+#[cfg(unix)]
 mod run;
 #[cfg(unix)]
 mod runs;
@@ -946,6 +948,8 @@ pub(crate) struct Shared {
     pub(crate) runs: runs::Runs,
     pub(crate) ledger: kv_grants::ledger::Ledger,
     pub(crate) host: kv_sandbox::bwrap::SandboxHost,
+    /// Python `trust.request_records`: the approval requests this session filed.
+    pub(crate) requests: kv_requests::request_records::RequestRecords,
 }
 
 #[cfg(unix)]
@@ -956,6 +960,7 @@ impl Shared {
             runs: runs::Runs::new(),
             ledger: kv_grants::ledger::Ledger::new(),
             host: kv_sandbox::bwrap::SandboxHost::detect(),
+            requests: kv_requests::request_records::RequestRecords::new(None),
         }
     }
 }

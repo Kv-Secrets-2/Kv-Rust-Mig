@@ -350,12 +350,16 @@ fn run_python(python: &Path, home: &Path, script: &Path, stdin: &[u8]) -> Vec<u8
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     child.stdin.take().unwrap().write_all(stdin).unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success(), "python probe failed");
+    assert!(
+        output.status.success(),
+        "python probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     output.stdout
 }
 

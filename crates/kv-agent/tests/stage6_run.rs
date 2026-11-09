@@ -245,6 +245,11 @@ run_agent(store,get_default_env(root))
     ChildGuard(child)
 }
 
+/// Whether the daemon will find a trusted bubblewrap (the same lookup it makes).
+fn bwrap_installed() -> bool {
+    kv_sandbox::bwrap::bwrap_path().is_some()
+}
+
 fn stop_daemon(root: &Path) {
     let _ = rust_request(root, "stop", &json!({"choice": "now"}));
     let socket = kv_proto::agent_socket_path(Some(root)).unwrap();
@@ -259,9 +264,23 @@ fn comparable(mut value: Value) -> Value {
     if let Some(map) = value.as_object_mut() {
         map.remove("run_id");
         map.remove("audit_warning");
-        // Pending approval-request creation needs the request stores (kv-requests);
-        // until then Rust answers the denial without one. Documented in the stage note.
-        map.remove("approval_request");
+        // Each daemon files its own pending request: a fresh id and its own clock.
+        for key in ["approval_request", "policy_request"] {
+            if let Some(request) = map.get_mut(key).and_then(Value::as_object_mut) {
+                let id = request
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                request.remove("expires_at");
+                if let Some(id) = id {
+                    for (_, field) in request.iter_mut() {
+                        if let Some(text) = field.as_str() {
+                            *field = Value::String(text.replace(&id, "<request_id>"));
+                        }
+                    }
+                }
+            }
+        }
     }
     value
 }
@@ -368,6 +387,7 @@ fn run_replies_match_python_on_the_same_vault() {
     drop(python_daemon);
 
     let join = start_rust_daemon(&vault);
+    let mut filed = 0;
     for ((name, fields), (_, expected)) in run_cases(&vault.root, &project)
         .into_iter()
         .zip(&python_replies)
@@ -378,6 +398,15 @@ fn run_replies_match_python_on_the_same_vault() {
             comparable(expected.clone()),
             "run case {name:?} differs"
         );
+        if expected.get("approval_request").is_some() {
+            // Both daemons filed a pending request of their own for the missing grant.
+            assert_eq!(actual["approval_request"]["status"], "pending", "{name:?}");
+            assert_ne!(
+                actual["approval_request"]["request_id"],
+                expected["approval_request"]["request_id"]
+            );
+            filed += 1;
+        }
         if expected.get("run_id").is_some() {
             let id = actual["run_id"].as_str().unwrap_or("");
             assert!(
@@ -385,6 +414,14 @@ fn run_replies_match_python_on_the_same_vault() {
                 "run id shape: {actual}"
             );
         }
+    }
+    // Without bubblewrap both daemons refuse a secret- or capability-bearing run before
+    // admission, so no request is filed; with it, each files its own pending request.
+    if bwrap_installed() {
+        assert!(
+            filed >= 2,
+            "secrets and capability cases without a grant file requests: {filed}"
+        );
     }
     assert_eq!(
         rust_request(&vault.root, "tracked_files", &json!({})),
@@ -409,6 +446,10 @@ fn stop_waits_for_a_running_program_and_ends_it_on_now() {
         return;
     };
     let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if !bwrap_installed() {
+        eprintln!("SKIP Stage 6c stop parity: bubblewrap is not installed, so no run starts");
+        return;
+    }
     let vault = prepare_vault(&python, "s6r");
     let project = vault.root.join("project");
     fs::create_dir(&project).unwrap();
@@ -501,7 +542,7 @@ fn secret_bearing_run_with_an_owner_grant_matches_python() {
         eprintln!("SKIP Stage 6c grant run parity: set KV_PY_REF");
         return;
     };
-    if !Path::new("/usr/bin/bwrap").exists() && !Path::new("/usr/local/bin/bwrap").exists() {
+    if !bwrap_installed() {
         eprintln!("SKIP Stage 6c grant run parity: bubblewrap is not installed");
         return;
     }
