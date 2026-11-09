@@ -1,0 +1,30 @@
+[package]
+name = "kv-requests"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = "0.22"
+getrandom = "0.2"
+hex = "0.4"
+kv-approvals = { path = "../kv-approvals" }
+kv-crypto = { path = "../kv-crypto" }
+kv-hook = { path = "../kv-hook" }
+kv-sandbox = { path = "../kv-sandbox" }
+kv-store = { path = "../kv-store" }
+serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order"] }
+sha2 = "0.10"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+exacl = "0.13"
+
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+tempfile = "3"
+
+[lints]
+workspace = true

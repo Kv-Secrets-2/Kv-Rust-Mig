@@ -811,6 +811,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "kv-requests"
+version = "0.5.0-dev"
+dependencies = [
+ "base64",
+ "exacl",
+ "getrandom 0.2.17",
+ "hex",
+ "kv-approvals",
+ "kv-crypto",
+ "kv-hook",
+ "kv-sandbox",
+ "kv-store",
+ "kv-test-support",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "time",
+]
+
+[[package]]
 name = "kv-sandbox"
 version = "0.5.0-dev"
 dependencies = [
