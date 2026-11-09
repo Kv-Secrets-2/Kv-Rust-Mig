@@ -246,6 +246,25 @@ impl StateFolder {
     }
 }
 
+/// An exclusive hold on `~/.kv/vaults.lock` (`VaultFolder.lock()`), released on drop;
+/// writers of `~/.kv/vaults.json` keep it from their read to their atomic replace.
+#[cfg(unix)]
+pub struct RegistryLock {
+    _lock: FileLock,
+    _folder: StateFolder,
+}
+
+#[cfg(unix)]
+pub fn registry_lock() -> Result<RegistryLock, VaultOriginError> {
+    let folder = StateFolder::open(true)?
+        .ok_or_else(|| VaultOriginError("the ~/.kv folder is missing".into()))?;
+    let lock = folder.lock()?;
+    Ok(RegistryLock {
+        _lock: lock,
+        _folder: folder,
+    })
+}
+
 #[cfg(unix)]
 struct FileLock(File);
 

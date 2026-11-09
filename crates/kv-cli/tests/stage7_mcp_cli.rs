@@ -92,7 +92,33 @@ fn approved_vault(python: &std::ffi::OsStr, root: &Path, home: &Path) {
     let identity = kv_crypto::keyfile::unwrap_v4(&blob, passphrase.as_bytes()).unwrap();
     let master = kv_crypto::Key32::new(*identity.master_key.as_bytes());
     set_home(home);
+    reviewed_approval_refuses_a_config_changed_after_review(root, &master);
     kv_store::config_authority::approve_config_unattended(root, &master).unwrap();
+}
+
+/// `kv vault approve-config` signs the authority it showed: a config written between
+/// the review and the owner's yes is refused, not approved.
+fn reviewed_approval_refuses_a_config_changed_after_review(root: &Path, master: &kv_crypto::Key32) {
+    use kv_store::config_authority::{approve_reviewed, review_config};
+    let config = root.join(".secrets/config.json");
+    let original = fs::read(&config).unwrap();
+    let approved_before = kv_store::config_authority::approved_authority(root, master).ok();
+    let review = review_config(root).unwrap();
+    kv_store::config::config_transaction(root, |value| {
+        value["providers"]["changed-after-review"] =
+            serde_json::json!({"base_url":"https://example.invalid","secret_name":"X"});
+        Ok(())
+    })
+    .unwrap();
+    let error = approve_reviewed(root, master, &review)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed"), "{error}");
+    assert_eq!(
+        kv_store::config_authority::approved_authority(root, master).ok(),
+        approved_before
+    );
+    fs::write(&config, &original).unwrap();
 }
 
 #[allow(unsafe_code)]

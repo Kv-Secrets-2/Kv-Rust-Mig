@@ -56,10 +56,8 @@ pub fn cmd_vault(p: &Palette, action: VaultAction) -> CmdResult {
 fn approve_config(p: &Palette) -> CmdResult {
     let root = require_project(p)?;
     kv_store::vault_origin::require_local(&root).map_err(|e| quiet_error(p, &e.to_string()))?;
-    let snapshot =
-        kv_store::config::load_config(&root).map_err(|e| quiet_error(p, &e.to_string()))?;
-    let proposed = config_authority::authority_state(&snapshot.value)
-        .map_err(|e| quiet_error(p, &e.to_string()))?;
+    let review =
+        config_authority::review_config(&root).map_err(|e| quiet_error(p, &e.to_string()))?;
     let real = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
     let shown = serde_json::to_string(&real.to_string_lossy()).unwrap_or_default();
     ui::out(&format!(
@@ -94,7 +92,7 @@ fn approve_config(p: &Palette) -> CmdResult {
     show_state("Previously approved authority", previous.as_ref());
     show_state(
         "Proposed authority (origins, secret bindings and policy)",
-        Some(&proposed),
+        Some(review.authority()),
     );
     let answer = match terminal::input("Approve this exact authority? [y/N] ") {
         Ok(text) => text,
@@ -107,7 +105,7 @@ fn approve_config(p: &Palette) -> CmdResult {
             "Config approval cancelled; restore the approved config or run kv vault approve-config again.",
         ));
     }
-    config_authority::approve_config_unattended(&root, &master).map_err(|e| {
+    config_authority::approve_reviewed(&root, &master, &review).map_err(|e| {
         let _ = Exit(1);
         quiet_error(p, &e.to_string())
     })?;
