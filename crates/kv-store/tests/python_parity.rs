@@ -5,11 +5,14 @@ use std::fs;
 use std::process::Command;
 
 use kv_crypto::{Key32, decrypt, derive_labeled_key};
-use kv_store::{DrawerStore, VersionInfo, VersionState};
+use kv_store::{CopyOptions, DrawerStore, StoreError, VersionInfo, VersionState, backup};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use common::{TestDir, copy_fixture_secrets, fixture_master_key, fixture_root, hex, key_copy};
+use common::{
+    TestDir, copy_fixture_secrets, fixture_expected, fixture_master_key, fixture_root, hex,
+    key_copy,
+};
 
 #[test]
 fn python_and_rust_drawer_operations_have_matching_storage_and_cross_reads() {
@@ -432,4 +435,257 @@ fn normalized_inventory(secrets_dir: &std::path::Path, env: &str, master: &Key32
         "record_count": generations.len(),
         "record_generations": generations,
     })
+}
+
+#[test]
+fn python_and_rust_envtree_copy_checked_copy_and_backup_interoperate() {
+    let Some(python) = std::env::var_os("KV_PY_REF") else {
+        eprintln!("SKIP Python Stage 2c parity: set KV_PY_REF to the reference interpreter");
+        return;
+    };
+    let master = fixture_master_key();
+    let passphrase = fixture_expected()["passphrase"]
+        .as_str()
+        .expect("fixture passphrase")
+        .to_owned();
+    let temp = TestDir::new("stage2c-parity");
+    let python_root = temp.project_root("python");
+    let rust_root = temp.project_root("rust");
+    let python_copy_root = temp.project_root("python-copy");
+    let rust_copy_root = temp.project_root("rust-copy");
+    let python_restore_root = temp.project_root("python-restore-python");
+    let python_rust_restore_root = temp.project_root("python-restore-rust");
+    let rust_restore_root = temp.project_root("rust-restore");
+    copy_fixture_secrets(&python_root);
+    let rust_secrets = copy_fixture_secrets(&rust_root);
+    let python_copy_secrets = copy_fixture_secrets(&python_copy_root);
+    let rust_copy_secrets = copy_fixture_secrets(&rust_copy_root);
+    let python_restore_secrets = copy_fixture_secrets(&python_restore_root);
+    let python_rust_restore_secrets = copy_fixture_secrets(&python_rust_restore_root);
+    let rust_restore_secrets = copy_fixture_secrets(&rust_restore_root);
+    let rust_store = DrawerStore::open(&rust_secrets, key_copy(&master));
+    let rust_copy_store = DrawerStore::open(&rust_copy_secrets, key_copy(&master));
+
+    rust_store
+        .copy_env_tree("dev", "staging")
+        .expect("Rust environment-tree copy");
+    rust_copy_store
+        .copy_env_tree("dev", "staging")
+        .expect("Rust-only environment-tree copy");
+    assert_eq!(
+        live_values(&rust_store, "dev"),
+        live_values(&rust_store, "staging")
+    );
+    let records_before_copy =
+        normalized_inventory(&rust_secrets, "staging", &master)["record_count"]
+            .as_u64()
+            .expect("record count before identical copy");
+    let created = rust_store
+        .copy_env_checked(
+            "dev",
+            "staging",
+            CopyOptions {
+                keep_existing: true,
+                ..CopyOptions::default()
+            },
+            1,
+            false,
+        )
+        .expect("Rust checked copy creating destination registration");
+    assert!(created.created);
+    assert_eq!(
+        normalized_inventory(&rust_secrets, "staging", &master)["record_count"],
+        json!(records_before_copy),
+        "an identical checked copy must not rewrite records"
+    );
+    rust_store
+        .set_secret("staging", "API_KEY", "destination value", 1)
+        .expect("set Rust destination value");
+    let kept = rust_store
+        .copy_env_checked(
+            "dev",
+            "staging",
+            CopyOptions {
+                keep_existing: true,
+                ..CopyOptions::default()
+            },
+            1,
+            true,
+        )
+        .expect("Rust checked copy keeping existing value");
+    assert_eq!(kept.kept, vec!["API_KEY"]);
+    assert!(matches!(
+        rust_store.copy_env_checked(
+            "dev",
+            "staging",
+            CopyOptions {
+                expect_replaced: Some(Vec::new()),
+                expect_keep: Some(1),
+                ..CopyOptions::default()
+            },
+            1,
+            true
+        ),
+        Err(StoreError::CopyChanged(message))
+            if message == "environment 'staging' changed while you were deciding; nothing was copied, run the copy again"
+    ));
+    assert!(matches!(
+        rust_store.copy_env_checked(
+            "dev",
+            "staging",
+            CopyOptions {
+                expect_replaced: Some(vec!["API_KEY".into()]),
+                expect_keep: Some(0),
+                ..CopyOptions::default()
+            },
+            1,
+            true
+        ),
+        Err(StoreError::CopyChanged(message))
+            if message == "the history setting changed while you were deciding; nothing was copied, run the copy again"
+    ));
+    let replaced = rust_store
+        .copy_env_checked(
+            "dev",
+            "staging",
+            CopyOptions {
+                expect_replaced: Some(vec!["API_KEY".into()]),
+                expect_keep: Some(1),
+                ..CopyOptions::default()
+            },
+            1,
+            true,
+        )
+        .expect("Rust checked copy replacing destination value");
+    assert_eq!(replaced.replaced, vec!["API_KEY"]);
+    rust_store
+        .set_secret("staging", "REMOVED", "removed value", 1)
+        .expect("set Rust removed snapshot value");
+    rust_store
+        .remove_secret("staging", "REMOVED", 1)
+        .expect("remove Rust snapshot value");
+
+    let rust_backup_path = temp.path().join("rust-backup.kvb");
+    let made_from = rust_root.to_string_lossy();
+    backup::make_backup_with_setting(
+        &rust_store,
+        &rust_backup_path,
+        backup::BackupOptions {
+            envs: &["dev", "prod", "staging"],
+            default_env: "dev",
+            history_keep: 1,
+            passphrase: &passphrase,
+            made_from: &made_from,
+            setting: [14, 8, 1],
+        },
+    )
+    .expect("make Rust backup");
+
+    let python_backup_path = temp.path().join("python-backup.kvb");
+    let operation_path = temp.path().join("stage2c.json");
+    let spec = json!({
+        "stage2c":true,
+        "python_copy_root":python_copy_root,
+        "rust_copy_root":rust_copy_root,
+        "python_restore_root":python_restore_root,
+        "python_rust_restore_root":python_rust_restore_root,
+        "python_backup_path":python_backup_path,
+        "rust_backup_path":rust_backup_path,
+        "passphrase":passphrase,
+        "history_keep":1
+    });
+    fs::write(&operation_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let script = fixture_root().join("../gen/check_store_parity.py");
+    let output = Command::new(python)
+        .arg(script)
+        .arg(&python_root)
+        .arg(&rust_root)
+        .arg(hex(master.as_bytes()))
+        .arg(&operation_path)
+        .env("PYTHONPATH", "/home/ubuntu/repos/kv-secrets")
+        .output()
+        .expect("run Python Stage 2c parity script");
+    assert!(
+        output.status.success(),
+        "Python Stage 2c parity failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS Stage 2c Python parity"), "{stdout}");
+    println!("{}", stdout.trim());
+    let report: Value =
+        serde_json::from_str(stdout.lines().last().expect("parity report")).unwrap();
+    assert_eq!(report["keep_copy"]["kept"], json!(["API_KEY"]));
+    assert_eq!(report["keep_copy"]["copied"], json!(kept.copied));
+    assert_eq!(report["keep_copy"]["created"], json!(kept.created));
+    assert_eq!(report["create_copy"]["copied"], json!(created.copied));
+    assert_eq!(report["create_copy"]["created"], json!(created.created));
+    assert_eq!(report["replace_copy"]["replaced"], json!(["API_KEY"]));
+    assert_eq!(report["replace_copy"]["copied"], json!(replaced.copied));
+    assert_eq!(report["replace_copy"]["created"], json!(replaced.created));
+    assert_eq!(report["replace_mismatch"], json!("CopyChanged"));
+    assert_eq!(
+        report["keep_setting_mismatch"],
+        json!(
+            "the history setting changed while you were deciding; nothing was copied, run the copy again"
+        )
+    );
+
+    let python_copy_store = DrawerStore::open(&python_copy_secrets, key_copy(&master));
+    assert_eq!(
+        live_values(&python_copy_store, "dev"),
+        live_values(&python_copy_store, "staging"),
+        "Rust cross-read of Python-copied environment tree"
+    );
+    assert_eq!(
+        normalized_inventory(&python_copy_secrets, "staging", &master),
+        normalized_inventory(&rust_copy_secrets, "staging", &master),
+        "Python and Rust environment-tree copies"
+    );
+
+    let python_plaintext = backup::open_backup_bytes(
+        &backup::read_backup_file(&python_backup_path).expect("read Python backup"),
+        &passphrase,
+    )
+    .expect("open Python backup");
+    let python_payload = backup::parse_payload(&python_plaintext).expect("parse Python backup");
+    assert_eq!(python_payload.state.history_keep, 1);
+    let rust_restore_store = DrawerStore::open(&rust_restore_secrets, key_copy(&master));
+    for env in ["dev", "prod", "staging"] {
+        rust_restore_store
+            .clear_env_tree(env)
+            .expect("prepare empty Rust restore environment");
+    }
+    let restored_count = rust_restore_store
+        .restore_snapshot(&python_payload.state.environments, 1)
+        .expect("restore Python snapshot in Rust");
+    assert_eq!(
+        restored_count,
+        report["python_restore_count"].as_u64().unwrap() as usize
+    );
+
+    let python_restore_store = DrawerStore::open(&python_restore_secrets, key_copy(&master));
+    let python_rust_restore_store =
+        DrawerStore::open(&python_rust_restore_secrets, key_copy(&master));
+    for env in ["dev", "prod", "staging"] {
+        assert_eq!(
+            normalized_inventory(&rust_restore_secrets, env, &master),
+            normalized_inventory(&python_restore_secrets, env, &master),
+            "Rust restore of Python backup matches Python restore for {env}"
+        );
+        assert_eq!(
+            normalized_inventory(&rust_secrets, env, &master),
+            normalized_inventory(&python_rust_restore_secrets, env, &master),
+            "Python restore of Rust backup matches Rust source for {env}"
+        );
+        assert_eq!(
+            live_values(&rust_restore_store, env),
+            live_values(&python_restore_store, env)
+        );
+        assert_eq!(
+            live_values(&rust_store, env),
+            live_values(&python_rust_restore_store, env)
+        );
+    }
 }

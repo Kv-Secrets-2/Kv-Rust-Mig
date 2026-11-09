@@ -74,6 +74,14 @@ pub(crate) fn ensure_private_dir(path: &Path) -> Result<(), StoreError> {
 }
 
 pub(crate) fn read_regular(path: &Path, what: &str) -> Result<Vec<u8>, StoreError> {
+    read_regular_limit(path, what, VAULT_FILE_LIMIT)
+}
+
+pub(crate) fn read_regular_limit(
+    path: &Path,
+    what: &str,
+    limit: usize,
+) -> Result<Vec<u8>, StoreError> {
     let named_before = fs::symlink_metadata(path)?;
     if is_indirect(&named_before) {
         return Err(StoreError::Structure(format!(
@@ -103,6 +111,12 @@ pub(crate) fn read_regular(path: &Path, what: &str) -> Result<Vec<u8>, StoreErro
             "{} is not a regular file",
             path.display()
         )));
+    }
+    if opened.len() > limit as u64 {
+        return Err(StoreError::TooLarge {
+            what: what.to_owned(),
+            len: usize::try_from(opened.len()).unwrap_or(usize::MAX),
+        });
     }
 
     #[cfg(unix)]
@@ -134,8 +148,8 @@ pub(crate) fn read_regular(path: &Path, what: &str) -> Result<Vec<u8>, StoreErro
 
     let mut contents = Vec::new();
     let mut buffer = [0u8; 8192];
-    while contents.len() <= VAULT_FILE_LIMIT {
-        let remaining = VAULT_FILE_LIMIT + 1 - contents.len();
+    while contents.len() <= limit {
+        let remaining = limit + 1 - contents.len();
         let read_len = remaining.min(buffer.len());
         let count = file.read(&mut buffer[..read_len])?;
         if count == 0 {
@@ -143,7 +157,7 @@ pub(crate) fn read_regular(path: &Path, what: &str) -> Result<Vec<u8>, StoreErro
         }
         contents.extend_from_slice(&buffer[..count]);
     }
-    if contents.len() > VAULT_FILE_LIMIT {
+    if contents.len() > limit {
         return Err(StoreError::TooLarge {
             what: what.to_owned(),
             len: contents.len(),
@@ -152,14 +166,238 @@ pub(crate) fn read_regular(path: &Path, what: &str) -> Result<Vec<u8>, StoreErro
     Ok(contents)
 }
 
+pub(crate) fn clear_env_tree(secrets_dir: &Path, env_id: &str) -> Result<(), StoreError> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{AtFlags, Dir, Mode, OFlags, fsync, open, openat, unlinkat};
+        use std::ffi::CString;
+        use std::os::fd::AsFd;
+
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let root = match open(secrets_dir, flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(()),
+            Err(error) if error == rustix::io::Errno::LOOP => {
+                return Err(StoreError::Structure(format!(
+                    "{} must be a real directory",
+                    secrets_dir.display()
+                )));
+            }
+            Err(error) => return Err(rustix_io_error(error).into()),
+        };
+        let mut parent = root;
+        for component in ["drawers", "envs"] {
+            parent = match openat(&parent, component, flags, Mode::empty()) {
+                Ok(fd) => fd,
+                Err(error) if error == rustix::io::Errno::NOENT => return Ok(()),
+                Err(error)
+                    if error == rustix::io::Errno::LOOP || error == rustix::io::Errno::NOTDIR =>
+                {
+                    return Err(StoreError::Structure(format!(
+                        "symlink or non-directory in drawer path component {component}"
+                    )));
+                }
+                Err(error) => return Err(rustix_io_error(error).into()),
+            };
+        }
+        let env_dir = match openat(&parent, env_id, flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(()),
+            Err(error)
+                if error == rustix::io::Errno::LOOP || error == rustix::io::Errno::NOTDIR =>
+            {
+                return Err(StoreError::Structure(
+                    "environment drawer must be a real directory".into(),
+                ));
+            }
+            Err(error) => return Err(rustix_io_error(error).into()),
+        };
+
+        match openat(&env_dir, "records", flags, Mode::empty()) {
+            Ok(records_dir) => {
+                let mut directory = Dir::read_from(&records_dir).map_err(rustix_io_error)?;
+                let mut names = Vec::new();
+                while let Some(entry) = directory.read() {
+                    let entry = entry.map_err(rustix_io_error)?;
+                    let name = entry.file_name().to_bytes();
+                    if name != b"." && name != b".." {
+                        names.push(CString::new(name).expect("filesystem name has no NUL"));
+                    }
+                }
+                names.sort_by(|left: &CString, right: &CString| {
+                    left.as_bytes().cmp(right.as_bytes())
+                });
+                for name in names {
+                    match unlinkat(&records_dir, &name, AtFlags::empty()) {
+                        Ok(()) => {}
+                        Err(error) if error == rustix::io::Errno::NOENT => {}
+                        Err(error) => return Err(rustix_io_error(error).into()),
+                    }
+                }
+                fsync(records_dir.as_fd()).map_err(rustix_io_error)?;
+                match unlinkat(&env_dir, "records", AtFlags::REMOVEDIR) {
+                    Ok(()) => {}
+                    Err(error) if error == rustix::io::Errno::NOENT => {}
+                    Err(error) => return Err(rustix_io_error(error).into()),
+                }
+            }
+            Err(error) if error == rustix::io::Errno::NOENT => {}
+            Err(error)
+                if error == rustix::io::Errno::LOOP || error == rustix::io::Errno::NOTDIR =>
+            {
+                return Err(StoreError::Structure(
+                    "drawer records must be a real directory".into(),
+                ));
+            }
+            Err(error) => return Err(rustix_io_error(error).into()),
+        }
+
+        let mut directory = Dir::read_from(&env_dir).map_err(rustix_io_error)?;
+        let mut names = Vec::new();
+        while let Some(entry) = directory.read() {
+            let entry = entry.map_err(rustix_io_error)?;
+            let name = entry.file_name().to_bytes();
+            if name != b"." && name != b".." {
+                names.push(CString::new(name).expect("filesystem name has no NUL"));
+            }
+        }
+        names.sort_by(|left: &CString, right: &CString| left.as_bytes().cmp(right.as_bytes()));
+        for name in names {
+            match unlinkat(&env_dir, &name, AtFlags::empty()) {
+                Ok(()) => {}
+                Err(error) if error == rustix::io::Errno::NOENT => {}
+                Err(error) => return Err(rustix_io_error(error).into()),
+            }
+        }
+        fsync(env_dir.as_fd()).map_err(rustix_io_error)?;
+        match unlinkat(&parent, env_id, AtFlags::REMOVEDIR) {
+            Ok(()) => {}
+            Err(error) if error == rustix::io::Errno::NOENT => {}
+            Err(error) => return Err(rustix_io_error(error).into()),
+        }
+        fsync(parent.as_fd()).map_err(rustix_io_error)?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        fn require_dir(path: &Path) -> Result<bool, StoreError> {
+            check_directory(path)
+        }
+
+        fn unlink_plain_children(path: &Path) -> Result<(), StoreError> {
+            for item in fs::read_dir(path)? {
+                let item = item?;
+                let child = item.path();
+                let metadata = match fs::symlink_metadata(&child) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                if is_indirect(&metadata) || metadata.is_dir() {
+                    return Err(StoreError::Structure(format!(
+                        "{} must contain only plain files",
+                        path.display()
+                    )));
+                }
+                match fs::remove_file(child) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            Ok(())
+        }
+
+        let drawers = secrets_dir.join("drawers");
+        let envs = drawers.join("envs");
+        let env_dir = envs.join(env_id);
+        for path in [&drawers, &envs] {
+            if !require_dir(path)? {
+                return Ok(());
+            }
+        }
+        if !require_dir(&env_dir)? {
+            return Ok(());
+        }
+        let records = env_dir.join("records");
+        if require_dir(&records)? {
+            unlink_plain_children(&records)?;
+            match fs::remove_dir(&records) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        unlink_plain_children(&env_dir)?;
+        match fs::remove_dir(&env_dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+pub(crate) fn sync_envs_dir(secrets_dir: &Path) -> Result<(), StoreError> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags, fsync, open, openat};
+        use std::os::fd::AsFd;
+
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut current = match open(secrets_dir, flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(()),
+            Err(error) if error == rustix::io::Errno::LOOP => {
+                return Err(StoreError::Structure(format!(
+                    "{} must be a real directory",
+                    secrets_dir.display()
+                )));
+            }
+            Err(error) => return Err(rustix_io_error(error).into()),
+        };
+        for component in ["drawers", "envs"] {
+            current = match openat(&current, component, flags, Mode::empty()) {
+                Ok(fd) => fd,
+                Err(error) if error == rustix::io::Errno::NOENT => return Ok(()),
+                Err(error)
+                    if error == rustix::io::Errno::LOOP || error == rustix::io::Errno::NOTDIR =>
+                {
+                    return Err(StoreError::Structure(format!(
+                        "symlink or non-directory in drawer path component {component}"
+                    )));
+                }
+                Err(error) => return Err(rustix_io_error(error).into()),
+            };
+        }
+        fsync(current.as_fd()).map_err(rustix_io_error)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = secrets_dir;
+        Ok(())
+    }
+}
+
 pub(crate) fn write_atomic(
     path: &Path,
     contents: &[u8],
     exclusive: bool,
 ) -> Result<(), StoreError> {
-    if contents.len() > VAULT_FILE_LIMIT {
+    write_atomic_limit(path, contents, exclusive, VAULT_FILE_LIMIT, "drawer file")
+}
+
+pub(crate) fn write_atomic_limit(
+    path: &Path,
+    contents: &[u8],
+    exclusive: bool,
+    limit: usize,
+    what: &str,
+) -> Result<(), StoreError> {
+    if contents.len() > limit {
         return Err(StoreError::TooLarge {
-            what: "drawer file".into(),
+            what: what.to_owned(),
             len: contents.len(),
         });
     }

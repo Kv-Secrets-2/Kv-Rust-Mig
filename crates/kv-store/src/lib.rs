@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 
+pub mod backup;
 pub mod envname;
 pub mod fsx;
 pub mod pyjson;
@@ -41,8 +42,121 @@ pub enum StoreError {
     VersionNotKept(u64),
     #[error("'{key}' is not removed in {env}")]
     NotRemoved { env: String, key: String },
+    #[error("{0}")]
+    CopyChanged(String),
+    #[error("environment '{0}' does not exist")]
+    EnvMissing(String),
+    #[error("environment {0} is not empty; a restore needs a new vault")]
+    NotEmpty(String),
     #[error(transparent)]
     Io(#[from] io::Error),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CopyOptions {
+    pub keep_existing: bool,
+    pub expect_replaced: Option<Vec<String>>,
+    pub expect_keep: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CopyRegistration {
+    pub source_registered: bool,
+    pub destination_registered: bool,
+    pub create_destination: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CopyResult {
+    pub copied: usize,
+    pub replaced: Vec<String>,
+    pub kept: Vec<String>,
+    pub created: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackupSecretState {
+    Live,
+    Removed,
+}
+
+pub struct BackupVersion {
+    pub version: u64,
+    pub updated: String,
+    pub value: Zeroizing<String>,
+}
+
+pub struct BackupSecret {
+    pub name: String,
+    pub state: BackupSecretState,
+    pub removed_at: Option<String>,
+    pub versions: Vec<BackupVersion>,
+}
+
+pub struct BackupEnv {
+    pub name: String,
+    pub secrets: Vec<BackupSecret>,
+}
+
+pub struct BackupState {
+    pub environments: Vec<BackupEnv>,
+    pub default_env: String,
+    pub history_keep: usize,
+}
+
+pub fn plan_copy(
+    src_env: &str,
+    dst_env: &str,
+    src: &BTreeMap<String, String>,
+    dst: &BTreeMap<String, String>,
+    options: &CopyOptions,
+    registration: CopyRegistration,
+) -> Result<(BTreeMap<String, String>, CopyResult), StoreError> {
+    if !registration.source_registered {
+        return Err(StoreError::EnvMissing(src_env.to_owned()));
+    }
+    if !registration.destination_registered && !registration.create_destination {
+        return Err(StoreError::EnvMissing(dst_env.to_owned()));
+    }
+    let differ: Vec<String> = src
+        .iter()
+        .filter(|(name, value)| dst.get(*name).is_some_and(|current| current != *value))
+        .map(|(name, _)| name.clone())
+        .collect();
+    let (writes, replaced, kept) = if options.keep_existing {
+        (
+            src.iter()
+                .filter(|(name, _)| !dst.contains_key(*name))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            Vec::new(),
+            differ,
+        )
+    } else {
+        if let Some(expected) = &options.expect_replaced {
+            let expected: HashSet<&str> = expected.iter().map(String::as_str).collect();
+            if differ.iter().any(|name| !expected.contains(name.as_str())) {
+                return Err(StoreError::CopyChanged(format!(
+                    "environment '{dst_env}' changed while you were deciding; nothing was copied, run the copy again"
+                )));
+            }
+        }
+        (
+            src.iter()
+                .filter(|(name, value)| dst.get(*name) != Some(*value))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            differ,
+            Vec::new(),
+        )
+    };
+    let result = CopyResult {
+        copied: src.len() - kept.len(),
+        replaced,
+        kept,
+        created: !registration.destination_registered,
+    };
+    Ok((writes, result))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +188,10 @@ impl DrawerStore {
             #[cfg(test)]
             fail_before_index_save: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn secrets_dir(&self) -> &Path {
+        &self.secrets_dir
     }
 
     pub fn env_id(&self, env: &str) -> String {
@@ -386,6 +504,317 @@ impl DrawerStore {
         Ok(self.unreferenced_record_ids(env, &index)?.len())
     }
 
+    /// The caller validates the registry and decides whether the environment is registered.
+    pub(crate) fn index_present(&self, env: &str) -> Result<bool, StoreError> {
+        envname::validate_env_name(env)?;
+        fsx::strictly_present(&self.index_path_for_env(env))
+    }
+
+    /// The caller holds the storage lock after a drawer-directory rename.
+    pub(crate) fn sync_envs_dir(&self) -> Result<(), StoreError> {
+        fsx::sync_envs_dir(&self.secrets_dir)
+    }
+
+    /// The caller checks registration and approval references before clearing the tree.
+    pub fn clear_env_tree(&self, env: &str) -> Result<(), StoreError> {
+        envname::validate_env_name(env)?;
+        let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        fsx::clear_env_tree(&self.secrets_dir, &self.env_id(env))
+    }
+
+    /// The caller checks both names, handles registration, and holds the storage lock here.
+    pub fn copy_env_tree(&self, old: &str, new: &str) -> Result<(), StoreError> {
+        envname::validate_env_name(old)?;
+        envname::validate_env_name(new)?;
+        let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        if !self.index_present(old)? {
+            return Ok(());
+        }
+        let mut index = self.load_index(old)?;
+        self.ensure_env_tree(new)?;
+        let secrets = index
+            .get_mut("secrets")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?;
+        for (name, entry) in secrets {
+            let has_current =
+                value_is_truthy(entry.get("current_record_id").unwrap_or(&Value::Null));
+            let current = has_current.then(|| current_ref(entry));
+            let object = entry.as_object_mut().ok_or_else(|| {
+                StoreError::Corrupt(format!("drawer index entry is invalid for {old}/{name}"))
+            })?;
+            if let Some(reference) = current {
+                let record_hash = self.recrypt_record(old, new, name, &reference)?;
+                object.insert("record_hash".into(), Value::String(record_hash));
+            }
+            if let Some(history) = object.get_mut("history").and_then(Value::as_array_mut) {
+                for reference in history {
+                    if !reference.is_object() {
+                        return Err(StoreError::Corrupt(
+                            "drawer history reference is not an object".into(),
+                        ));
+                    }
+                    let record_hash = self.recrypt_record(old, new, name, reference)?;
+                    reference
+                        .as_object_mut()
+                        .ok_or_else(|| {
+                            StoreError::Corrupt("drawer history reference is not an object".into())
+                        })?
+                        .insert("record_hash".into(), Value::String(record_hash));
+                }
+            }
+        }
+        self.save_index(new, &mut index)?;
+        self.sync_envs_dir()
+    }
+
+    /// Caller supplies validated registered names and the effective history setting.
+    pub fn backup_state(
+        &self,
+        envs: &[&str],
+        default_env: &str,
+        history_keep: usize,
+    ) -> Result<BackupState, StoreError> {
+        validate_keep(history_keep)?;
+        let names = envs.iter().map(|env| (*env).to_owned()).collect::<Vec<_>>();
+        envname::validate_environment_registry(&names, default_env)?;
+        let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        let mut environments = Vec::with_capacity(envs.len());
+        for env in envs {
+            let index = self.load_index(env)?;
+            let secrets_map = index
+                .get("secrets")
+                .and_then(Value::as_object)
+                .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?;
+            let mut secrets = Vec::new();
+            for (name, entry) in secrets_map {
+                if !entry.is_object()
+                    || !value_is_truthy(entry.get("current_record_id").unwrap_or(&Value::Null))
+                {
+                    continue;
+                }
+                let removed = entry.get("state").and_then(Value::as_str) == Some("deleted");
+                if !removed && !is_live_entry(entry) {
+                    continue;
+                }
+                let mut references = vec![current_ref(entry)];
+                if let Some(history) = entry.get("history").and_then(Value::as_array) {
+                    references.extend(history.iter().cloned());
+                }
+                let mut versions = Vec::with_capacity(references.len());
+                for reference in references {
+                    let (version, updated, value) =
+                        self.load_record_ref_info(env, name, &reference)?;
+                    versions.push(BackupVersion {
+                        version,
+                        updated,
+                        value,
+                    });
+                }
+                secrets.push(BackupSecret {
+                    name: name.clone(),
+                    state: if removed {
+                        BackupSecretState::Removed
+                    } else {
+                        BackupSecretState::Live
+                    },
+                    removed_at: if removed {
+                        entry
+                            .get("deleted")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    } else {
+                        None
+                    },
+                    versions,
+                });
+            }
+            environments.push(BackupEnv {
+                name: (*env).to_owned(),
+                secrets,
+            });
+        }
+        Ok(BackupState {
+            environments,
+            default_env: default_env.to_owned(),
+            history_keep,
+        })
+    }
+
+    /// Caller registers every environment and persists the effective keep setting first.
+    pub fn restore_snapshot(
+        &self,
+        environments: &[BackupEnv],
+        keep: usize,
+    ) -> Result<usize, StoreError> {
+        validate_keep(keep)?;
+        let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        let mut written = 0usize;
+        for env in environments {
+            envname::validate_env_name(&env.name)?;
+            let mut index = self.load_index(&env.name)?;
+            let secrets = index
+                .get("secrets")
+                .and_then(Value::as_object)
+                .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?;
+            if !secrets.is_empty() {
+                return Err(StoreError::NotEmpty(env.name.clone()));
+            }
+            let mut restored = Map::new();
+            for secret in &env.secrets {
+                if secret.versions.is_empty() {
+                    return Err(StoreError::Corrupt("backup secret has no versions".into()));
+                }
+                let removed = secret.state == BackupSecretState::Removed;
+                if removed && keep == 0 {
+                    continue;
+                }
+                let allowed = if removed { keep - 1 } else { keep } + 1;
+                let versions = secret.versions.iter().take(allowed).collect::<Vec<_>>();
+                let mut records = Vec::with_capacity(versions.len());
+                for version in &versions {
+                    let (record, _) = self.write_secret_record(
+                        &env.name,
+                        &secret.name,
+                        &version.value,
+                        &empty_object(),
+                        Some(version.version),
+                        Some(&version.updated),
+                    )?;
+                    let record_id = record.get("current_record_id").cloned().ok_or_else(|| {
+                        StoreError::Corrupt("restored record has no record id".into())
+                    })?;
+                    let mut reference = Map::new();
+                    reference.insert("record_id".into(), record_id);
+                    reference.insert(
+                        "generation".into(),
+                        record.get("generation").cloned().unwrap_or(Value::Null),
+                    );
+                    reference.insert(
+                        "record_hash".into(),
+                        record.get("record_hash").cloned().unwrap_or(Value::Null),
+                    );
+                    reference.insert(
+                        "updated".into(),
+                        record.get("updated").cloned().unwrap_or(Value::Null),
+                    );
+                    records.push((record, Value::Object(reference)));
+                    written += 1;
+                }
+                let (mut entry, _) = records
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| StoreError::Corrupt("backup secret has no versions".into()))?;
+                entry
+                    .as_object_mut()
+                    .ok_or_else(|| StoreError::Corrupt("restored entry is invalid".into()))?
+                    .insert(
+                        "created".into(),
+                        Value::String(versions.last().expect("non-empty versions").updated.clone()),
+                    );
+                if records.len() > 1 {
+                    entry
+                        .as_object_mut()
+                        .ok_or_else(|| StoreError::Corrupt("restored entry is invalid".into()))?
+                        .insert(
+                            "history".into(),
+                            Value::Array(
+                                records
+                                    .into_iter()
+                                    .skip(1)
+                                    .map(|(_, reference)| reference)
+                                    .collect(),
+                            ),
+                        );
+                }
+                if removed {
+                    let object = entry
+                        .as_object_mut()
+                        .ok_or_else(|| StoreError::Corrupt("restored entry is invalid".into()))?;
+                    object.insert("state".into(), Value::String("deleted".into()));
+                    let updated = object
+                        .get("updated")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned();
+                    object.insert(
+                        "deleted".into(),
+                        Value::String(secret.removed_at.as_deref().unwrap_or(&updated).to_owned()),
+                    );
+                }
+                restored.insert(secret.name.clone(), entry);
+            }
+            index
+                .get_mut("secrets")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?
+                .extend(restored);
+            self.save_index(&env.name, &mut index)?;
+        }
+        Ok(written)
+    }
+
+    /// Caller checks source existence/registration and performs destination registration first.
+    pub fn copy_env_checked(
+        &self,
+        src: &str,
+        dst: &str,
+        options: CopyOptions,
+        keep: usize,
+        dst_registered: bool,
+    ) -> Result<CopyResult, StoreError> {
+        envname::validate_env_name(src)?;
+        envname::validate_env_name(dst)?;
+        validate_keep(keep)?;
+        let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        let src_index = self.load_index(src)?;
+        let dst_index = self.load_index(dst)?;
+        let src_values = self.live_values(src, &src_index)?;
+        let dst_values = self.live_values(dst, &dst_index)?;
+        let (writes, result) = plan_copy(
+            src,
+            dst,
+            &src_values,
+            &dst_values,
+            &options,
+            CopyRegistration {
+                source_registered: true,
+                destination_registered: dst_registered,
+                create_destination: true,
+            },
+        )?;
+        if options
+            .expect_keep
+            .is_some_and(|expected| !result.replaced.is_empty() && (keep > 0) != (expected > 0))
+        {
+            return Err(StoreError::CopyChanged(
+                "the history setting changed while you were deciding; nothing was copied, run the copy again"
+                    .into(),
+            ));
+        }
+        let mut index = dst_index;
+        let mut dropped = Vec::new();
+        for (name, value) in writes {
+            let old_entry = index
+                .get("secrets")
+                .and_then(Value::as_object)
+                .and_then(|secrets| secrets.get(&name))
+                .map(effective_old_entry)
+                .transpose()?
+                .unwrap_or_else(empty_object);
+            let (entry, _, old_refs) = self.changed_entry(dst, &name, &value, &old_entry, keep)?;
+            index
+                .get_mut("secrets")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?
+                .insert(name, entry);
+            dropped.extend(old_refs);
+        }
+        self.save_index(dst, &mut index)?;
+        self.wipe_records(dst, &dropped)?;
+        Ok(result)
+    }
+
     pub fn save_env(
         &self,
         env: &str,
@@ -534,6 +963,142 @@ impl DrawerStore {
         fsx::write_atomic(&self.index_path_for_env(env), &blob, false)
     }
 
+    fn live_values(
+        &self,
+        env: &str,
+        index: &Value,
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        let secrets = index
+            .get("secrets")
+            .and_then(Value::as_object)
+            .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?;
+        let mut values = BTreeMap::new();
+        for (name, entry) in secrets {
+            if is_live_entry(entry) {
+                values.insert(
+                    name.clone(),
+                    self.load_current_record(env, name, entry)?.to_string(),
+                );
+            }
+        }
+        Ok(values)
+    }
+
+    fn load_record_ref_info(
+        &self,
+        env: &str,
+        key: &str,
+        reference: &Value,
+    ) -> Result<(u64, String, Zeroizing<String>), StoreError> {
+        let generation = reference
+            .get("generation")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| StoreError::Corrupt("drawer generation is invalid".into()))?;
+        let record_id = reference
+            .get("record_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| StoreError::Corrupt("drawer index entry has no record id".into()))?;
+        let mut record_entry = Map::new();
+        record_entry.insert(
+            "current_record_id".into(),
+            Value::String(record_id.to_owned()),
+        );
+        record_entry.insert("generation".into(), Value::Number(Number::from(generation)));
+        record_entry.insert(
+            "record_hash".into(),
+            reference.get("record_hash").cloned().unwrap_or(Value::Null),
+        );
+        let (value, payload_updated) =
+            self.load_current_record_info(env, key, &Value::Object(record_entry))?;
+        let updated = reference
+            .get("updated")
+            .and_then(Value::as_str)
+            .filter(|updated| !updated.is_empty())
+            .or(payload_updated.as_deref())
+            .ok_or_else(|| StoreError::Corrupt("drawer record updated value is invalid".into()))?
+            .to_owned();
+        Ok((generation, updated, value))
+    }
+
+    fn recrypt_record(
+        &self,
+        old: &str,
+        new: &str,
+        key: &str,
+        reference: &Value,
+    ) -> Result<String, StoreError> {
+        let generation = reference
+            .get("generation")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| StoreError::Corrupt("drawer generation is invalid".into()))?;
+        let record_id = reference
+            .get("record_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| StoreError::Corrupt("drawer index entry has no record id".into()))?;
+        fsx::validate_record_id(record_id)?;
+        let expected_hash = reference
+            .get("record_hash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| StoreError::Corrupt("drawer index entry has no record hash".into()))?;
+        let source = read_drawer_file(&self.record_path(old, record_id)?, "drawer record")?;
+        let actual_hash = sha256_hex(&source);
+        if !constant_time_equal(expected_hash.as_bytes(), actual_hash.as_bytes()) {
+            return Err(StoreError::Corrupt("drawer record hash mismatch".into()));
+        }
+        let mut payload = self.decrypt_record_payload(old, key, record_id, generation, &source)?;
+        payload
+            .as_object_mut()
+            .ok_or_else(|| StoreError::Corrupt("drawer record payload is invalid".into()))?
+            .insert("env".into(), Value::String(new.to_owned()));
+        let serialized = pyjson::to_vec(&payload);
+        zeroize_value(&mut payload);
+        let plaintext = Zeroizing::new(serialized?);
+        let encrypted = encrypt(
+            &self.record_key(new, record_id),
+            &plaintext,
+            self.record_aad(new, key, record_id, generation).as_bytes(),
+        );
+        let mut blob = Vec::with_capacity(4 + encrypted.len());
+        blob.extend_from_slice(DRAWER_RECORD_MAGIC);
+        blob.push(DRAWER_FORMAT_VERSION);
+        blob.extend_from_slice(&encrypted);
+        if blob.len() > fsx::VAULT_FILE_LIMIT {
+            return Err(StoreError::TooLarge {
+                what: "drawer record".into(),
+                len: blob.len(),
+            });
+        }
+        let target = self.record_path(new, record_id)?;
+        if fsx::strictly_present(&target)? {
+            return Err(StoreError::Structure(format!(
+                "{} already exists",
+                target.display()
+            )));
+        }
+        match fsx::write_atomic(&target, &blob, true) {
+            Ok(()) => {}
+            Err(StoreError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(StoreError::Structure(format!(
+                    "{} already exists",
+                    target.display()
+                )));
+            }
+            Err(error) => return Err(error),
+        }
+        let verified = read_drawer_file(&target, "drawer record")?;
+        let mut verified_payload =
+            self.decrypt_record_payload(new, key, record_id, generation, &verified)?;
+        let verified_bytes = pyjson::to_vec(&verified_payload);
+        zeroize_value(&mut verified_payload);
+        let verified_bytes = Zeroizing::new(verified_bytes?);
+        if verified_bytes.as_slice() != plaintext.as_slice() {
+            return Err(StoreError::Corrupt(
+                "drawer record verification failed".into(),
+            ));
+        }
+        Ok(sha256_hex(&verified))
+    }
+
     fn changed_entry(
         &self,
         env: &str,
@@ -542,7 +1107,8 @@ impl DrawerStore {
         old_entry: &Value,
         keep: usize,
     ) -> Result<(Value, u64, Vec<Value>), StoreError> {
-        let (mut entry, generation) = self.write_secret_record(env, key, value, old_entry)?;
+        let (mut entry, generation) =
+            self.write_secret_record(env, key, value, old_entry, None, None)?;
         let mut refs = Vec::new();
         if old_entry
             .get("current_record_id")
@@ -595,12 +1161,20 @@ impl DrawerStore {
         key: &str,
         value: &str,
         old_entry: &Value,
+        generation_override: Option<u64>,
+        updated_override: Option<&str>,
     ) -> Result<(Value, u64), StoreError> {
         self.ensure_env_tree(env)?;
-        let generation = generation_from_entry(old_entry)?
-            .checked_add(1)
-            .ok_or_else(|| StoreError::Corrupt("drawer generation overflow".into()))?;
-        let now = now_iso();
+        let generation = match generation_override {
+            Some(generation) => generation,
+            None => generation_from_entry(old_entry)?
+                .checked_add(1)
+                .ok_or_else(|| StoreError::Corrupt("drawer generation overflow".into()))?,
+        };
+        let now = updated_override
+            .filter(|updated| !updated.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(now_iso);
 
         for _ in 0..10 {
             let mut id_bytes = [0u8; 32];
@@ -699,6 +1273,16 @@ impl DrawerStore {
         key: &str,
         entry: &Value,
     ) -> Result<Zeroizing<String>, StoreError> {
+        self.load_current_record_info(env, key, entry)
+            .map(|(value, _)| value)
+    }
+
+    fn load_current_record_info(
+        &self,
+        env: &str,
+        key: &str,
+        entry: &Value,
+    ) -> Result<(Zeroizing<String>, Option<String>), StoreError> {
         let record_id = entry
             .get("current_record_id")
             .and_then(Value::as_str)
@@ -733,7 +1317,18 @@ impl DrawerStore {
         if !constant_time_equal(expected_hash.as_bytes(), actual_hash.as_bytes()) {
             return Err(StoreError::Corrupt("drawer record hash mismatch".into()));
         }
-        self.decrypt_record_value(env, key, record_id, generation, &raw)
+        let mut payload = self.decrypt_record_payload(env, key, record_id, generation, &raw)?;
+        let value = payload
+            .get_mut("value")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| StoreError::Corrupt("drawer record value is invalid".into()))?;
+        let updated = payload
+            .get("updated")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        zeroize_value(&mut payload);
+        Ok((Zeroizing::new(value), updated))
     }
 
     fn decrypt_record_value(
@@ -744,6 +1339,24 @@ impl DrawerStore {
         generation: u64,
         raw: &[u8],
     ) -> Result<Zeroizing<String>, StoreError> {
+        let mut payload = self.decrypt_record_payload(env, key, record_id, generation, raw)?;
+        let value = payload
+            .get_mut("value")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| StoreError::Corrupt("drawer record value is invalid".into()))?;
+        zeroize_value(&mut payload);
+        Ok(Zeroizing::new(value))
+    }
+
+    fn decrypt_record_payload(
+        &self,
+        env: &str,
+        key: &str,
+        record_id: &str,
+        generation: u64,
+        raw: &[u8],
+    ) -> Result<Value, StoreError> {
         if raw.len() < 4 || raw.get(..3) != Some(DRAWER_RECORD_MAGIC.as_slice()) {
             return Err(StoreError::Corrupt(
                 "drawer record has bad magic bytes".into(),
@@ -778,13 +1391,7 @@ impl DrawerStore {
                 "drawer record metadata mismatch".into(),
             ));
         }
-        let value = payload
-            .get_mut("value")
-            .and_then(|value| value.as_str())
-            .map(str::to_owned)
-            .ok_or_else(|| StoreError::Corrupt("drawer record value is invalid".into()))?;
-        zeroize_value(&mut payload);
-        Ok(Zeroizing::new(value))
+        Ok(payload)
     }
 
     fn wipe_records(&self, env: &str, refs: &[Value]) -> Result<(), StoreError> {

@@ -4,9 +4,11 @@
 import hashlib
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 
-from kv.store import DrawerUpgradeBackend
+from kv import backup
+from kv.store import CopyChangedError, DrawerUpgradeBackend
 from kv import vault_origin
 
 
@@ -36,6 +38,175 @@ def normalized_versions(versions):
         for version in versions
     ]
 
+def normalized_inventory(backend, env):
+    index = deepcopy(backend._load_index(env))
+    references = {}
+    for name, entry in index["secrets"].items():
+        record_id = entry.get("current_record_id")
+        generation = entry.get("generation")
+        if record_id and isinstance(generation, int):
+            references[record_id] = (name, generation)
+            entry["current_record_id"] = f"record:{name}:{generation}"
+        entry["record_hash"] = "HASH"
+        for field in ("created", "updated", "deleted"):
+            if field in entry:
+                entry[field] = "TIME"
+        for reference in entry.get("history") or []:
+            record_id = reference.get("record_id")
+            generation = reference.get("generation")
+            if record_id and isinstance(generation, int):
+                references[record_id] = (name, generation)
+                reference["record_id"] = f"record:{name}:{generation}"
+            if "record_hash" in reference:
+                reference["record_hash"] = "HASH"
+            if "updated" in reference:
+                reference["updated"] = "TIME"
+    if "updated" in index.get("_meta", {}):
+        index["_meta"]["updated"] = "TIME"
+    generations = []
+    for path in Path(backend._records_dir(env)).glob("*.kvs"):
+        record_id = path.name[:-4]
+        generations.append(references[record_id])
+    return {
+        "index": index,
+        "record_count": len(generations),
+        "record_generations": sorted(generations),
+    }
+
+def prepare_restore(backend, keep):
+    set_history_keep(backend.root, keep)
+    with backend._storage_lock():
+        for env in ("dev", "prod", "staging"):
+            backend._clear_env_tree(env)
+
+def stage2c_parity(python_root, rust_root, master_key, spec):
+    passphrase = spec["passphrase"]
+    keep = spec["history_keep"]
+    python_backend = DrawerUpgradeBackend(python_root, lambda: master_key)
+    rust_backend = DrawerUpgradeBackend(rust_root, lambda: master_key)
+    python_copy_backend = DrawerUpgradeBackend(
+        Path(spec["python_copy_root"]), lambda: master_key
+    )
+    rust_copy_backend = DrawerUpgradeBackend(
+        Path(spec["rust_copy_root"]), lambda: master_key
+    )
+
+    with python_backend._storage_lock():
+        python_backend._copy_env_tree("dev", "staging")
+    with python_copy_backend._storage_lock():
+        python_copy_backend._copy_env_tree("dev", "staging")
+    if dict(python_backend.list_secrets("dev")) != dict(
+        rust_copy_backend.list_secrets("staging")
+    ):
+        raise AssertionError("Python could not read the Rust-copied environment tree")
+    if normalized_inventory(python_copy_backend, "staging") != normalized_inventory(
+        rust_copy_backend, "staging"
+    ):
+        raise AssertionError("Python and Rust environment-tree copies differ")
+
+    set_history_keep(python_root, keep)
+    create_result = python_backend.copy_env_checked(
+        "dev", "staging", keep_existing=True
+    )
+    python_backend.set_secret("staging", "API_KEY", "destination value")
+    keep_result = python_backend.copy_env_checked(
+        "dev", "staging", keep_existing=True
+    )
+    try:
+        python_backend.copy_env_checked(
+            "dev",
+            "staging",
+            expect_replaced=[],
+            expect_keep=keep,
+        )
+    except CopyChangedError:
+        mismatch = "CopyChanged"
+    else:
+        raise AssertionError("Python checked copy did not reject stale replacements")
+    try:
+        python_backend.copy_env_checked(
+            "dev",
+            "staging",
+            expect_replaced=["API_KEY"],
+            expect_keep=0,
+        )
+    except CopyChangedError as exc:
+        keep_mismatch = str(exc)
+    else:
+        raise AssertionError("Python checked copy did not reject a changed history setting")
+    replace_result = python_backend.copy_env_checked(
+        "dev",
+        "staging",
+        expect_replaced=["API_KEY"],
+        expect_keep=keep,
+    )
+    python_backend.set_secret("staging", "REMOVED", "removed value")
+    python_backend.remove_secret("staging", "REMOVED")
+    if dict(python_backend.list_secrets("staging")) != dict(
+        rust_backend.list_secrets("staging")
+    ):
+        raise AssertionError("checked copy results differ between Python and Rust")
+    if normalized_inventory(python_backend, "staging") != normalized_inventory(
+        rust_backend, "staging"
+    ):
+        raise AssertionError("checked copy indexes differ between Python and Rust")
+
+    python_state = python_backend.backup_state()
+    python_backup_data = backup._payload(
+        python_root,
+        python_state["environments"],
+        python_state["default_env"],
+        python_state["history_keep"],
+    )
+    python_plaintext = json.dumps(
+        python_backup_data, ensure_ascii=False, sort_keys=True
+    ).encode("utf-8")
+    python_backup_path = Path(spec["python_backup_path"])
+    python_backup_path.write_bytes(
+        backup.seal(python_plaintext, passphrase, setting=(14, 8, 1))
+    )
+    python_backup_data = backup.open_backup(python_backup_path, passphrase)
+
+    rust_backup_data = backup.open_backup(
+        Path(spec["rust_backup_path"]), passphrase
+    )
+    python_restore_backend = DrawerUpgradeBackend(
+        Path(spec["python_restore_root"]), lambda: master_key
+    )
+    python_rust_restore_backend = DrawerUpgradeBackend(
+        Path(spec["python_rust_restore_root"]), lambda: master_key
+    )
+    prepare_restore(python_restore_backend, keep)
+    prepare_restore(python_rust_restore_backend, keep)
+    python_restore_count = python_restore_backend.restore_snapshot(
+        python_backup_data["environments"]
+    )
+    python_rust_restore_count = python_rust_restore_backend.restore_snapshot(
+        rust_backup_data["environments"]
+    )
+
+    print("PASS Stage 2c Python parity")
+    print(json.dumps({
+        "create_copy": create_result,
+        "keep_copy": keep_result,
+        "replace_copy": replace_result,
+        "replace_mismatch": mismatch,
+        "keep_setting_mismatch": keep_mismatch,
+        "checked_copy": normalized_inventory(python_backend, "staging"),
+        "python_restore_count": python_restore_count,
+        "python_rust_restore_count": python_rust_restore_count,
+        "python_tree": normalized_inventory(python_copy_backend, "staging"),
+        "rust_tree": normalized_inventory(rust_copy_backend, "staging"),
+        "python_restore": {
+            env: normalized_inventory(python_restore_backend, env)
+            for env in ("dev", "prod", "staging")
+        },
+        "python_rust_restore": {
+            env: normalized_inventory(python_rust_restore_backend, env)
+            for env in ("dev", "prod", "staging")
+        },
+    }, ensure_ascii=False, separators=(",", ":")))
+
 
 def main():
     python_root = Path(sys.argv[1])
@@ -44,6 +215,9 @@ def main():
     operations = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
     envs = ("dev", "prod")
     vault_origin.require_local = lambda _root: None
+    if isinstance(operations, dict) and operations.get("stage2c"):
+        stage2c_parity(python_root, rust_root, master_key, operations)
+        return
     python_backend = DrawerUpgradeBackend(python_root, lambda: master_key)
     rust_backend = DrawerUpgradeBackend(rust_root, lambda: master_key)
 
