@@ -778,6 +778,7 @@ dependencies = [
  "kv-approvals",
  "kv-crypto",
  "kv-store",
+ "kv-test-support",
  "rustix",
  "serde_json",
  "sha2",

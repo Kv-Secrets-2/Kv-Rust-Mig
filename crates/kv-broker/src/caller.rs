@@ -102,6 +102,18 @@ impl ApiCaller {
     }
 
     pub fn call(&self, request: ApiRequest<'_>) -> Value {
+        self.call_with_before_send(request, || Ok(()))
+    }
+
+    /// Admit the provider operation after validation and URL safety checks,
+    /// immediately before entering the HTTP transport. The returned guard stays
+    /// alive through response reading; dropping it closes the committed window.
+    /// A refusal skips the transport entirely and is returned unchanged.
+    pub fn call_with_before_send<G>(
+        &self,
+        request: ApiRequest<'_>,
+        before_send: impl FnOnce() -> Result<G, Value>,
+    ) -> Value {
         let ApiRequest {
             provider_name,
             provider,
@@ -308,6 +320,10 @@ impl ApiCaller {
         )) {
             return json!({"error":error,"error_code":"http_request_invalid"});
         }
+        let _committed = match before_send() {
+            Ok(guard) => guard,
+            Err(refusal) => return refusal,
+        };
         self.send(
             &url,
             &parsed,

@@ -16,7 +16,10 @@ thiserror = "2"
 hex = "0.4"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["fs", "process"] }
+rustix = { version = "1", features = ["fs", "process", "net", "event"] }
+
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
 
 [lints]
 workspace = true
