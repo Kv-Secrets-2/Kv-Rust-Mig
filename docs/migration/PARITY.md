@@ -99,10 +99,10 @@ short names and explicitly verify the socket path fits the macOS/Linux limit.
    decisions ([stage 8 notes](stage8-hook.md)), the `kv run` sandbox
    foundations ([stage 6a notes](stage6a-sandbox.md)), the grants and capability
    tokens, the daemon's `run` command with `kv run`
-   ([stage 6c notes](stage6c-run.md)), and preflight scans, manifests, run risk
-   cards and CLI transcripts ([stage 9b2 notes](stage9b2-preflight.md)). The audit
-   corruption tests also verify the documented conservative handling of a
-   reference exception.
+   ([stage 6c notes](stage6c-run.md)), and preflight scans, manifests,
+   run risk cards and CLI transcripts ([stage 9b2 notes](stage9b2-preflight.md)).
+   The audit corruption tests also verify the documented conservative handling
+   of a reference exception.
 4. Produce Rust crypto vectors and require Python to open them. On the canonical
    lane, also exhaustively verify the generated Unicode digit table.
 5. Write `report.json` plus build, discovery, test and reverse-check logs. A failed

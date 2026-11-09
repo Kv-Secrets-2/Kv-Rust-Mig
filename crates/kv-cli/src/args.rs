@@ -305,7 +305,7 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                 i += 1;
                 continue;
             }
-            if let Some((flag, _)) = spec.flags.iter().find(|(flag, text)| {
+            if let Some((flag, text)) = spec.flags.iter().find(|(flag, text)| {
                 *flag == name
                     || text
                         .trim_start()
@@ -313,6 +313,25 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                         .map(|s| s.trim().split(' ').next().unwrap_or(""))
                         .any(|alias| alias == name)
             }) {
+                if let Some(value) = inline {
+                    let mut aliases: Vec<&str> = text
+                        .trim_start()
+                        .split(',')
+                        .map(|s| s.trim().split(' ').next().unwrap_or(""))
+                        .filter(|alias| !alias.is_empty())
+                        .collect();
+                    if aliases.is_empty() {
+                        aliases.push(flag);
+                    }
+                    return Err(spec_error(
+                        spec,
+                        &format!(
+                            "argument {}: ignored explicit argument {}",
+                            aliases.join("/"),
+                            crate::secrets::py_repr(&value)
+                        ),
+                    ));
+                }
                 parsed.flags.push(flag);
                 i += 1;
                 continue;
@@ -1149,4 +1168,42 @@ fn parse_run(rest: &[String]) -> Result<Option<Command>, ParseError> {
         capability_names,
         cmd: rest[i..].to_vec(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, ParseError, parse};
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    fn usage_error(items: &[&str]) -> String {
+        match parse(&args(items)) {
+            Err(ParseError::Usage(text)) => text,
+            _ => panic!("expected a usage error for {items:?}"),
+        }
+    }
+
+    #[test]
+    fn boolean_flags_refuse_an_explicit_value_like_argparse() {
+        assert!(
+            usage_error(&["rm", "KEY", "--force=false"]).ends_with(
+                "kv rm: error: argument -f/--force: ignored explicit argument 'false'\n"
+            )
+        );
+        assert!(
+            usage_error(&["ls", "--reveal=true"])
+                .ends_with("kv ls: error: argument --reveal: ignored explicit argument 'true'\n")
+        );
+        assert!(usage_error(&["rm", "KEY", "--force="]).contains("ignored explicit argument ''"));
+        assert!(
+            usage_error(&["history", "forget", "KEY", "--all=true"])
+                .contains("error: argument --all: ignored explicit argument 'true'")
+        );
+        assert!(matches!(
+            parse(&args(&["rm", "KEY", "--force"])),
+            Ok(Some(Command::Rm { force: true, .. }))
+        ));
+    }
 }
