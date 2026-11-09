@@ -88,9 +88,21 @@ pub fn input(prompt: &str) -> Result<String, PromptError> {
     Ok(String::from_utf8_lossy(&line).into_owned())
 }
 
+/// Appends a byte without letting `Vec` reallocate behind our back: a full buffer is
+/// replaced by a larger `Zeroizing` one, so the outgrown copy is wiped when it drops
+/// instead of being freed with the partial passphrase still in it.
+fn push_wiped(buffer: &mut Zeroizing<Vec<u8>>, byte: u8) {
+    if buffer.len() == buffer.capacity() {
+        let mut bigger = Zeroizing::new(Vec::with_capacity((buffer.capacity() * 2).max(256)));
+        bigger.extend_from_slice(buffer);
+        *buffer = bigger;
+    }
+    buffer.push(byte);
+}
+
 #[cfg(unix)]
 fn read_line_fd(fd: &impl rustix::fd::AsFd) -> Result<Zeroizing<Vec<u8>>, PromptError> {
-    let mut answer = Zeroizing::new(Vec::new());
+    let mut answer = Zeroizing::new(Vec::with_capacity(256));
     let mut byte = [0u8; 1];
     loop {
         let n = rustix::io::read(fd, &mut byte).map_err(io::Error::from)?;
@@ -100,7 +112,7 @@ fn read_line_fd(fd: &impl rustix::fd::AsFd) -> Result<Zeroizing<Vec<u8>>, Prompt
         if byte[0] == b'\n' {
             return Ok(answer);
         }
-        answer.push(byte[0]);
+        push_wiped(&mut answer, byte[0]);
     }
 }
 
@@ -138,13 +150,23 @@ pub fn getpass(prompt: &str) -> Result<String, PromptError> {
         let _ = err.write_all(prompt.as_bytes());
         let _ = err.flush();
         drop(err);
-        let mut line = Zeroizing::new(Vec::new());
-        let read = io::stdin().lock().read_until(b'\n', &mut line)?;
-        if read == 0 {
-            return Err(PromptError::Eof);
-        }
-        if line.last() == Some(&b'\n') {
-            line.pop();
+        // Read the descriptor directly rather than through `io::stdin()`, whose
+        // internal buffer would keep an unwiped copy of the line.
+        let stdin = rustix::stdio::stdin();
+        let mut line = Zeroizing::new(Vec::with_capacity(256));
+        let mut byte = [0u8; 1];
+        loop {
+            let n = rustix::io::read(stdin, &mut byte).map_err(io::Error::from)?;
+            if n == 0 {
+                if line.is_empty() {
+                    return Err(PromptError::Eof);
+                }
+                break;
+            }
+            if byte[0] == b'\n' {
+                break;
+            }
+            push_wiped(&mut line, byte[0]);
         }
         Ok(String::from_utf8_lossy(&line).into_owned())
     }
