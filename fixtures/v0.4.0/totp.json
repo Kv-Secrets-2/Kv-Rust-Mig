@@ -1,0 +1,126 @@
+{
+  "codes": [
+    {
+      "code": "755224",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 0
+    },
+    {
+      "code": "287082",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 59
+    },
+    {
+      "code": "081804",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 1111111109
+    },
+    {
+      "code": "050471",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 1111111111
+    },
+    {
+      "code": "005924",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 1234567890
+    },
+    {
+      "code": "279037",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 2000000000
+    },
+    {
+      "code": "353130",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "time": 20000000000
+    },
+    {
+      "code": "653532",
+      "secret": "MXUJH7GUM5B3P3HRDG5PP6UZKON3TLQA",
+      "time": 1234567890
+    }
+  ],
+  "encrypted_v3": [
+    {
+      "blob_base64": "S1ZUAw4IAS2G3MyQ5E_62z-N0qVQeIUcJvKlzptr1Fj1kdbBV5uZilTaW2MHAZ43zRdCAgcRk59N3mUR_AyX_n3pTg==",
+      "blob_hex": "4b5654030e08012d86dccc90e44ffadb3f8dd2a55078851c26f2a5ce9b6bd458f591d6c1579b998a54da5b6307019e37cd1742020711939f4dde6511fc0c97fe7de94e",
+      "passphrase": "fixture-totp-16",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "secret_length": 16,
+      "setting": [
+        14,
+        8,
+        1
+      ]
+    },
+    {
+      "blob_base64": "S1ZUAw4IARSUzgudXRRCTRoMLpqJrTx54U0iTR_qCk9klasqE0LPPnqImAblxphuiWs0qIxno7jLOABIS0Rk1tW41VJZCxs4lNVvrxF_RTZ7ChY=",
+      "blob_hex": "4b5654030e08011494ce0b9d5d14424d1a0c2e9a89ad3c79e14d224d1fea0a4f6495ab2a1342cf3e7a889806e5c6986e896b34a88c67a3b8cb3800484b4464d6d5b8d552590b1b3894d56faf117f45367b0a16",
+      "passphrase": "fixture-totp-32",
+      "secret": "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+      "secret_length": 32,
+      "setting": [
+        14,
+        8,
+        1
+      ]
+    },
+    {
+      "blob_base64": "S1ZUAw4IAUPwl5SMcCC6xnSVRveElIjwE9gx7qch6cRQttaJrQYnulJ4vr4YJcfFdex6EyNdZ8V_K2NsSZODLHNXmcMGUF0THLH6IexradHnxTfV7DUVdrnes-PUsXhsMEwIWfvyIcZh2C86-i791mrr_awH-benZP_uxxjPS_KuTX2oUTCsEvY6nixicPPTQevg7l4ohjGiJxtsem3lDjf7LCVbZLph3BSZLhyH0jePnJk=",
+      "blob_hex": "4b5654030e080143f097948c7020bac6749546f7849488f013d831eea721e9c450b6d689ad0627ba5278bebe1825c7c575ec7a13235d67c57f2b636c4993832c735799c306505d131cb1fa21ec6b69d1e7c537d5ec351576b9deb3e3d4b1786c304c0859fbf221c661d82f3afa2efdd66aebfdac07f9b7a764ffeec718cf4bf2ae4d7da85130ac12f63a9e2c6270f3d341ebe0ee5e288631a2271b6c7a6de50e37fb2c255b64ba61dc14992e1c87d2378f9c99",
+      "passphrase": "fixture-totp-128",
+      "secret": "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+      "secret_length": 128,
+      "setting": [
+        14,
+        8,
+        1
+      ]
+    }
+  ],
+  "negative": [
+    {
+      "blob_base64": "S1ZUAhJBYlAb1FZ4BM9UqErhfBb-OuV92ySIrSN9JfrDmXTjnMBQYiZDgBTs3O07JeTJ6CJgHLeyrFUcM6DrFg==",
+      "name": "real-v2-blob",
+      "passphrase": "fixture-totp-v2",
+      "python_outcome": "ok",
+      "secret": "JBSWY3DPEHPK3PXP"
+    },
+    {
+      "blob_base64": "S1ZUAw4IARSUzgudXRRCTRoMLpqJrTx54U0iTR_qCk9klasqE0LPPnqImAblxphuiWs0qIxno7jLOABIS0Rk1tW41VJZCxs4lNVvrxF_RTZ7Cg==",
+      "name": "v3-truncated-by-one",
+      "passphrase": "fixture-totp-32",
+      "python_outcome": "invalid_tag"
+    },
+    {
+      "blob_base64": "S1ZUAw4IARSUzgudXRRCTRoMLpqJrTx54U0iTR_qCk9klasqE0LPPnqImAblxphuiWs0qIxno7jLOABIS0Rk1tW41VJZCxs4lNVvrxF_RTZ7Chc=",
+      "name": "v3-tag-byte-flipped",
+      "passphrase": "fixture-totp-32",
+      "python_outcome": "invalid_tag"
+    }
+  ],
+  "uris": [
+    {
+      "account": "kv-secrets",
+      "issuer": "kv",
+      "name": "defaults",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "uri": "otpauth://totp/kv:kv-secrets?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=kv"
+    },
+    {
+      "account": "a b@c.d",
+      "issuer": "My Org",
+      "name": "spaces-and-at",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "uri": "otpauth://totp/My%20Org:a%20b%40c.d?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=My%20Org"
+    },
+    {
+      "account": "ü",
+      "issuer": "kv",
+      "name": "unicode",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "uri": "otpauth://totp/kv:%C3%BC?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=kv"
+    }
+  ]
+}

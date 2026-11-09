@@ -1,0 +1,29 @@
+# kv — encrypted secrets management
+# The key file must NEVER be committed
+key
+run_grants.json
+approval_signing_key
+capability_tokens.json
+approval_requests.json
+policy_requests.json
+storage.lock
+
+# Encrypted secret data may be committed only while the key remains private
+!*.enc
+!*.kvi
+!*.kvs
+!drawers/
+!drawers/**
+
+# Configuration and its owner approval are local authority, never shared
+/config.json
+/config-authority
+/vault-marker
+
+# Local migration recovery material is encrypted but history-bearing
+migration-backups/
+
+# Stable writer lock and private atomic-write residue are never versioned
+/config.lock
+/.kv-write-*.tmp
+/key-config.pending

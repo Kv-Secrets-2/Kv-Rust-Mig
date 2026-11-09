@@ -1,0 +1,231 @@
+{
+  "excluded_vault_paths": [
+    {
+      "path": ".secrets/config.lock",
+      "reason": "Machine-local configuration writer lock; it carries no vault-format data."
+    },
+    {
+      "path": ".secrets/storage.lock",
+      "reason": "Machine-local synchronization lock; it carries no vault-format data."
+    },
+    {
+      "path": ".secrets/vault-marker",
+      "reason": "Machine-local provenance marker bound to the source directory object; it is not vault-format data."
+    }
+  ],
+  "files": {
+    "aead.json": {
+      "mode": "0o0644",
+      "sha256": "551a1005b86cebb9f53f08bc6a374bc31263d1085b6a753d7101f10fe282f770",
+      "size_bytes": 18726
+    },
+    "backup_codes.json": {
+      "mode": "0o0644",
+      "sha256": "6b4d75889165e114b7197e7fa46abeaf7267251edb8914b11c573199ab8981af",
+      "size_bytes": 4444
+    },
+    "keys.json": {
+      "mode": "0o0644",
+      "sha256": "2491656e06f020051126372c88944874081a6811477b11cae78b0591ac928bf0",
+      "size_bytes": 14847
+    },
+    "keys/legacy-v2.kvw": {
+      "mode": "0o0644",
+      "sha256": "2557a5b088846119d78e3c881ace75adffd07df6dbbd1929300c33f7d3ae6f41",
+      "size_bytes": 80
+    },
+    "keys/legacy-v3.kvw": {
+      "mode": "0o0644",
+      "sha256": "f3e70f4cf1f968a98a91ddffb6226c39fd8de67d5324646a96f59d0858f9f47b",
+      "size_bytes": 142
+    },
+    "keys/negative/ciphertext-byte-flipped.kvw": {
+      "mode": "0o0644",
+      "sha256": "61c7cabb2a0d19b225ae2fd2e01dd62a3d688a30386df9c67dd7bcccaa9533ad",
+      "size_bytes": 145
+    },
+    "keys/negative/extended-by-one.kvw": {
+      "mode": "0o0644",
+      "sha256": "b3e6b4d78b93a3b69396b278fbfe2ac84c22bebc2ca171b303b557ec95f1b6cd",
+      "size_bytes": 146
+    },
+    "keys/negative/location-byte-flipped.kvw": {
+      "mode": "0o0644",
+      "sha256": "37e73f7608536e9e8471714e22bb64d08b1459f784c99e4064b7500b539d61f0",
+      "size_bytes": 145
+    },
+    "keys/negative/location-length-4097.kvw": {
+      "mode": "0o0644",
+      "sha256": "b8b7c42278f223a968c9750e816ee9873ad9a1e44ced2c6fb040174e66f84bcb",
+      "size_bytes": 145
+    },
+    "keys/negative/location-length-zero.kvw": {
+      "mode": "0o0644",
+      "sha256": "650414ce4e987a5d6bc8fd64494bd12cfc7ca8a9ebb6f69fe18938630000b62c",
+      "size_bytes": 145
+    },
+    "keys/negative/magic-kvw-05.kvw": {
+      "mode": "0o0644",
+      "sha256": "19d6aa09c940fcfc3dbe1beac8ee79c26a3ecbafb5d8b0dd981a5d98999dc589",
+      "size_bytes": 145
+    },
+    "keys/negative/nonce-byte-flipped.kvw": {
+      "mode": "0o0644",
+      "sha256": "4d9002a88d440d8ba442b8949547635c511b46d416347177cadbd87d2f2f1503",
+      "size_bytes": 145
+    },
+    "keys/negative/salt-byte-flipped.kvw": {
+      "mode": "0o0644",
+      "sha256": "adf3e99a1772339b2ad2142273c5e3b9d6086387882fe33c82a49e11c62af885",
+      "size_bytes": 145
+    },
+    "keys/negative/setting-13-8-1.kvw": {
+      "mode": "0o0644",
+      "sha256": "404f3f8e5d53780833a7695919406a917caeb1249a98d95749017ce2959cc474",
+      "size_bytes": 145
+    },
+    "keys/negative/setting-14-8-2.kvw": {
+      "mode": "0o0644",
+      "sha256": "34561d2c8b6a6f81b1ff1c97fe172a0ab0d604c543ebd7871427107e5f00f3d8",
+      "size_bytes": 145
+    },
+    "keys/negative/setting-14-9-1.kvw": {
+      "mode": "0o0644",
+      "sha256": "859d4b8e020d978d18e4dc597d0c0e6edc7d41c3df043c9ac4b0ff6870b5fe77",
+      "size_bytes": 145
+    },
+    "keys/negative/setting-15-8-1.kvw": {
+      "mode": "0o0644",
+      "sha256": "dced40a0455d8f63ddedaee2709185c1bfc9cffd9187a153bbae18bc584aaa9c",
+      "size_bytes": 145
+    },
+    "keys/negative/setting-18-8-1.kvw": {
+      "mode": "0o0644",
+      "sha256": "7445b9184267fbb50d47634679c72aa55f325c6745d33cdf320e0a380f2701ae",
+      "size_bytes": 145
+    },
+    "keys/negative/tag-byte-flipped.kvw": {
+      "mode": "0o0644",
+      "sha256": "983f11b37e158d0b205db0eafc533f33e53664c63cb94c56bc739ee76a869ede",
+      "size_bytes": 145
+    },
+    "keys/negative/truncated-by-one.kvw": {
+      "mode": "0o0644",
+      "sha256": "0d7d939f6bc00f59d5ecf1823faa7e33e693f32e2016f4f0ad3a6e22351ecc33",
+      "size_bytes": 144
+    },
+    "keys/v4-location-4096.kvw": {
+      "mode": "0o0644",
+      "sha256": "d55677247c557bee048189bae96ee161052bf46d5940e26d32ef2374faac5f94",
+      "size_bytes": 4229
+    },
+    "keys/v4-location-non-utf8.kvw": {
+      "mode": "0o0644",
+      "sha256": "5497f9e4a51641965e2fd31b84f8491849a3d5d110626256a6929c1005813205",
+      "size_bytes": 144
+    },
+    "keys/v4-setting14-passphrase-1.kvw": {
+      "mode": "0o0644",
+      "sha256": "e01652501c488e9e0db0f50d6cc379b794c9d5ae6a0264eed0423902769ba4cc",
+      "size_bytes": 145
+    },
+    "keys/v4-setting14-passphrase-2.kvw": {
+      "mode": "0o0644",
+      "sha256": "6e5ecf1f8452cf757f6a9debe81ad8e008f41fd78989b5b55c3c76ca8b69ade6",
+      "size_bytes": 145
+    },
+    "keys/v4-setting14-passphrase-3.kvw": {
+      "mode": "0o0644",
+      "sha256": "6d212eb174217a0c2e9d88926791860069786ad727b593b3dc6c474ba459936b",
+      "size_bytes": 145
+    },
+    "keys/v4-setting17.kvw": {
+      "mode": "0o0644",
+      "sha256": "88536c26b485c8fbf98cba1e602419f952d68c42af6c6da51940d8000d7301d9",
+      "size_bytes": 145
+    },
+    "labeled_keys.json": {
+      "mode": "0o0644",
+      "sha256": "92559679b2849ff42b7db328271fc3b88345edd16c98cbc2ce0b8f8ea996cb3e",
+      "size_bytes": 5567
+    },
+    "recovery.json": {
+      "mode": "0o0644",
+      "sha256": "a55cb9551b9e6a923ee6c96c5fbb0311e741cfb93e546c6c8b8966b150af6111",
+      "size_bytes": 1468
+    },
+    "totp.json": {
+      "mode": "0o0644",
+      "sha256": "98d2c287c8ee87dec8d7a391eba63b2ada713061c50c1dbd0b336bc7f2fa31ed",
+      "size_bytes": 4382
+    },
+    "vaults/basic.expected.json": {
+      "mode": "0o0644",
+      "sha256": "482f78320e1aa81d60a38aaef08066915daed6230f671b5396bb011691dfed15",
+      "size_bytes": 535
+    },
+    "vaults/basic/.secrets/.gitignore": {
+      "mode": "0o0600",
+      "sha256": "0fdc200c136e32906077acef16f97c476ffbfcb69b27a0a5b5399a1fa21263fd",
+      "size_bytes": 651
+    },
+    "vaults/basic/.secrets/config.json": {
+      "mode": "0o0600",
+      "sha256": "a29c6041234cc4cce4bf0f91643b3a8ecde2d48179b454c98e0fe691e9e96409",
+      "size_bytes": 1056
+    },
+    "vaults/basic/.secrets/drawers/envs/e_724acd3f4428756134289cd7d607d87a/index.kvi": {
+      "mode": "0o0600",
+      "sha256": "4c9d3561daa594dc21e3cbb2aaba54618ba6709626811c23e144e1bcbb4ebce0",
+      "size_bytes": 1785
+    },
+    "vaults/basic/.secrets/drawers/envs/e_724acd3f4428756134289cd7d607d87a/records/r_2f599626b4c32e1c9f6dddf5f9366fbd316a60e302e52000841197415671890e.kvs": {
+      "mode": "0o0600",
+      "sha256": "24c66fd1a81c6e1e6dab72eed26e67d7e1903f8349cf32112e3729ca157e8c3a",
+      "size_bytes": 272
+    },
+    "vaults/basic/.secrets/drawers/envs/e_724acd3f4428756134289cd7d607d87a/records/r_37a191c605f3972a9aa12c14b4627cf4742bb6919a1dc46a5e7fe5d37248e80b.kvs": {
+      "mode": "0o0600",
+      "sha256": "c80fa59e996176f24ba2b722b42733672e515ca8f4caf06b1fa89c2d8a87bf1e",
+      "size_bytes": 267
+    },
+    "vaults/basic/.secrets/drawers/envs/e_724acd3f4428756134289cd7d607d87a/records/r_8cdc933eb787fc36bfcd03cb6cfaeefbfcb34fea285f27447aca6f8198a38e8d.kvs": {
+      "mode": "0o0600",
+      "sha256": "81169bc9cd66fa42b5a20d432f95a0eb2bd836ea295415f4e7dbf702d5774aae",
+      "size_bytes": 271
+    },
+    "vaults/basic/.secrets/drawers/envs/e_724acd3f4428756134289cd7d607d87a/records/r_9dbbcf58bfaafb55abab75df6dca6e40a3593c19efa0879e06a72f937e7d9204.kvs": {
+      "mode": "0o0600",
+      "sha256": "ff5f16190a4641438fdb7f63e4c5976ddbadf62171544f636ca3c34836b0cc72",
+      "size_bytes": 267
+    },
+    "vaults/basic/.secrets/drawers/envs/e_724acd3f4428756134289cd7d607d87a/records/r_c4654708074b7718258ae07e6d7d427f0e87f313ec08d95d1d4e3b67794b70b5.kvs": {
+      "mode": "0o0600",
+      "sha256": "77782ff52142777b4b974079d4b77d5fc26dad1583889fdc9c82976f2567cdb6",
+      "size_bytes": 272
+    },
+    "vaults/basic/.secrets/drawers/envs/e_75e1e5ce441ac98d1d222aac976b0c3e/index.kvi": {
+      "mode": "0o0600",
+      "sha256": "48e3b421ee386d0d05c7d9ab937705378bbf9a93451d7e8397d6481035bc4410",
+      "size_bytes": 480
+    },
+    "vaults/basic/.secrets/drawers/envs/e_75e1e5ce441ac98d1d222aac976b0c3e/records/r_af28da3742f4fc7b373fdd6859328f451da7d802e6e4fe237f1cf7cabdc00cc5.kvs": {
+      "mode": "0o0600",
+      "sha256": "cef0cd2c6b9fe62c26e6678b720c2440649d6a1f2af85e323ec15b14d77009fc",
+      "size_bytes": 280
+    },
+    "vaults/basic/.secrets/key": {
+      "mode": "0o0600",
+      "sha256": "c8f243aa522108be0cfd9b51f90c48f7715ad19279188247e248dbef28cf9edc",
+      "size_bytes": 165
+    }
+  },
+  "manifest_note": "Hashes cover every generated file except manifest.json itself, which cannot contain its own SHA-256 without a self-reference.",
+  "reference": {
+    "commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
+    "cryptography_version": "50.0.2",
+    "package": "kv-secrets",
+    "package_version": "0.4.0",
+    "python_version": "3.10.12"
+  }
+}

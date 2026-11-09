@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "created": "2026-11-01T10:41:08.807280+00:00",
+  "default_env": "dev",
+  "environments": [
+    "dev",
+    "prod"
+  ],
+  "cipher": "chacha20-poly1305",
+  "storage": {
+    "format": "drawers"
+  },
+  "security": {
+    "passphrase": true,
+    "totp": false,
+    "approval_mode": "unset"
+  },
+  "broker_policy": {
+    "http": {
+      "openai": {
+        "origin": "https://api.openai.com",
+        "secret_name": "OPENAI_API_KEY",
+        "rules": []
+      },
+      "anthropic": {
+        "origin": "https://api.anthropic.com",
+        "secret_name": "ANTHROPIC_API_KEY",
+        "rules": []
+      },
+      "google": {
+        "origin": "https://generativelanguage.googleapis.com",
+        "secret_name": "GOOGLE_API_KEY",
+        "rules": []
+      },
+      "github": {
+        "origin": "https://api.github.com",
+        "secret_name": "GITHUB_TOKEN",
+        "rules": []
+      },
+      "google-cloud": {
+        "origin": "https://www.googleapis.com",
+        "secret_name": "GOOGLE_CLOUD_API_KEY",
+        "rules": []
+      }
+    }
+  }
+}
