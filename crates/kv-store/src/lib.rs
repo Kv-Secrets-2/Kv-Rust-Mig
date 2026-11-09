@@ -15,9 +15,11 @@ use time::OffsetDateTime;
 pub mod approval_refs;
 pub mod backup;
 pub mod config;
+pub mod config_authority;
 pub mod envname;
 pub mod fsx;
 pub mod pyjson;
+pub mod vault_origin;
 
 const DRAWER_INDEX_MAGIC: &[u8; 3] = b"KVI";
 const DRAWER_RECORD_MAGIC: &[u8; 3] = b"KVS";

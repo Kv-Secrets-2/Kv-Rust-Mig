@@ -509,6 +509,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "kv-agent"
+version = "0.5.0-dev"
+dependencies = [
+ "getrandom",
+ "kv-crypto",
+ "kv-proto",
+ "kv-store",
+ "libc",
+ "rustix",
+ "serde_json",
+ "sha2",
+ "signal-hook",
+ "subtle",
+ "thiserror",
+]
+
+[[package]]
 name = "kv-approvals"
 version = "0.5.0-dev"
 dependencies = [
@@ -548,6 +565,18 @@ dependencies = [
  "subtle",
  "thiserror",
  "zeroize",
+]
+
+[[package]]
+name = "kv-proto"
+version = "0.5.0-dev"
+dependencies = [
+ "getrandom",
+ "kv-store",
+ "rustix",
+ "serde_json",
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]
@@ -829,6 +858,26 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "signal-hook"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
+
+[[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
 ]
 
 [[package]]
