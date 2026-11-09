@@ -44,6 +44,8 @@ pub fn register_vault(root: &Path, kind: &str) -> Result<(), String> {
         .to_str()
         .ok_or("the vault path is not text")?
         .to_owned();
+    #[cfg(unix)]
+    let lock = kv_store::vault_origin::registry_lock().map_err(|e| e.to_string())?;
     let file = folder.join("vaults.json");
     let mut entries: Vec<Value> = match std::fs::symlink_metadata(&file) {
         Ok(meta) if meta.is_file() => {
@@ -87,6 +89,8 @@ pub fn register_vault(root: &Path, kind: &str) -> Result<(), String> {
     let payload = kv_store::pyjson::to_vec_indent2_ascii(&sort_keys(Value::Object(doc)))
         .map_err(|e| e.to_string())?;
     crate::fsutil::write_private_atomic(&file, &payload).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    drop(lock);
     let mut fields = Map::new();
     fields.insert("path".into(), Value::String(real_text));
     fields.insert("kind".into(), Value::String(kind.to_owned()));
@@ -137,6 +141,11 @@ pub fn last_backup_at(root: &Path) -> Option<String> {
 pub fn record_backup(root: &Path, stamp: &str) -> Result<(), String> {
     let folder = kv_store::vault_origin::state_dir().map_err(|e| e.to_string())?;
     let file = folder.join("vaults.json");
+    if std::fs::symlink_metadata(&file).is_err() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    let _lock = kv_store::vault_origin::registry_lock().map_err(|e| e.to_string())?;
     let raw = match std::fs::symlink_metadata(&file) {
         Ok(meta) if meta.is_file() => std::fs::read(&file).map_err(|e| e.to_string())?,
         Ok(_) => return Err("~/.kv/vaults.json is not a plain file".into()),
