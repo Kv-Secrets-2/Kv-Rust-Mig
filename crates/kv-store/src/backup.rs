@@ -2,9 +2,10 @@ use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 
 use kv_crypto::{
-    CryptoError, Zeroize, Zeroizing, decrypt_with_nonce, derive_backup_key, encrypt_with_nonce,
+    CryptoError, Identity, Key32, Zeroize, Zeroizing, decrypt_with_nonce, derive_backup_key,
+    encrypt_with_nonce, keyfile,
 };
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Number, Value, json};
 use thiserror::Error;
 
 use crate::{
@@ -17,7 +18,7 @@ pub const FORMAT_VERSION: u8 = 1;
 pub const HEADER_LEN: usize = 40;
 pub const TAG_LEN: usize = 16;
 pub const BACKUP_READ_LIMIT: usize = 512 * 1024 * 1024;
-const DEFAULT_SETTING: [u8; 3] = [17, 8, 1];
+pub const DEFAULT_SETTING: [u8; 3] = [17, 8, 1];
 
 #[derive(Debug, Error)]
 pub enum BackupError {
@@ -377,10 +378,39 @@ pub fn make_backup_with_setting(
     let path = path.as_ref();
     check_destination(store, path)?;
     let state = store.backup_state(options.envs, options.default_env, options.history_keep)?;
+    make_backup_from_state_unchecked(
+        path,
+        state,
+        options.passphrase,
+        options.made_from,
+        options.setting,
+    )
+}
+
+pub fn make_backup_from_state(
+    store: &DrawerStore,
+    path: impl AsRef<Path>,
+    state: BackupState,
+    passphrase: &str,
+    made_from: &str,
+    setting: [u8; 3],
+) -> Result<BackupSummary, BackupError> {
+    let path = path.as_ref();
+    check_destination(store, path)?;
+    make_backup_from_state_unchecked(path, state, passphrase, made_from, setting)
+}
+
+fn make_backup_from_state_unchecked(
+    path: &Path,
+    state: BackupState,
+    passphrase: &str,
+    made_from: &str,
+    setting: [u8; 3],
+) -> Result<BackupSummary, BackupError> {
     let created_at = stamp_now();
-    let plaintext = Zeroizing::new(payload_bytes(&state, options.made_from, &created_at)?);
+    let plaintext = Zeroizing::new(payload_bytes(&state, made_from, &created_at)?);
     parse_payload(&plaintext)?;
-    let blob = seal(&plaintext, options.passphrase, options.setting)?;
+    let blob = seal(&plaintext, passphrase, setting)?;
     if blob.len() > BACKUP_READ_LIMIT {
         return Err(BackupError::Message(format!(
             "this vault's backup would be {} MiB, more than kv reads back ({} MiB); nothing was written",
@@ -398,17 +428,17 @@ pub fn make_backup_with_setting(
         }
         Err(error) => return Err(BackupError::Store(error)),
     }
-    let written = open_backup_bytes(&read_backup_file(path)?, options.passphrase)?;
+    let written = open_backup_bytes(&read_backup_file(path)?, passphrase)?;
     if written.as_slice() != plaintext.as_slice() {
         return Err(BackupError::Message(
             "the written backup file did not verify".into(),
         ));
     }
     parse_payload(&written)?;
-    Ok(summary(&state, &created_at, options.made_from))
+    Ok(summary(&state, &created_at, made_from))
 }
 
-fn check_destination(store: &DrawerStore, path: &Path) -> Result<(), BackupError> {
+pub fn check_destination(store: &DrawerStore, path: &Path) -> Result<(), BackupError> {
     let absolute = absolute_path(path)?;
     let secrets_dir = absolute_path(store.secrets_dir())?;
     if path_is_within(&absolute, &secrets_dir) {
@@ -444,6 +474,152 @@ fn check_destination(store: &DrawerStore, path: &Path) -> Result<(), BackupError
         ));
     }
     Ok(())
+}
+
+pub fn check_restore_target(target: impl AsRef<Path>) -> Result<PathBuf, BackupError> {
+    let path = absolute_path(target.as_ref())?;
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(BackupError::Message(format!(
+                    "{} is not a new folder; a restore goes into a new folder only",
+                    path.display()
+                )));
+            }
+            if std::fs::read_dir(&path)
+                .map_err(StoreError::Io)?
+                .next()
+                .is_some()
+            {
+                return Err(BackupError::Message(format!(
+                    "{} is not empty; a restore goes into a new folder only",
+                    path.display()
+                )));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path.parent().ok_or_else(|| {
+                BackupError::Message(format!("the folder {} does not exist", path.display()))
+            })?;
+            let parent_metadata = std::fs::symlink_metadata(parent).map_err(|_| {
+                BackupError::Message(format!("the folder {} does not exist", parent.display()))
+            })?;
+            if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
+                return Err(BackupError::Message(format!(
+                    "the folder {} does not exist",
+                    parent.display()
+                )));
+            }
+        }
+        Err(error) => return Err(BackupError::Store(StoreError::Io(error))),
+    }
+    Ok(path)
+}
+
+pub fn restore_backup(
+    payload: BackupPayload,
+    passphrase: &str,
+    target: impl AsRef<Path>,
+) -> Result<crate::config::Vault, BackupError> {
+    crate::envname::validate_environment_registry(
+        &payload
+            .state
+            .environments
+            .iter()
+            .map(|env| env.name.clone())
+            .collect::<Vec<_>>(),
+        &payload.state.default_env,
+    )
+    .map_err(|_| {
+        BackupError::Message("the backup's environment names are invalid or ambiguous".into())
+    })?;
+    if passphrase.is_empty() {
+        return Err(BackupError::Message(
+            "passphrase is required for new vaults".into(),
+        ));
+    }
+    let root = check_restore_target(target)?;
+    match std::fs::create_dir(&root) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(BackupError::Store(StoreError::Io(error))),
+    }
+    check_restore_target(&root)?;
+    fsx::ensure_private_dir(&root)?;
+    let root = std::fs::canonicalize(&root).map_err(StoreError::Io)?;
+    let secrets = root.join(".secrets");
+    fsx::ensure_private_dir(&secrets)?;
+    let gitignore = b"# kv \xe2\x80\x94 encrypted secrets management\n# The key file must NEVER be committed\nkey\nrun_grants.json\napproval_signing_key\ncapability_tokens.json\napproval_requests.json\npolicy_requests.json\nstorage.lock\n\n# Encrypted secret data may be committed only while the key remains private\n!*.enc\n!*.kvi\n!*.kvs\n!drawers/\n!drawers/**\n\n# Configuration and its owner approval are local authority, never shared\n/config.json\n/config-authority\n/vault-marker\n\n# Local migration recovery material is encrypted but history-bearing\nmigration-backups/\n\n# Stable writer lock and private atomic-write residue are never versioned\n/config.lock\n/.kv-write-*.tmp\n/key-config.pending\n";
+    fsx::write_atomic_limit(
+        &secrets.join(".gitignore"),
+        gitignore,
+        true,
+        64 * 1024 * 1024,
+        "vault ignore file",
+    )?;
+
+    let mut master_bytes = Zeroizing::new([0u8; 32]);
+    getrandom::getrandom(master_bytes.as_mut())
+        .map_err(|_| BackupError::Crypto(CryptoError::Randomness))?;
+    let master = Key32::new(*master_bytes);
+    let mut owner_seed = Zeroizing::new([0u8; 32]);
+    let mut local_approval_id = Zeroizing::new([0u8; 16]);
+    getrandom::getrandom(owner_seed.as_mut())
+        .map_err(|_| BackupError::Crypto(CryptoError::Randomness))?;
+    getrandom::getrandom(local_approval_id.as_mut())
+        .map_err(|_| BackupError::Crypto(CryptoError::Randomness))?;
+    let identity = Identity::new(master, *owner_seed, *local_approval_id);
+    #[cfg(unix)]
+    let location = {
+        use std::os::unix::ffi::OsStrExt;
+        root.as_os_str().as_bytes().to_vec()
+    };
+    #[cfg(not(unix))]
+    let location = root.to_string_lossy().as_bytes().to_vec();
+    let key_blob = keyfile::wrap_v4(&identity, passphrase.as_bytes(), &location, None)?;
+    let store_master = Key32::new(*identity.master_key.as_bytes());
+    fsx::write_atomic_limit(
+        &secrets.join("key"),
+        &key_blob,
+        true,
+        64 * 1024 * 1024,
+        "key file",
+    )?;
+
+    let initial = json!({
+        "version":1,
+        "created":crate::config::timestamp_now(),
+        "default_env":"dev",
+        "environments":["dev"],
+        "cipher":"chacha20-poly1305",
+        "storage":{"format":"drawers"},
+        "security":{"passphrase":true,"totp":false,"approval_mode":"unset"},
+        "broker_policy":{"http":{
+            "openai":{"origin":"https://api.openai.com","secret_name":"OPENAI_API_KEY","rules":[]},
+            "anthropic":{"origin":"https://api.anthropic.com","secret_name":"ANTHROPIC_API_KEY","rules":[]},
+            "google":{"origin":"https://generativelanguage.googleapis.com","secret_name":"GOOGLE_API_KEY","rules":[]},
+            "github":{"origin":"https://api.github.com","secret_name":"GITHUB_TOKEN","rules":[]},
+            "google-cloud":{"origin":"https://www.googleapis.com","secret_name":"GOOGLE_CLOUD_API_KEY","rules":[]}
+        }}
+    });
+    let config_bytes = pyjson::to_vec_indent2_ascii(&initial)?;
+    fsx::write_atomic_limit(
+        &secrets.join("config.json"),
+        &config_bytes,
+        true,
+        16 * 1024 * 1024,
+        "config file",
+    )?;
+    fsx::ensure_private_dir(&secrets.join("drawers"))?;
+
+    let store = DrawerStore::open(&secrets, store_master);
+    let vault = crate::config::Vault::new(&root, store, crate::config::NoApprovals);
+    vault.restore_snapshot(
+        &payload.state.environments,
+        &payload.state.default_env,
+        payload.state.history_keep,
+    )?;
+    Ok(vault)
 }
 
 fn path_is_within(path: &Path, folder: &Path) -> bool {

@@ -13,6 +13,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 pub mod backup;
+pub mod config;
 pub mod envname;
 pub mod fsx;
 pub mod pyjson;
@@ -42,6 +43,16 @@ pub enum StoreError {
     VersionNotKept(u64),
     #[error("'{key}' is not removed in {env}")]
     NotRemoved { env: String, key: String },
+    #[error("{0}")]
+    ConfigConflict(String),
+    #[error(
+        "key/config publication is pending; run kv status to reconcile it, then use the new passphrase and rotate the recovery key after login"
+    )]
+    KeyConfigPending,
+    #[error("{0}")]
+    LockOrder(String),
+    #[error("config.json contains a floating-point value and cannot be rewritten")]
+    ConfigFloat,
     #[error("{0}")]
     CopyChanged(String),
     #[error("environment '{0}' does not exist")]
@@ -263,7 +274,19 @@ impl DrawerStore {
             .map(|(generation, _)| generation)
     }
 
-    fn set_locked(
+    pub(crate) fn set_locked(
+        &self,
+        env: &str,
+        key: &str,
+        value: &str,
+        keep: usize,
+    ) -> Result<(u64, Vec<Value>), StoreError> {
+        let (generation, dropped) = self.set_locked_unwiped(env, key, value, keep)?;
+        self.wipe_records(env, &dropped)?;
+        Ok((generation, dropped))
+    }
+
+    pub(crate) fn set_locked_unwiped(
         &self,
         env: &str,
         key: &str,
@@ -286,7 +309,6 @@ impl DrawerStore {
             .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?;
         secrets.insert(key.to_owned(), new_entry);
         self.save_index(env, &mut index)?;
-        self.wipe_records(env, &dropped)?;
         Ok((generation, dropped))
     }
 
@@ -294,6 +316,16 @@ impl DrawerStore {
         envname::validate_env_name(env)?;
         validate_keep(keep)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.remove_secret_locked(env, key, keep)
+    }
+
+    pub(crate) fn remove_secret_locked(
+        &self,
+        env: &str,
+        key: &str,
+        keep: usize,
+    ) -> Result<bool, StoreError> {
+        validate_keep(keep)?;
         let mut index = self.load_index(env)?;
         let old_entry = index
             .get("secrets")
@@ -392,6 +424,18 @@ impl DrawerStore {
         envname::validate_env_name(env)?;
         validate_keep(keep)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.restore_version_locked(env, key, version, keep)
+    }
+
+    pub(crate) fn restore_version_locked(
+        &self,
+        env: &str,
+        key: &str,
+        version: u64,
+        keep: usize,
+    ) -> Result<u64, StoreError> {
+        envname::validate_env_name(env)?;
+        validate_keep(keep)?;
         let (_index, entry) = self.entry_for_history(env, key)?;
         let value = self.version_value(env, key, &entry, version)?;
         self.set_locked(env, key, &value, keep)
@@ -402,6 +446,11 @@ impl DrawerStore {
     pub fn undo_remove(&self, env: &str, key: &str) -> Result<u64, StoreError> {
         envname::validate_env_name(env)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.undo_remove_locked(env, key)
+    }
+
+    pub(crate) fn undo_remove_locked(&self, env: &str, key: &str) -> Result<u64, StoreError> {
+        envname::validate_env_name(env)?;
         let (mut index, entry) = self.entry_for_history(env, key)?;
         if entry.get("state").and_then(Value::as_str) != Some("deleted") {
             return Err(StoreError::NotRemoved {
@@ -527,6 +576,13 @@ impl DrawerStore {
         envname::validate_env_name(old)?;
         envname::validate_env_name(new)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.copy_env_tree_locked(old, new)?;
+        self.sync_envs_dir()
+    }
+
+    pub(crate) fn copy_env_tree_locked(&self, old: &str, new: &str) -> Result<(), StoreError> {
+        envname::validate_env_name(old)?;
+        envname::validate_env_name(new)?;
         if !self.index_present(old)? {
             return Ok(());
         }
@@ -564,8 +620,7 @@ impl DrawerStore {
                 }
             }
         }
-        self.save_index(new, &mut index)?;
-        self.sync_envs_dir()
+        self.save_index(new, &mut index)
     }
 
     /// Caller supplies validated registered names and the effective history setting.
@@ -579,6 +634,18 @@ impl DrawerStore {
         let names = envs.iter().map(|env| (*env).to_owned()).collect::<Vec<_>>();
         envname::validate_environment_registry(&names, default_env)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.backup_state_locked(envs, default_env, history_keep)
+    }
+
+    pub(crate) fn backup_state_locked(
+        &self,
+        envs: &[&str],
+        default_env: &str,
+        history_keep: usize,
+    ) -> Result<BackupState, StoreError> {
+        validate_keep(history_keep)?;
+        let names = envs.iter().map(|env| (*env).to_owned()).collect::<Vec<_>>();
+        envname::validate_environment_registry(&names, default_env)?;
         let mut environments = Vec::with_capacity(envs.len());
         for env in envs {
             let index = self.load_index(env)?;
@@ -649,6 +716,15 @@ impl DrawerStore {
     ) -> Result<usize, StoreError> {
         validate_keep(keep)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.restore_snapshot_locked(environments, keep)
+    }
+
+    pub(crate) fn restore_snapshot_locked(
+        &self,
+        environments: &[BackupEnv],
+        keep: usize,
+    ) -> Result<usize, StoreError> {
+        validate_keep(keep)?;
         let mut written = 0usize;
         for env in environments {
             envname::validate_env_name(&env.name)?;
@@ -767,6 +843,20 @@ impl DrawerStore {
         envname::validate_env_name(dst)?;
         validate_keep(keep)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.copy_env_checked_locked(src, dst, options, keep, dst_registered)
+    }
+
+    pub(crate) fn copy_env_checked_locked(
+        &self,
+        src: &str,
+        dst: &str,
+        options: CopyOptions,
+        keep: usize,
+        dst_registered: bool,
+    ) -> Result<CopyResult, StoreError> {
+        envname::validate_env_name(src)?;
+        envname::validate_env_name(dst)?;
+        validate_keep(keep)?;
         let src_index = self.load_index(src)?;
         let dst_index = self.load_index(dst)?;
         let src_values = self.live_values(src, &src_index)?;
@@ -824,6 +914,26 @@ impl DrawerStore {
         envname::validate_env_name(env)?;
         validate_keep(keep)?;
         let _lock = fsx::lock_storage(&self.secrets_dir)?;
+        self.save_env_locked(env, secrets, keep)
+    }
+
+    pub(crate) fn save_env_locked(
+        &self,
+        env: &str,
+        secrets: &BTreeMap<String, String>,
+        keep: usize,
+    ) -> Result<(), StoreError> {
+        let dropped = self.save_env_locked_unwiped(env, secrets, keep)?;
+        self.wipe_records(env, &dropped)
+    }
+
+    pub(crate) fn save_env_locked_unwiped(
+        &self,
+        env: &str,
+        secrets: &BTreeMap<String, String>,
+        keep: usize,
+    ) -> Result<Vec<Value>, StoreError> {
+        validate_keep(keep)?;
         let mut index = self.load_index(env)?;
         let old_secrets = index
             .get("secrets")
@@ -869,7 +979,7 @@ impl DrawerStore {
             .ok_or_else(|| StoreError::Corrupt("drawer secrets map is invalid".into()))?;
         *secrets_object = final_secrets;
         self.save_index(env, &mut index)?;
-        self.wipe_records(env, &dropped)
+        Ok(dropped)
     }
 
     fn load_index(&self, env: &str) -> Result<Value, StoreError> {
@@ -1394,7 +1504,7 @@ impl DrawerStore {
         Ok(payload)
     }
 
-    fn wipe_records(&self, env: &str, refs: &[Value]) -> Result<(), StoreError> {
+    pub(crate) fn wipe_records(&self, env: &str, refs: &[Value]) -> Result<(), StoreError> {
         let mut record_ids = Vec::new();
         for reference in refs {
             let value = reference
@@ -1657,7 +1767,7 @@ impl DrawerStore {
         Ok(found)
     }
 
-    fn forget_locked(
+    pub(crate) fn forget_locked(
         &self,
         env: &str,
         keys: Option<&BTreeSet<String>>,
@@ -1715,7 +1825,7 @@ impl DrawerStore {
         Ok(dropped.len())
     }
 
-    fn prune_env_locked(&self, env: &str, keep: usize) -> Result<usize, StoreError> {
+    pub(crate) fn prune_env_locked(&self, env: &str, keep: usize) -> Result<usize, StoreError> {
         let mut index = self.load_index(env)?;
         let names = index
             .get("secrets")
