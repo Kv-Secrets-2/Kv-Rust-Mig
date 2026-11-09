@@ -10,6 +10,7 @@ mod history;
 mod hook;
 mod init;
 mod lifecycle;
+mod preflight;
 mod project;
 mod registry;
 mod render;
@@ -91,5 +92,6 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Vault(action) => vaultcmd::cmd_vault(p, action),
+        Preflight(args) => preflight::run(p, args),
     }
 }
