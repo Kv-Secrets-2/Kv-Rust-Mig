@@ -1,0 +1,849 @@
+{"command": "$'\\U0000006b\\U00000076' get FOO"}
+{"command": "kv $'g\\U00000065t' FOO"}
+{"command": "kv approvals $'appr\\U0000006fve' req_1"}
+{"command": "kv $'get\\0junk' FOO"}
+{"command": "$'kv\\0junk' get FOO"}
+{"command": "$'\\553\\566' get FOO"}
+{"command": ": >\"$(k''v g''et FOO)\""}
+{"command": "true <<<\"$(k''v g''et FOO)\""}
+{"command": ": >\"${UNSET:-$(k''v g''et FOO)}\""}
+{"command": ": >\"`k''v g''et FOO`\""}
+{"command": "echo \"${UNSET:-$(k''v g''et FOO)}\""}
+{"command": "echo ${UNSET:-$(k''v g''et FOO)}"}
+{"command": "cat <<EOF\n$(k''v g''et FOO)\nEOF"}
+{"command": "flock stub-lock kv g''et FOO"}
+{"command": "shopt -s expand_aliases\nalias -- 'k=kv'\nk get FOO"}
+{"command": "shopt -s expand_aliases\nalias 'k=kv'\nk get FOO"}
+{"command": "printf 'kv\\x20get FOO' | env bash"}
+{"command": "printf 'kv\\x20get FOO' | command bash"}
+{"command": "printf 'kv\\x20get FOO' | tee >(bash)"}
+{"command": "printf 'kv\\x20get FOO' | bash -n +o noexec"}
+{"command": "printf 'kv\\x20get FOO' | # c\nbash"}
+{"command": "python3 -m kv.__main__ get FOO"}
+{"command": "python3-config -mkv get FOO"}
+{"command": "k''v g''et FOO; echo \"$(case x in x) :;; esac)\""}
+{"command": "k''v g''et FOO; echo `case x in x) :;; esac`"}
+{"command": "$'\\x6b\\x76' $'\\x67\\x65\\x74' FOO"}
+{"command": "k''v > sink g''et FOO"}
+{"command": "k''v g''et FOO"}
+{"command": "k''v g''et FOO\n: '"}
+{"command": "k''v g''et FOO\ncat <<'EOF'\n'\nEOF"}
+{"command": "k''v g''et FOO\necho \"$(cat <<'EOF'\n'\nEOF\n)\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v g''et FOO)\")\")\")\")\")\")\")\")\")\""}
+{"command": "$'\\x6b\\x76' $'\\x67\\x65\\x74' FOO\n: '"}
+{"command": "printf 'kv\\x20get FOO' | bash"}
+{"command": "printf 'kv\\x20get FOO' | { bash; }"}
+{"command": "printf 'kv\\x20get FOO' | (bash)"}
+{"command": "printf 'kv\\x20get FOO' | if true; then bash; fi"}
+{"command": "printf 'kv %s FOO' get | bash"}
+{"command": "printf 'kv %s FOO' get | env bash"}
+{"command": "env bash <<'EOF'\nk''v g''et FOO\nEOF"}
+{"command": "env bash <<<\"k''v g''et FOO\""}
+{"command": "printf 'kv\\x20get FOO' | bash /dev/stdin"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk get FOO"}
+{"command": "shopt -s expand_aliases\nalias unused=true k=kv\nk get FOO"}
+{"command": "alias unused=true kv=echo"}
+{"command": "$'\\u006b\\u0076' get FOO"}
+{"command": "$'\\153\\166' get FOO"}
+{"command": "kv $'get\\x00ignored' FOO"}
+{"command": "k\"\"v g\"\"et FOO"}
+{"command": ": >\"$(kv get FOO)\""}
+{"command": ": >\"$($'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\""}
+{"command": "echo \"${UNSET:-$(kv get FOO)}\""}
+{"command": "bash <<'EOF'\nk''v g''et FOO\nEOF"}
+{"command": "bash -c \"k''v g''et FOO\""}
+{"command": "echo \"$(flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\""}
+{"command": "echo \"$(flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\"; echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(true)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(true)\")\")\")\")\")\")\")\")\")\"; echo \"$(flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO)\""}
+{"command": "flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO"}
+{"command": "flock stub-lock $'\\x6b\\x76' $'\\x67\\x65\\x74' FOO\n: '"}
+{"command": "printf '%s\\n' \"$(true)\" 'kv status' "}
+{"command": "kv 2fa"}
+{"command": "kv agent"}
+{"command": "kv allow"}
+{"command": "kv deny"}
+{"command": "kv export"}
+{"command": "kv export-key"}
+{"command": "kv get"}
+{"command": "kv grant"}
+{"command": "kv import-key"}
+{"command": "kv init"}
+{"command": "kv lock"}
+{"command": "kv network-allow"}
+{"command": "kv network-deny"}
+{"command": "kv passphrase"}
+{"command": "kv provider"}
+{"command": "kv recover"}
+{"command": "kv recovery-key"}
+{"command": "kv setup-2fa"}
+{"command": "kv unlock"}
+{"command": "kv upgrade-security"}
+{"command": "kv vault"}
+{"command": "kv approvals approve"}
+{"command": "kv approvals deny"}
+{"command": "kv approvals prune"}
+{"command": "kv policy allow"}
+{"command": "kv policy block"}
+{"command": "kv policy deny"}
+{"command": "kv policy prune"}
+{"command": "kv approval-mode set"}
+{"command": "kv policy http add"}
+{"command": "kv policy http remove"}
+{"command": "kv policy http rm"}
+{"command": "kv ls --reveal"}
+{"command": "kv sync init"}
+{"command": "kv sync login --token-stdin"}
+{"command": "kv sync attach-device --token-stdin"}
+{"command": "kv sync revoke-device --cloud"}
+{"command": "kv sync rotate-device-token --cloud"}
+{"command": "kv sync create-attach-token --cloud"}
+{"command": "echo kv 2fa"}
+{"command": "echo kv agent"}
+{"command": "echo kv allow"}
+{"command": "echo kv deny"}
+{"command": "echo kv export"}
+{"command": "echo kv export-key"}
+{"command": "echo kv get"}
+{"command": "echo kv grant"}
+{"command": "echo kv import-key"}
+{"command": "echo kv init"}
+{"command": "echo kv lock"}
+{"command": "echo kv network-allow"}
+{"command": "echo kv network-deny"}
+{"command": "echo kv passphrase"}
+{"command": "echo kv provider"}
+{"command": "echo kv recover"}
+{"command": "echo kv recovery-key"}
+{"command": "echo kv setup-2fa"}
+{"command": "echo kv unlock"}
+{"command": "echo kv upgrade-security"}
+{"command": "echo kv vault"}
+{"command": "echo kv approvals approve"}
+{"command": "echo kv approvals deny"}
+{"command": "echo kv approvals prune"}
+{"command": "echo kv policy allow"}
+{"command": "echo kv policy block"}
+{"command": "echo kv policy deny"}
+{"command": "echo kv policy prune"}
+{"command": "echo kv approval-mode set"}
+{"command": "echo kv policy http add"}
+{"command": "echo kv policy http remove"}
+{"command": "echo kv policy http rm"}
+{"command": "echo kv ls --reveal"}
+{"command": "echo kv sync init"}
+{"command": "echo kv sync login --token-stdin"}
+{"command": "echo kv sync attach-device --token-stdin"}
+{"command": "echo kv sync revoke-device --cloud"}
+{"command": "echo kv sync rotate-device-token --cloud"}
+{"command": "echo kv sync create-attach-token --cloud"}
+{"command": "flock stub-lock k''v 2fa; echo kv get FOO"}
+{"command": "flock stub-lock k''v agent; echo kv get FOO"}
+{"command": "flock stub-lock k''v allow; echo kv get FOO"}
+{"command": "flock stub-lock k''v deny; echo kv get FOO"}
+{"command": "flock stub-lock k''v export; echo kv get FOO"}
+{"command": "flock stub-lock k''v export-key; echo kv get FOO"}
+{"command": "flock stub-lock k''v get; echo kv get FOO"}
+{"command": "flock stub-lock k''v grant; echo kv get FOO"}
+{"command": "flock stub-lock k''v import-key; echo kv get FOO"}
+{"command": "flock stub-lock k''v init; echo kv get FOO"}
+{"command": "flock stub-lock k''v lock; echo kv get FOO"}
+{"command": "flock stub-lock k''v network-allow; echo kv get FOO"}
+{"command": "flock stub-lock k''v network-deny; echo kv get FOO"}
+{"command": "flock stub-lock k''v passphrase; echo kv get FOO"}
+{"command": "flock stub-lock k''v provider; echo kv get FOO"}
+{"command": "flock stub-lock k''v recover; echo kv get FOO"}
+{"command": "flock stub-lock k''v recovery-key; echo kv get FOO"}
+{"command": "flock stub-lock k''v setup-2fa; echo kv get FOO"}
+{"command": "flock stub-lock k''v unlock; echo kv get FOO"}
+{"command": "flock stub-lock k''v upgrade-security; echo kv get FOO"}
+{"command": "flock stub-lock k''v vault; echo kv get FOO"}
+{"command": "flock stub-lock k''v approvals approve; echo kv get FOO"}
+{"command": "flock stub-lock k''v approvals deny; echo kv get FOO"}
+{"command": "flock stub-lock k''v approvals prune; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy allow; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy block; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy deny; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy prune; echo kv get FOO"}
+{"command": "flock stub-lock k''v approval-mode set; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy http add; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy http remove; echo kv get FOO"}
+{"command": "flock stub-lock k''v policy http rm; echo kv get FOO"}
+{"command": "flock stub-lock k''v ls --reveal; echo kv get FOO"}
+{"command": "flock stub-lock k''v sync init; echo kv get FOO"}
+{"command": "flock stub-lock k''v sync login --token-stdin; echo kv get FOO"}
+{"command": "flock stub-lock k''v sync attach-device --token-stdin; echo kv get FOO"}
+{"command": "flock stub-lock k''v sync revoke-device --cloud; echo kv get FOO"}
+{"command": "flock stub-lock k''v sync rotate-device-token --cloud; echo kv get FOO"}
+{"command": "flock stub-lock k''v sync create-attach-token --cloud; echo kv get FOO"}
+{"command": "echo kv 2fa |\n bash"}
+{"command": "echo kv agent |\n bash"}
+{"command": "echo kv allow |\n bash"}
+{"command": "echo kv deny |\n bash"}
+{"command": "echo kv export |\n bash"}
+{"command": "echo kv export-key |\n bash"}
+{"command": "echo kv get |\n bash"}
+{"command": "echo kv grant |\n bash"}
+{"command": "echo kv import-key |\n bash"}
+{"command": "echo kv init |\n bash"}
+{"command": "echo kv lock |\n bash"}
+{"command": "echo kv network-allow |\n bash"}
+{"command": "echo kv network-deny |\n bash"}
+{"command": "echo kv passphrase |\n bash"}
+{"command": "echo kv provider |\n bash"}
+{"command": "echo kv recover |\n bash"}
+{"command": "echo kv recovery-key |\n bash"}
+{"command": "echo kv setup-2fa |\n bash"}
+{"command": "echo kv unlock |\n bash"}
+{"command": "echo kv upgrade-security |\n bash"}
+{"command": "echo kv vault |\n bash"}
+{"command": "echo kv approvals approve |\n bash"}
+{"command": "echo kv approvals deny |\n bash"}
+{"command": "echo kv approvals prune |\n bash"}
+{"command": "echo kv policy allow |\n bash"}
+{"command": "echo kv policy block |\n bash"}
+{"command": "echo kv policy deny |\n bash"}
+{"command": "echo kv policy prune |\n bash"}
+{"command": "echo kv approval-mode set |\n bash"}
+{"command": "echo kv policy http add |\n bash"}
+{"command": "echo kv policy http remove |\n bash"}
+{"command": "echo kv policy http rm |\n bash"}
+{"command": "echo kv ls --reveal |\n bash"}
+{"command": "echo kv sync init |\n bash"}
+{"command": "echo kv sync login --token-stdin |\n bash"}
+{"command": "echo kv sync attach-device --token-stdin |\n bash"}
+{"command": "echo kv sync revoke-device --cloud |\n bash"}
+{"command": "echo kv sync rotate-device-token --cloud |\n bash"}
+{"command": "echo kv sync create-attach-token --cloud |\n bash"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv 2fa'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv agent'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv allow'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv deny'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv export'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv export-key'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv get'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv grant'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv import-key'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv init'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv lock'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv network-allow'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv network-deny'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv passphrase'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv provider'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv recover'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv recovery-key'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv setup-2fa'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv unlock'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv upgrade-security'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv vault'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approvals approve'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approvals deny'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approvals prune'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy allow'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy block'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy deny'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy prune'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv approval-mode set'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy http add'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy http remove'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv policy http rm'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv ls --reveal'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync init'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync login --token-stdin'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync attach-device --token-stdin'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync revoke-device --cloud'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync rotate-device-token --cloud'"}
+{"command": "alias 'echo=bash'; shopt -s expand_aliases\necho -c 'kv sync create-attach-token --cloud'"}
+{"command": "true <<<\"$(kv 2fa)\""}
+{"command": "true <<<\"$(kv agent)\""}
+{"command": "true <<<\"$(kv allow)\""}
+{"command": "true <<<\"$(kv deny)\""}
+{"command": "true <<<\"$(kv export)\""}
+{"command": "true <<<\"$(kv export-key)\""}
+{"command": "true <<<\"$(kv get)\""}
+{"command": "true <<<\"$(kv grant)\""}
+{"command": "true <<<\"$(kv import-key)\""}
+{"command": "true <<<\"$(kv init)\""}
+{"command": "true <<<\"$(kv lock)\""}
+{"command": "true <<<\"$(kv network-allow)\""}
+{"command": "true <<<\"$(kv network-deny)\""}
+{"command": "true <<<\"$(kv passphrase)\""}
+{"command": "true <<<\"$(kv provider)\""}
+{"command": "true <<<\"$(kv recover)\""}
+{"command": "true <<<\"$(kv recovery-key)\""}
+{"command": "true <<<\"$(kv setup-2fa)\""}
+{"command": "true <<<\"$(kv unlock)\""}
+{"command": "true <<<\"$(kv upgrade-security)\""}
+{"command": "true <<<\"$(kv vault)\""}
+{"command": "true <<<\"$(kv approvals approve)\""}
+{"command": "true <<<\"$(kv approvals deny)\""}
+{"command": "true <<<\"$(kv approvals prune)\""}
+{"command": "true <<<\"$(kv policy allow)\""}
+{"command": "true <<<\"$(kv policy block)\""}
+{"command": "true <<<\"$(kv policy deny)\""}
+{"command": "true <<<\"$(kv policy prune)\""}
+{"command": "true <<<\"$(kv approval-mode set)\""}
+{"command": "true <<<\"$(kv policy http add)\""}
+{"command": "true <<<\"$(kv policy http remove)\""}
+{"command": "true <<<\"$(kv policy http rm)\""}
+{"command": "true <<<\"$(kv ls --reveal)\""}
+{"command": "true <<<\"$(kv sync init)\""}
+{"command": "true <<<\"$(kv sync login --token-stdin)\""}
+{"command": "true <<<\"$(kv sync attach-device --token-stdin)\""}
+{"command": "true <<<\"$(kv sync revoke-device --cloud)\""}
+{"command": "true <<<\"$(kv sync rotate-device-token --cloud)\""}
+{"command": "true <<<\"$(kv sync create-attach-token --cloud)\""}
+{"command": "bash -n +n -c 'kv 2fa'"}
+{"command": "bash -n +n -c 'kv agent'"}
+{"command": "bash -n +n -c 'kv allow'"}
+{"command": "bash -n +n -c 'kv deny'"}
+{"command": "bash -n +n -c 'kv export'"}
+{"command": "bash -n +n -c 'kv export-key'"}
+{"command": "bash -n +n -c 'kv get'"}
+{"command": "bash -n +n -c 'kv grant'"}
+{"command": "bash -n +n -c 'kv import-key'"}
+{"command": "bash -n +n -c 'kv init'"}
+{"command": "bash -n +n -c 'kv lock'"}
+{"command": "bash -n +n -c 'kv network-allow'"}
+{"command": "bash -n +n -c 'kv network-deny'"}
+{"command": "bash -n +n -c 'kv passphrase'"}
+{"command": "bash -n +n -c 'kv provider'"}
+{"command": "bash -n +n -c 'kv recover'"}
+{"command": "bash -n +n -c 'kv recovery-key'"}
+{"command": "bash -n +n -c 'kv setup-2fa'"}
+{"command": "bash -n +n -c 'kv unlock'"}
+{"command": "bash -n +n -c 'kv upgrade-security'"}
+{"command": "bash -n +n -c 'kv vault'"}
+{"command": "bash -n +n -c 'kv approvals approve'"}
+{"command": "bash -n +n -c 'kv approvals deny'"}
+{"command": "bash -n +n -c 'kv approvals prune'"}
+{"command": "bash -n +n -c 'kv policy allow'"}
+{"command": "bash -n +n -c 'kv policy block'"}
+{"command": "bash -n +n -c 'kv policy deny'"}
+{"command": "bash -n +n -c 'kv policy prune'"}
+{"command": "bash -n +n -c 'kv approval-mode set'"}
+{"command": "bash -n +n -c 'kv policy http add'"}
+{"command": "bash -n +n -c 'kv policy http remove'"}
+{"command": "bash -n +n -c 'kv policy http rm'"}
+{"command": "bash -n +n -c 'kv ls --reveal'"}
+{"command": "bash -n +n -c 'kv sync init'"}
+{"command": "bash -n +n -c 'kv sync login --token-stdin'"}
+{"command": "bash -n +n -c 'kv sync attach-device --token-stdin'"}
+{"command": "bash -n +n -c 'kv sync revoke-device --cloud'"}
+{"command": "bash -n +n -c 'kv sync rotate-device-token --cloud'"}
+{"command": "bash -n +n -c 'kv sync create-attach-token --cloud'"}
+{"command": "$'\\553\\566' 2fa"}
+{"command": "$'\\553\\566' agent"}
+{"command": "$'\\553\\566' allow"}
+{"command": "$'\\553\\566' deny"}
+{"command": "$'\\553\\566' export"}
+{"command": "$'\\553\\566' export-key"}
+{"command": "$'\\553\\566' get"}
+{"command": "$'\\553\\566' grant"}
+{"command": "$'\\553\\566' import-key"}
+{"command": "$'\\553\\566' init"}
+{"command": "$'\\553\\566' lock"}
+{"command": "$'\\553\\566' network-allow"}
+{"command": "$'\\553\\566' network-deny"}
+{"command": "$'\\553\\566' passphrase"}
+{"command": "$'\\553\\566' provider"}
+{"command": "$'\\553\\566' recover"}
+{"command": "$'\\553\\566' recovery-key"}
+{"command": "$'\\553\\566' setup-2fa"}
+{"command": "$'\\553\\566' unlock"}
+{"command": "$'\\553\\566' upgrade-security"}
+{"command": "$'\\553\\566' vault"}
+{"command": "$'\\553\\566' approvals approve"}
+{"command": "$'\\553\\566' approvals deny"}
+{"command": "$'\\553\\566' approvals prune"}
+{"command": "$'\\553\\566' policy allow"}
+{"command": "$'\\553\\566' policy block"}
+{"command": "$'\\553\\566' policy deny"}
+{"command": "$'\\553\\566' policy prune"}
+{"command": "$'\\553\\566' approval-mode set"}
+{"command": "$'\\553\\566' policy http add"}
+{"command": "$'\\553\\566' policy http remove"}
+{"command": "$'\\553\\566' policy http rm"}
+{"command": "$'\\553\\566' ls --reveal"}
+{"command": "$'\\553\\566' sync init"}
+{"command": "$'\\553\\566' sync login --token-stdin"}
+{"command": "$'\\553\\566' sync attach-device --token-stdin"}
+{"command": "$'\\553\\566' sync revoke-device --cloud"}
+{"command": "$'\\553\\566' sync rotate-device-token --cloud"}
+{"command": "$'\\553\\566' sync create-attach-token --cloud"}
+{"command": "$'kv\\0junk' 2fa"}
+{"command": "$'kv\\0junk' agent"}
+{"command": "$'kv\\0junk' allow"}
+{"command": "$'kv\\0junk' deny"}
+{"command": "$'kv\\0junk' export"}
+{"command": "$'kv\\0junk' export-key"}
+{"command": "$'kv\\0junk' get"}
+{"command": "$'kv\\0junk' grant"}
+{"command": "$'kv\\0junk' import-key"}
+{"command": "$'kv\\0junk' init"}
+{"command": "$'kv\\0junk' lock"}
+{"command": "$'kv\\0junk' network-allow"}
+{"command": "$'kv\\0junk' network-deny"}
+{"command": "$'kv\\0junk' passphrase"}
+{"command": "$'kv\\0junk' provider"}
+{"command": "$'kv\\0junk' recover"}
+{"command": "$'kv\\0junk' recovery-key"}
+{"command": "$'kv\\0junk' setup-2fa"}
+{"command": "$'kv\\0junk' unlock"}
+{"command": "$'kv\\0junk' upgrade-security"}
+{"command": "$'kv\\0junk' vault"}
+{"command": "$'kv\\0junk' approvals approve"}
+{"command": "$'kv\\0junk' approvals deny"}
+{"command": "$'kv\\0junk' approvals prune"}
+{"command": "$'kv\\0junk' policy allow"}
+{"command": "$'kv\\0junk' policy block"}
+{"command": "$'kv\\0junk' policy deny"}
+{"command": "$'kv\\0junk' policy prune"}
+{"command": "$'kv\\0junk' approval-mode set"}
+{"command": "$'kv\\0junk' policy http add"}
+{"command": "$'kv\\0junk' policy http remove"}
+{"command": "$'kv\\0junk' policy http rm"}
+{"command": "$'kv\\0junk' ls --reveal"}
+{"command": "$'kv\\0junk' sync init"}
+{"command": "$'kv\\0junk' sync login --token-stdin"}
+{"command": "$'kv\\0junk' sync attach-device --token-stdin"}
+{"command": "$'kv\\0junk' sync revoke-device --cloud"}
+{"command": "$'kv\\0junk' sync rotate-device-token --cloud"}
+{"command": "$'kv\\0junk' sync create-attach-token --cloud"}
+{"command": ": >\"$(k''v 2''fa)\""}
+{"command": ": >\"$(k''v a''gent)\""}
+{"command": ": >\"$(k''v a''llow)\""}
+{"command": ": >\"$(k''v d''eny)\""}
+{"command": ": >\"$(k''v e''xport)\""}
+{"command": ": >\"$(k''v e''xport-key)\""}
+{"command": ": >\"$(k''v g''et)\""}
+{"command": ": >\"$(k''v g''rant)\""}
+{"command": ": >\"$(k''v i''mport-key)\""}
+{"command": ": >\"$(k''v i''nit)\""}
+{"command": ": >\"$(k''v l''ock)\""}
+{"command": ": >\"$(k''v n''etwork-allow)\""}
+{"command": ": >\"$(k''v n''etwork-deny)\""}
+{"command": ": >\"$(k''v p''assphrase)\""}
+{"command": ": >\"$(k''v p''rovider)\""}
+{"command": ": >\"$(k''v r''ecover)\""}
+{"command": ": >\"$(k''v r''ecovery-key)\""}
+{"command": ": >\"$(k''v s''etup-2fa)\""}
+{"command": ": >\"$(k''v u''nlock)\""}
+{"command": ": >\"$(k''v u''pgrade-security)\""}
+{"command": ": >\"$(k''v v''ault)\""}
+{"command": ": >\"$(k''v a''pprovals a''pprove)\""}
+{"command": ": >\"$(k''v a''pprovals d''eny)\""}
+{"command": ": >\"$(k''v a''pprovals p''rune)\""}
+{"command": ": >\"$(k''v p''olicy a''llow)\""}
+{"command": ": >\"$(k''v p''olicy b''lock)\""}
+{"command": ": >\"$(k''v p''olicy d''eny)\""}
+{"command": ": >\"$(k''v p''olicy p''rune)\""}
+{"command": ": >\"$(k''v a''pproval-mode s''et)\""}
+{"command": ": >\"$(k''v p''olicy h''ttp a''dd)\""}
+{"command": ": >\"$(k''v p''olicy h''ttp r''emove)\""}
+{"command": ": >\"$(k''v p''olicy h''ttp r''m)\""}
+{"command": ": >\"$(k''v l''s -''-reveal)\""}
+{"command": ": >\"$(k''v s''ync i''nit)\""}
+{"command": ": >\"$(k''v s''ync l''ogin -''-token-stdin)\""}
+{"command": ": >\"$(k''v s''ync a''ttach-device -''-token-stdin)\""}
+{"command": ": >\"$(k''v s''ync r''evoke-device -''-cloud)\""}
+{"command": ": >\"$(k''v s''ync r''otate-device-token -''-cloud)\""}
+{"command": ": >\"$(k''v s''ync c''reate-attach-token -''-cloud)\""}
+{"command": "true <<<\"$(k''v 2''fa)\""}
+{"command": "true <<<\"$(k''v a''gent)\""}
+{"command": "true <<<\"$(k''v a''llow)\""}
+{"command": "true <<<\"$(k''v d''eny)\""}
+{"command": "true <<<\"$(k''v e''xport)\""}
+{"command": "true <<<\"$(k''v e''xport-key)\""}
+{"command": "true <<<\"$(k''v g''et)\""}
+{"command": "true <<<\"$(k''v g''rant)\""}
+{"command": "true <<<\"$(k''v i''mport-key)\""}
+{"command": "true <<<\"$(k''v i''nit)\""}
+{"command": "true <<<\"$(k''v l''ock)\""}
+{"command": "true <<<\"$(k''v n''etwork-allow)\""}
+{"command": "true <<<\"$(k''v n''etwork-deny)\""}
+{"command": "true <<<\"$(k''v p''assphrase)\""}
+{"command": "true <<<\"$(k''v p''rovider)\""}
+{"command": "true <<<\"$(k''v r''ecover)\""}
+{"command": "true <<<\"$(k''v r''ecovery-key)\""}
+{"command": "true <<<\"$(k''v s''etup-2fa)\""}
+{"command": "true <<<\"$(k''v u''nlock)\""}
+{"command": "true <<<\"$(k''v u''pgrade-security)\""}
+{"command": "true <<<\"$(k''v v''ault)\""}
+{"command": "true <<<\"$(k''v a''pprovals a''pprove)\""}
+{"command": "true <<<\"$(k''v a''pprovals d''eny)\""}
+{"command": "true <<<\"$(k''v a''pprovals p''rune)\""}
+{"command": "true <<<\"$(k''v p''olicy a''llow)\""}
+{"command": "true <<<\"$(k''v p''olicy b''lock)\""}
+{"command": "true <<<\"$(k''v p''olicy d''eny)\""}
+{"command": "true <<<\"$(k''v p''olicy p''rune)\""}
+{"command": "true <<<\"$(k''v a''pproval-mode s''et)\""}
+{"command": "true <<<\"$(k''v p''olicy h''ttp a''dd)\""}
+{"command": "true <<<\"$(k''v p''olicy h''ttp r''emove)\""}
+{"command": "true <<<\"$(k''v p''olicy h''ttp r''m)\""}
+{"command": "true <<<\"$(k''v l''s -''-reveal)\""}
+{"command": "true <<<\"$(k''v s''ync i''nit)\""}
+{"command": "true <<<\"$(k''v s''ync l''ogin -''-token-stdin)\""}
+{"command": "true <<<\"$(k''v s''ync a''ttach-device -''-token-stdin)\""}
+{"command": "true <<<\"$(k''v s''ync r''evoke-device -''-cloud)\""}
+{"command": "true <<<\"$(k''v s''ync r''otate-device-token -''-cloud)\""}
+{"command": "true <<<\"$(k''v s''ync c''reate-attach-token -''-cloud)\""}
+{"command": "echo \"${UNSET:-$(k''v 2''fa)}\""}
+{"command": "echo \"${UNSET:-$(k''v a''gent)}\""}
+{"command": "echo \"${UNSET:-$(k''v a''llow)}\""}
+{"command": "echo \"${UNSET:-$(k''v d''eny)}\""}
+{"command": "echo \"${UNSET:-$(k''v e''xport)}\""}
+{"command": "echo \"${UNSET:-$(k''v e''xport-key)}\""}
+{"command": "echo \"${UNSET:-$(k''v g''et)}\""}
+{"command": "echo \"${UNSET:-$(k''v g''rant)}\""}
+{"command": "echo \"${UNSET:-$(k''v i''mport-key)}\""}
+{"command": "echo \"${UNSET:-$(k''v i''nit)}\""}
+{"command": "echo \"${UNSET:-$(k''v l''ock)}\""}
+{"command": "echo \"${UNSET:-$(k''v n''etwork-allow)}\""}
+{"command": "echo \"${UNSET:-$(k''v n''etwork-deny)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''assphrase)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''rovider)}\""}
+{"command": "echo \"${UNSET:-$(k''v r''ecover)}\""}
+{"command": "echo \"${UNSET:-$(k''v r''ecovery-key)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''etup-2fa)}\""}
+{"command": "echo \"${UNSET:-$(k''v u''nlock)}\""}
+{"command": "echo \"${UNSET:-$(k''v u''pgrade-security)}\""}
+{"command": "echo \"${UNSET:-$(k''v v''ault)}\""}
+{"command": "echo \"${UNSET:-$(k''v a''pprovals a''pprove)}\""}
+{"command": "echo \"${UNSET:-$(k''v a''pprovals d''eny)}\""}
+{"command": "echo \"${UNSET:-$(k''v a''pprovals p''rune)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy a''llow)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy b''lock)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy d''eny)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy p''rune)}\""}
+{"command": "echo \"${UNSET:-$(k''v a''pproval-mode s''et)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy h''ttp a''dd)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy h''ttp r''emove)}\""}
+{"command": "echo \"${UNSET:-$(k''v p''olicy h''ttp r''m)}\""}
+{"command": "echo \"${UNSET:-$(k''v l''s -''-reveal)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''ync i''nit)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''ync l''ogin -''-token-stdin)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''ync a''ttach-device -''-token-stdin)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''ync r''evoke-device -''-cloud)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''ync r''otate-device-token -''-cloud)}\""}
+{"command": "echo \"${UNSET:-$(k''v s''ync c''reate-attach-token -''-cloud)}\""}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk 2fa"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk agent"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk allow"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk deny"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk export"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk export-key"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk get"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk grant"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk import-key"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk init"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk lock"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk network-allow"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk network-deny"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk passphrase"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk provider"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk recover"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk recovery-key"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk setup-2fa"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk unlock"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk upgrade-security"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk vault"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk approvals approve"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk approvals deny"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk approvals prune"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy allow"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy block"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy deny"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy prune"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk approval-mode set"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy http add"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy http remove"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk policy http rm"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk ls --reveal"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync init"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync login --token-stdin"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync attach-device --token-stdin"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync revoke-device --cloud"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync rotate-device-token --cloud"}
+{"command": "shopt -s expand_aliases\nalias -- k=kv\nk sync create-attach-token --cloud"}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v 2''fa)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''gent)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''llow)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v d''eny)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v e''xport)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v e''xport-key)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v g''et)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v g''rant)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v i''mport-key)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v i''nit)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v l''ock)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v n''etwork-allow)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v n''etwork-deny)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''assphrase)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''rovider)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v r''ecover)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v r''ecovery-key)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''etup-2fa)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v u''nlock)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v u''pgrade-security)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v v''ault)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pprovals a''pprove)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pprovals d''eny)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pprovals p''rune)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy a''llow)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy b''lock)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy d''eny)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy p''rune)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v a''pproval-mode s''et)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy h''ttp a''dd)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy h''ttp r''emove)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v p''olicy h''ttp r''m)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v l''s -''-reveal)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync i''nit)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync l''ogin -''-token-stdin)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync a''ttach-device -''-token-stdin)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync r''evoke-device -''-cloud)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync r''otate-device-token -''-cloud)\")\")\")\")\")\")\")\")\")\""}
+{"command": "echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(echo \"$(k''v s''ync c''reate-attach-token -''-cloud)\")\")\")\")\")\")\")\")\")\""}
+{"command": "k''v 2''fa\n: '"}
+{"command": "k''v a''gent\n: '"}
+{"command": "k''v a''llow\n: '"}
+{"command": "k''v d''eny\n: '"}
+{"command": "k''v e''xport\n: '"}
+{"command": "k''v e''xport-key\n: '"}
+{"command": "k''v g''et\n: '"}
+{"command": "k''v g''rant\n: '"}
+{"command": "k''v i''mport-key\n: '"}
+{"command": "k''v i''nit\n: '"}
+{"command": "k''v l''ock\n: '"}
+{"command": "k''v n''etwork-allow\n: '"}
+{"command": "k''v n''etwork-deny\n: '"}
+{"command": "k''v p''assphrase\n: '"}
+{"command": "k''v p''rovider\n: '"}
+{"command": "k''v r''ecover\n: '"}
+{"command": "k''v r''ecovery-key\n: '"}
+{"command": "k''v s''etup-2fa\n: '"}
+{"command": "k''v u''nlock\n: '"}
+{"command": "k''v u''pgrade-security\n: '"}
+{"command": "k''v v''ault\n: '"}
+{"command": "k''v a''pprovals a''pprove\n: '"}
+{"command": "k''v a''pprovals d''eny\n: '"}
+{"command": "k''v a''pprovals p''rune\n: '"}
+{"command": "k''v p''olicy a''llow\n: '"}
+{"command": "k''v p''olicy b''lock\n: '"}
+{"command": "k''v p''olicy d''eny\n: '"}
+{"command": "k''v p''olicy p''rune\n: '"}
+{"command": "k''v a''pproval-mode s''et\n: '"}
+{"command": "k''v p''olicy h''ttp a''dd\n: '"}
+{"command": "k''v p''olicy h''ttp r''emove\n: '"}
+{"command": "k''v p''olicy h''ttp r''m\n: '"}
+{"command": "k''v l''s -''-reveal\n: '"}
+{"command": "k''v s''ync i''nit\n: '"}
+{"command": "k''v s''ync l''ogin -''-token-stdin\n: '"}
+{"command": "k''v s''ync a''ttach-device -''-token-stdin\n: '"}
+{"command": "k''v s''ync r''evoke-device -''-cloud\n: '"}
+{"command": "k''v s''ync r''otate-device-token -''-cloud\n: '"}
+{"command": "k''v s''ync c''reate-attach-token -''-cloud\n: '"}
+{"command": "kv get CONTROL"}
+{"command": "kv get X"}
+{"command": "kv ls"}
+{"command": "python3 -m kv export"}
+{"command": "python -Bmkv.cli history list"}
+{"command": "sudo -u me kv unlock"}
+{"command": "bash -c 'kv history list X'"}
+{"command": "echo 'kv get X' | sh"}
+{"command": "alias g=kv; g get X"}
+{"command": "kv() { :; }; kv ls"}
+{"command": "function kv { :; }"}
+{"command": "ls; echo 'oops"}
+{"command": "ls; kv 'get"}
+{"command": "$X get Y"}
+{"command": "env -S 'kv get X'"}
+{"command": "timeout 5 kv lock"}
+{"command": "find . -exec kv get {} \\;"}
+{"command": "cat <<EOF\nkv get X\nEOF"}
+{"command": "sh <<'EOF'\nkv get X\nEOF"}
+{"command": "sh <<< 'kv get X'"}
+{"command": "echo $'kv\\x20get X'"}
+{"command": "eval kv\\ get"}
+{"command": "script -qc 'kv get X' /dev/null"}
+{"command": "command -v kv"}
+{"command": "FOO=1 kv init"}
+{"command": "kv approvals approve 1"}
+{"command": "kv approvals request x"}
+{"command": "kv policy http add gh"}
+{"command": "kv env copy a b"}
+{"command": "kv env create a"}
+{"command": "echo \"$(kv get X)\""}
+{"command": "echo `kv get X`"}
+{"command": "cat <(kv get X)"}
+{"command": "ls > out 2>&1; kv get X"}
+{"command": "a | b |\n kv get X"}
+{"command": "kv get X # comment"}
+{"command": "ls ${HOME}/x"}
+{"command": "python3 -c 'import kv.config; kv.config.save_config()'"}
+{"command": "cat .secrets/key"}
+{"command": "cat ~/.kv/agent-0123456789ab.token"}
+{"command": "git -C .secrets show HEAD:key"}
+{"command": "( kv get X )"}
+{"command": "{ kv get X; }"}
+{"command": "if true; then kv get X; fi"}
+{"command": "! kv get X"}
+{"command": "x=$(kv get X)"}
+{"command": "kv   get   X"}
+{"command": "KV=kv; $KV get X"}
+{"command": "\"kv\" get X"}
+{"command": "k\\v get X"}
+{"command": "'kv' 'get' X"}
+{"command": "kv\\\n get X"}
+{"command": "echo ok; kv get 'unterminated"}
+{"command": "bash -c \"$(echo kv get X)\""}
+{"command": "bash -n 'kv get X'"}
+{"command": "bash -c"}
+{"command": "bash -s <<EOF\nkv get X\nEOF"}
+{"command": "unbuffer kv export"}
+{"command": "xargs -I{} kv get {}"}
+{"command": "nice -n 5 kv backup create"}
+{"command": "env FOO=1 -- kv lock"}
+{"command": "doas kv init"}
+{"command": "time kv recover"}
+{"command": "nohup kv agent &"}
+{"command": "ionice -c 3 kv vault approve-config"}
+{"command": "chrt 1 kv passphrase reset"}
+{"command": "taskset 1 kv 2fa"}
+{"command": "stdbuf -oL kv provider add x"}
+{"command": "sudo --chdir=/tmp kv grant approve 1"}
+{"command": "kv ls -e dev"}
+{"command": "kv set X"}
+{"command": "kv rm X"}
+{"command": "kv envs"}
+{"command": "kv status"}
+{"command": "kv version"}
+{"command": "echo kvget"}
+{"command": "echo kv.get"}
+{"command": "kv.cli get"}
+{"command": "./kv get X"}
+{"command": "/usr/bin/kv export"}
+{"command": "kv.exe get X"}
+{"command": "KV.EXE get X"}
+{"command": "python -m kv.__main__ get X"}
+{"command": "python -W ignore -m kv get X"}
+{"command": "python -Wignore -m kv get X"}
+{"command": "python -X dev -m kv get X"}
+{"command": "python --check-hash-based-pycs always -m kv get X"}
+{"command": "python -- -m kv get X"}
+{"command": "python -c 'kv get'"}
+{"command": "node -e 'kv get'"}
+{"command": "deno run x kv get"}
+{"command": "kv -v get X"}
+{"command": "kv --json get X"}
+{"command": "echo a\tb"}
+{"command": "printf '%s' \"a\\$b\""}
+{"command": "echo \"a\\\"b\" kv get"}
+{"command": "x=\"$(echo \"$(kv get X)\")\""}
+{"command": "echo ${X:-kv get}"}
+{"command": "echo ${X:-$(kv get X)}"}
+{"command": "cat <<-EOF\n\tkv get X\n\tEOF"}
+{"command": "cat <<EOF\nunterminated"}
+{"command": "cat << 'EOF' > f\nkv get X\nEOF\n"}
+{"command": "echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(kv get X))))))))))"}
+{"command": "echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo ok))))))))))"}
+{"command": "exec kv get X"}
+{"command": "exec -a foo kv get X"}
+{"command": "builtin kv get X"}
+{"command": "setsid kv get X"}
+{"command": "kv\u00a0get X"}
+{"command": "kv get X\u2028"}
+{"command": "echo '\u00e9' && kv get X"}
+{"command": "echo \"\u00fcn\u00efcode\" | kv export"}
+{"command": "kv ls; echo 'kv get' | cat"}
+{"command": "cat .secr*/k?y"}
+{"command": "cat .secrets/drawer*/x"}
+{"command": "ls .secr*/k?y"}
+{"command": "cat *.txt"}
+{"command": "cat [.]secrets/key"}
+{"command": "cat .secrets/[k]ey"}
+{"command": "cat .kv-write-*.tmp"}
+{"command": "cat '.kv-write-????????????????????????????????.tmp'"}
+{"command": "cat ~/.kv/*.token"}
+{"command": "A=.secrets; cat $A/key"}
+{"command": "echo $A; cat x"}
+{"command": "git commit -F $F"}
+{"command": "git commit -m 'kv get' -F f"}
+{"command": "git log --grep=kv --pretty=x -- a b"}
+{"command": "GIT_X=1 env -u Y git -C . commit -m 'kv get'"}
+{"command": "git commit -m x; kv get"}
+{"command": "git -c a=b commit --file=.secrets/key"}
+{"command": "git tag -F .secrets/key v1"}
+{"command": "git log -L 1,2:.secrets/key"}
+{"command": "git log -L :func:.secrets/key"}
+{"command": "git log -L .secrets/key"}
+{"command": "git commit --fi=.secrets/key"}
+{"command": "git commit --template .secrets/key"}
+{"command": "git commit -t.secrets/key"}
+{"command": "git commit -- .secrets/key x"}
+{"command": "git commit -m a -F- x"}
+{"command": "env -S 'git commit' -F x"}
+{"command": "env -- git commit -F x"}
+{"command": "env FOO=1 -C /tmp git commit -F x"}
+{"command": "cat <.secrets/key"}
+{"command": "cat -n<.secrets/key"}
+{"command": "true;<.secrets/key"}
+{"command": "(cat)<.secrets/key"}
+{"command": "cat <<<x<.secrets/key"}
+{"command": "head -n 1 c"}
+{"command": "cat a, b: (c)"}
+{"command": "cat ~/x ~root/y ~nosuchuser/z"}
+{"command": "cat x/../.secrets/key"}
+{"command": "cat ./.secrets/key"}
+{"command": "cat ../.secrets/key"}
+{"command": "cat /abs/.secrets/key"}
+{"command": "echo a/b --x=~/y"}
+{"command": "echo x=/etc/passwd"}
+{"command": "echo a/etc 0/x _/y"}
+{"command": "cat $(cat .secrets/key)"}
+{"command": "cat `cat .secrets/key`"}
+{"command": "cat <(cat .secrets/key)"}
+{"command": "echo \"$(cat .secrets/key)\""}
+{"command": "echo \"<(cat x)\""}
+{"command": "echo '$(cat x)'"}
+{"command": "echo \\$(cat x)"}
+{"command": "echo $(echo $(cat .secrets/key))"}
+{"command": "echo $("}
+{"command": "echo `"}
+{"command": "echo $(a 'b)' c)"}
+{"command": "echo $(a \"b)\" c)"}
+{"command": "echo $(a \\) b)"}
+{"command": "sed -n p .secrets/key"}
+{"command": "tee .secrets/key"}
+{"command": "mv .secrets/key /tmp"}
+{"command": "cp -r .secrets /tmp"}
+{"command": "diff .secrets/key x"}
+{"command": "base64 .secrets/key"}
+{"command": "awk 1 .secrets/key"}
+{"command": "strings .secrets/drawers/x"}
+{"command": "od .secrets/dev.enc"}
+{"command": "python3 -c 'open(\".secrets/key\").read()'"}
+{"command": "python3 -c 'import base64; open(\"x\").read()'"}
+{"command": "cat .secrets/.gitignore"}
+{"command": "cat .secrets"}
+{"command": "ls .secrets"}
+{"command": "ls -la .secrets/"}
+{"command": "cat .SECRETS/key"}
+{"command": "cat .secrets\\\\key"}
+{"command": "cat .secrets/config.json"}
+{"command": "cat .secrets/run_grants.json"}
+{"command": "cat .secrets/approval_signing_key"}
+{"command": "echo .secrets/key"}
+{"command": "cat x.kvi"}
+{"command": "cat .secrets/x/index.kvi"}
+{"command": "cat ~/.kv/agent-0123456789ab.sock"}
+{"command": "cat agent.token"}
+{"command": "cat \"a b/.secrets/key\""}
+{"command": "cat 'a'\"b\"/.secrets/key"}
+{"command": "cat .secrets/key\\ x"}
+{"command": "cat 2>&1 .secrets/key"}
+{"command": "cat .secrets/key 2>&1 | head"}
+{"command": "cat x >> .secrets/key"}
+{"command": "echo x > .secrets/key"}
+{"command": "cat < .secrets/key"}
+{"command": "cat << EOF\n.secrets/key\nEOF"}

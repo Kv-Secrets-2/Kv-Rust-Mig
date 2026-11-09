@@ -1,0 +1,25 @@
+[package]
+name = "kv-hook"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kv-store = { path = "../kv-store" }
+kv-proto = { path = "../kv-proto" }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+ignore = "0.4"
+globset = "0.4"
+unicode-normalization = "0.1"
+caseless = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
+
+[dev-dependencies]
+kv-test-support = { path = "../kv-test-support" }
+
+[lints]
+workspace = true

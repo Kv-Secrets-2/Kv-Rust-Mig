@@ -35,6 +35,9 @@ pub enum Command {
     Lock,
     Status,
     AgentChild,
+    Hook {
+        mode: String,
+    },
     Vault(crate::vaultcmd::VaultAction),
     Env(crate::envcmd::EnvAction),
     History(crate::history::HistoryAction),
@@ -406,6 +409,10 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "vault" {
         return parse_vault(&argv[1..]);
+    }
+    if first == "hook" {
+        let mode = argv.get(1).cloned().unwrap_or_else(|| "pre".to_owned());
+        return Ok(Some(Command::Hook { mode }));
     }
     if first == crate::lifecycle::AGENT_CHILD {
         return Ok(Some(Command::AgentChild));

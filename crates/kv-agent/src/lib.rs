@@ -1111,6 +1111,13 @@ fn handle_connection(
             kv_proto::write_reply(stream, &response)?;
             return Ok(());
         }
+        // No run has created files yet (kv_run arrives with the sandbox stage), so the
+        // hook's dynamic layer is told the truth: nothing is tracked.
+        "tracked_files" => json!({"files": []}),
+        "check_file" => match request.get("path") {
+            Some(Value::String(_)) => json!({"tracked": false}),
+            _ => json!({"error": "check_file requires a path"}),
+        },
         other => json!({"error":format!("{other} is not supported by this kv service yet")}),
     };
     replies.write(stream, &response)?;
