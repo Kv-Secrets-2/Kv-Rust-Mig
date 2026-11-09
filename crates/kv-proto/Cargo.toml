@@ -7,10 +7,13 @@ rust-version.workspace = true
 
 [dependencies]
 kv-store = { path = "../kv-store" }
+kv-approvals = { path = "../kv-approvals" }
+kv-crypto = { path = "../kv-crypto" }
 getrandom = "0.2"
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 thiserror = "2"
+hex = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }

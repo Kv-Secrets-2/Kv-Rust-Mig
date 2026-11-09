@@ -512,7 +512,9 @@ dependencies = [
 name = "kv-agent"
 version = "0.5.0-dev"
 dependencies = [
+ "base64",
  "getrandom",
+ "kv-approvals",
  "kv-crypto",
  "kv-proto",
  "kv-store",
@@ -572,6 +574,9 @@ name = "kv-proto"
 version = "0.5.0-dev"
 dependencies = [
  "getrandom",
+ "hex",
+ "kv-approvals",
+ "kv-crypto",
  "kv-store",
  "rustix",
  "serde_json",

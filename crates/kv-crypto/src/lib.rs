@@ -73,6 +73,7 @@ pub struct Identity {
     pub master_key: Key32,
     pub owner_seed: Zeroizing<[u8; 32]>,
     pub local_approval_id: [u8; 16],
+    pub location: Vec<u8>,
 }
 
 impl Identity {
@@ -81,6 +82,7 @@ impl Identity {
             master_key,
             owner_seed: Zeroizing::new(owner_seed),
             local_approval_id,
+            location: Vec::new(),
         }
     }
 }
@@ -390,6 +392,7 @@ pub mod keyfile {
             master_key: Key32::from_zeroizing(master_key),
             owner_seed,
             local_approval_id: *local_approval_id,
+            location: header.location,
         })
     }
 }

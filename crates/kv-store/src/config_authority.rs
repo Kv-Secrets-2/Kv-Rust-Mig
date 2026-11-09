@@ -13,35 +13,39 @@ pub const LABEL: &[u8] = b"kv-config-authority:v1";
 const RECORD_REFUSAL: &str = "The approved config record cannot be verified here; restore the vault at its approved location from a trusted backup.";
 
 #[derive(Debug, Error)]
-#[error("{0}")]
-pub struct AuthorityError(pub String);
+pub enum AuthorityError {
+    #[error("{0}")]
+    Refused(String),
+    #[error("{0}")]
+    Internal(String),
+}
 
 impl From<StoreError> for AuthorityError {
     fn from(error: StoreError) -> Self {
-        Self(error.to_string())
+        Self::Internal(error.to_string())
     }
 }
 
 impl From<std::io::Error> for AuthorityError {
     fn from(error: std::io::Error) -> Self {
-        Self(error.to_string())
+        Self::Internal(error.to_string())
     }
 }
 
 impl From<vault_origin::VaultOriginError> for AuthorityError {
     fn from(error: vault_origin::VaultOriginError) -> Self {
-        Self(error.to_string())
+        Self::Refused(error.to_string())
     }
 }
 
 impl From<kv_crypto::CryptoError> for AuthorityError {
     fn from(error: kv_crypto::CryptoError) -> Self {
-        Self(error.to_string())
+        Self::Internal(error.to_string())
     }
 }
 
 fn invalid_authority() -> AuthorityError {
-    AuthorityError(
+    AuthorityError::Refused(
         "Config authority is invalid; restore a valid config and run kv vault approve-config."
             .into(),
     )
@@ -191,7 +195,7 @@ fn canonical_location(root: &Path) -> Result<Vec<u8>, AuthorityError> {
     {
         let path = fs::canonicalize(root)?;
         let text = path.to_str().ok_or_else(|| {
-            AuthorityError("vault path cannot be encoded (lone surrogate)".into())
+            AuthorityError::Internal("vault path cannot be encoded (lone surrogate)".into())
         })?;
         Ok(text.as_bytes().to_vec())
     }
@@ -201,7 +205,7 @@ fn aad(root: &Path, local: &Value) -> Result<Vec<u8>, AuthorityError> {
     let local_id = local
         .get("local_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| AuthorityError("local vault identity is invalid".into()))?;
+        .ok_or_else(|| AuthorityError::Internal("local vault identity is invalid".into()))?;
     let location = hex(&canonical_location(root)?);
     Ok(format!(
         "{}:{}:{}",
@@ -236,23 +240,24 @@ fn open_record(
     }
     let expected_hash = digest
         .as_str()
-        .ok_or_else(|| AuthorityError(RECORD_REFUSAL.into()))?;
+        .ok_or_else(|| AuthorityError::Refused(RECORD_REFUSAL.into()))?;
     let Some(blob) = blob else {
         return Ok(None);
     };
     if hex(&Sha256::digest(blob)) != expected_hash {
-        return Err(AuthorityError(RECORD_REFUSAL.into()));
+        return Err(AuthorityError::Refused(RECORD_REFUSAL.into()));
     }
     let key = derive_labeled_key(master_key, LABEL, &[]);
-    let associated_data = aad(root, &local).map_err(|_| AuthorityError(RECORD_REFUSAL.into()))?;
-    let plain =
-        decrypt(&key, blob, &associated_data).map_err(|_| AuthorityError(RECORD_REFUSAL.into()))?;
-    let record: Value =
-        serde_json::from_slice(&plain).map_err(|_| AuthorityError(RECORD_REFUSAL.into()))?;
+    let associated_data =
+        aad(root, &local).map_err(|_| AuthorityError::Refused(RECORD_REFUSAL.into()))?;
+    let plain = decrypt(&key, blob, &associated_data)
+        .map_err(|_| AuthorityError::Refused(RECORD_REFUSAL.into()))?;
+    let record: Value = serde_json::from_slice(&plain)
+        .map_err(|_| AuthorityError::Refused(RECORD_REFUSAL.into()))?;
     let state = record
         .get("authority")
         .cloned()
-        .ok_or_else(|| AuthorityError(RECORD_REFUSAL.into()))?;
+        .ok_or_else(|| AuthorityError::Refused(RECORD_REFUSAL.into()))?;
     let keys = state
         .as_object()
         .map(|object| {
@@ -269,13 +274,14 @@ fn open_record(
         "security",
     ];
     expected_keys.sort_unstable();
-    let canonical_state = canonical(&state).map_err(|_| AuthorityError(RECORD_REFUSAL.into()))?;
+    let canonical_state =
+        canonical(&state).map_err(|_| AuthorityError::Refused(RECORD_REFUSAL.into()))?;
     let valid = record.get("version").and_then(Value::as_u64) == Some(1)
         && record.get("sha256").and_then(Value::as_str)
             == Some(hex(&Sha256::digest(canonical_state)).as_str())
         && keys == expected_keys;
     if !valid {
-        return Err(AuthorityError(RECORD_REFUSAL.into()));
+        return Err(AuthorityError::Refused(RECORD_REFUSAL.into()));
     }
     Ok(Some(state))
 }
@@ -303,7 +309,7 @@ fn verify_approved(
     config_snapshot: &config::ConfigSnapshot,
 ) -> Result<(), AuthorityError> {
     if !is_key_wrapped(root, true)? {
-        return Err(AuthorityError(
+        return Err(AuthorityError::Refused(
             "Config authority requires a passphrase-protected vault; create one with kv init."
                 .into(),
         ));
@@ -312,7 +318,7 @@ fn verify_approved(
     let new = authority_state(&config_snapshot.value)?;
     let changed = changed_parts(old.as_ref(), &new)?;
     if !changed.is_empty() {
-        return Err(AuthorityError(format!(
+        return Err(AuthorityError::Refused(format!(
             "Config authority changed ({}); run kv vault approve-config at your terminal before unlocking.",
             changed.join(", ")
         )));
@@ -342,7 +348,7 @@ pub fn require_current(
         &authority_state(&current.value)?,
     )?;
     if !changed.is_empty() {
-        return Err(AuthorityError(format!(
+        return Err(AuthorityError::Refused(format!(
             "Config authority changed ({}); run kv vault approve-config and restart the daemon.",
             changed.join(", ")
         )));
@@ -361,7 +367,7 @@ pub fn approve_config_unattended(
     let snapshot = config::load_config(root)?;
     let key_file = fsx::read_regular(&key_path(root), "key file")?;
     let header = keyfile::parse_v4_header(&key_file).map_err(|_| {
-        AuthorityError(
+        AuthorityError::Internal(
             "Config approval requires a passphrase-protected owner key; create a vault with kv init."
                 .into(),
         )
