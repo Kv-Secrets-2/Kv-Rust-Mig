@@ -8,6 +8,8 @@ pub mod permit;
 mod permit_facts;
 mod permit_render;
 pub mod permit_session;
+pub mod risk_card;
+pub mod verify;
 pub mod wire;
 
 #[cfg(all(test, unix))]

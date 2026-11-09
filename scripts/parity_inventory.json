@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 78,
+  "minimum_comparisons": 83,
   "targets": {
     "kv-requests/approval_requests_parity": ["approval_requests_match_python"],
     "kv-requests/policy_requests_parity": ["policy_requests_match_python"],
@@ -60,6 +60,12 @@
       "permit_render::tests::complete_permit_review_cards_match_python",
       "permit_render::tests::excessive_depth_deliberately_refuses_instead_of_python_recursion_error"
     ],
+    "kv-approvals/risk_card_parity": [
+      "risk_cards_match_python"
+    ],
+    "kv-approvals/verify_parity": [
+      "verifier_core_matches_python"
+    ],
     "kv-broker/kv_broker": ["caller::tests::url_safety_matches_python_for_ip_literals_and_localhost"],
     "kv-broker/python_parity": [
       "http_policy_matches_python_over_canonical_targets_and_malformed_rules",
@@ -71,6 +77,15 @@
     "kv-cli/stage7_mcp_cli": ["mcp_server_command_line_matches_python"],
     "kv-crypto/kv_crypto": ["python_digits::tests::passphrase_strength_matches_python_reference_digit_corpus"],
     "kv-mcp/stage7_mcp": ["transcripts_match_python_with_and_without_the_daemon", "key_kinds_and_fatal_frames_match_python"],
+    "kv-grants/normalize_parity": [
+      "normalization_matches_python"
+    ],
+    "kv-grants/store_parity": [
+      "stores_match_python"
+    ],
+    "kv-grants/grants_parity": [
+      "grants_and_tokens_match_python"
+    ],
     "kv-hook/bash_parity": ["bash_text_analysis_matches_python"],
     "kv-hook/hook_parity": ["decisions_match_python"],
     "kv-proto/kv_proto": ["unix_transport::tests::reply_modes_match_live_python_reference"],
