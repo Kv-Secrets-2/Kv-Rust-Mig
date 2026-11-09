@@ -184,7 +184,7 @@ fn read_authority(root: &Path) -> Result<Option<Vec<u8>>, AuthorityError> {
     }
 }
 
-fn canonical_location(root: &Path) -> Result<Vec<u8>, AuthorityError> {
+pub fn canonical_location(root: &Path) -> Result<Vec<u8>, AuthorityError> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -326,6 +326,15 @@ fn verify_approved(
     Ok(())
 }
 
+/// The authority the owner approved for this vault, if any (`_open(root, key, _read(root))`).
+pub fn approved_authority(
+    root: impl AsRef<Path>,
+    master_key: &Key32,
+) -> Result<Option<Value>, AuthorityError> {
+    let root = root.as_ref();
+    open_record(root, master_key, read_authority(root)?.as_deref())
+}
+
 pub fn require_approved(
     root: impl AsRef<Path>,
     master_key: &Key32,
@@ -363,10 +372,31 @@ pub fn approve_config_unattended(
     master_key: &Key32,
 ) -> Result<(), AuthorityError> {
     let root = root.as_ref();
-    let local = vault_origin::require_local(root)?;
+    let review = review_config(root)?;
+    approve_reviewed(root, master_key, &review)
+}
+
+/// The state an owner reviews before `approve_config`: the config read, the key file and
+/// the authority record as they were, and the authority they would approve.
+pub struct ConfigReview {
+    snapshot: config::ConfigSnapshot,
+    key_file: Vec<u8>,
+    before: Option<Vec<u8>>,
+    authority: Value,
+}
+
+impl ConfigReview {
+    pub fn authority(&self) -> &Value {
+        &self.authority
+    }
+}
+
+pub fn review_config(root: impl AsRef<Path>) -> Result<ConfigReview, AuthorityError> {
+    let root = root.as_ref();
+    vault_origin::require_local(root)?;
     let snapshot = config::load_config(root)?;
     let key_file = fsx::read_regular(&key_path(root), "key file")?;
-    let header = keyfile::parse_v4_header(&key_file).map_err(|_| {
+    keyfile::parse_v4_header(&key_file).map_err(|_| {
         AuthorityError::Internal(
             "Config approval requires a passphrase-protected owner key; create a vault with kv init."
                 .into(),
@@ -374,20 +404,46 @@ pub fn approve_config_unattended(
     })?;
     let before = read_authority(root)?;
     let authority = authority_state(&snapshot.value)?;
-    config::config_write_guard(root, &snapshot, || {
+    Ok(ConfigReview {
+        snapshot,
+        key_file,
+        before,
+        authority,
+    })
+}
+
+/// `approve_config` after the owner's yes: signs exactly the reviewed authority, and
+/// refuses when the config, key file or authority record changed since the review.
+pub fn approve_reviewed(
+    root: impl AsRef<Path>,
+    master_key: &Key32,
+    review: &ConfigReview,
+) -> Result<(), AuthorityError> {
+    let root = root.as_ref();
+    let local = vault_origin::require_local(root)?;
+    let authority = &review.authority;
+    let changed = || {
+        StoreError::ConfigConflict(
+            "Vault approval state changed; review it again with kv vault approve-config.".into(),
+        )
+    };
+    config::config_write_guard(root, &review.snapshot, || {
         let current_key = fsx::read_regular(&key_path(root), "key file")?;
         let current_record =
             read_authority(root).map_err(|error| StoreError::ConfigConflict(error.to_string()))?;
-        if current_key != key_file || current_record != before {
-            return Err(StoreError::ConfigConflict(
-                "Vault approval state changed; review it again with kv vault approve-config."
-                    .into(),
-            ));
+        if current_key != review.key_file || current_record != review.before {
+            return Err(changed());
+        }
+        let current = config::load_config(root)?;
+        let current_authority = authority_state(&current.value)
+            .map_err(|error| StoreError::ConfigConflict(error.to_string()))?;
+        if current.digest != review.snapshot.digest || &current_authority != authority {
+            return Err(changed());
         }
         let record = json!({
             "version":1,
             "authority":authority,
-            "sha256":hex(&Sha256::digest(canonical(&authority).map_err(|error| {
+            "sha256":hex(&Sha256::digest(canonical(authority).map_err(|error| {
                 StoreError::ConfigConflict(error.to_string())
             })?))
         });
@@ -404,6 +460,5 @@ pub fn approve_config_unattended(
             .map_err(|error| StoreError::ConfigConflict(error.to_string()))?;
         Ok(())
     })?;
-    let _ = header;
     Ok(())
 }

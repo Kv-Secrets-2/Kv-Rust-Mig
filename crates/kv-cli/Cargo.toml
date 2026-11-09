@@ -10,14 +10,24 @@ name = "kv"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
 kv-mcp = { path = "../kv-mcp" }
+kv-agent = { path = "../kv-agent" }
+kv-store = { path = "../kv-store" }
+kv-crypto = { path = "../kv-crypto" }
+kv-proto = { path = "../kv-proto" }
+kv-broker = { path = "../kv-broker" }
+kv-audit = { path = "../kv-audit" }
+serde_json = "1"
+caseless = "0.2.2"
+unicode-general-category = "1"
+zeroize = "1"
+getrandom = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process", "termios", "stdio"] }
 
 [dev-dependencies]
 kv-test-support = { path = "../kv-test-support" }
-kv-crypto = { path = "../kv-crypto" }
-kv-store = { path = "../kv-store" }
-serde_json = "1"
 
 [lints]
 workspace = true

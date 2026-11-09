@@ -247,6 +247,47 @@ impl DrawerStore {
             .collect())
     }
 
+    /// `DrawerBackend.env_storage_mtime`: a digest of the index and every live current
+    /// record, for cache invalidation; `None` (Python's 0) when there is no index or it
+    /// cannot be read.
+    pub fn env_storage_marker(&self, env: &str) -> Option<[u8; 32]> {
+        envname::validate_env_name(env).ok()?;
+        let path = self.index_path_for_env(env);
+        if !fsx::strictly_present(&path).ok()? {
+            return None;
+        }
+        let index_blob = read_drawer_file(&path, "drawer index").ok()?;
+        let index = self.load_index(env).ok()?;
+        let secrets = index.get("secrets")?.as_object()?;
+        let mut marker = Sha256::new();
+        marker.update(b"drawer\0");
+        marker.update(Sha256::digest(&index_blob));
+        let mut names: Vec<&String> = secrets.keys().collect();
+        names.sort();
+        for name in names {
+            let entry = &secrets[name];
+            if !is_live_entry(entry) {
+                continue;
+            }
+            let record_id = entry
+                .get("current_record_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            marker.update((name.len() as u64).to_le_bytes());
+            marker.update(name.as_bytes());
+            marker.update((record_id.len() as u64).to_le_bytes());
+            marker.update(record_id.as_bytes());
+            match self
+                .record_path(env, record_id)
+                .and_then(|record| read_drawer_file(&record, "drawer record"))
+            {
+                Ok(blob) => marker.update(Sha256::digest(&blob)),
+                Err(_) => marker.update(b"error"),
+            }
+        }
+        Some(marker.finalize().into())
+    }
+
     pub fn list_secrets(&self, env: &str) -> Result<Vec<(String, Zeroizing<String>)>, StoreError> {
         envname::validate_env_name(env)?;
         let index = self.load_index(env)?;

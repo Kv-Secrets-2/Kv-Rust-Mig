@@ -595,7 +595,7 @@ pub(crate) fn ensure_config_ignores(sdir: &Path) -> Result<(), StoreError> {
     update_vault_ignores(sdir, OLD_IGNORE_RULES, true, Some(IGNORE_HEADER))
 }
 
-pub(crate) fn write_config(sdir: &Path, value: &Value) -> Result<(), StoreError> {
+pub fn write_config(sdir: &Path, value: &Value) -> Result<(), StoreError> {
     let payload = pyjson::to_vec_indent2_ascii(value)?;
     fsx::write_atomic_limit(
         &sdir.join(CONFIG_FILE),
@@ -871,6 +871,10 @@ impl Vault {
             store,
             approvals: Box::new(approvals),
         }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn list_environments(&self) -> Result<Vec<String>, StoreError> {
