@@ -40,9 +40,23 @@ use thiserror::Error;
 #[cfg(all(unix, test))]
 mod audit_reply_tests;
 #[cfg(unix)]
+mod capapi;
+#[cfg(unix)]
+mod capture;
+#[cfg(unix)]
 mod lifecycle;
 #[cfg(unix)]
 mod permits;
+#[cfg(unix)]
+mod requests;
+#[cfg(unix)]
+mod run;
+#[cfg(unix)]
+mod runs;
+#[cfg(unix)]
+mod tracked;
+#[cfg(unix)]
+mod withhold;
 #[cfg(unix)]
 use lifecycle::{
     CommitError, ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker,
@@ -135,6 +149,30 @@ impl SecretCache {
         Ok(self.environment(store, env)?.keys().cloned().collect())
     }
 
+    /// Python `get_env_secrets`: every secret of one environment.
+    fn env_secrets(
+        &mut self,
+        store: &DrawerStore,
+        env: &str,
+    ) -> Result<BTreeMap<String, Zeroizing<String>>, AgentError> {
+        if !self.environments.contains_key(env) {
+            let secrets = store
+                .list_secrets(env)?
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+            self.environments.insert(env.to_owned(), secrets);
+        }
+        Ok(self.environments[env].clone())
+    }
+
+    /// Python `redaction_secrets`: every cached value, for error text.
+    fn redaction_values(&self) -> Vec<String> {
+        self.environments
+            .values()
+            .flat_map(|items| items.values().map(|v| v.to_string()))
+            .collect()
+    }
+
     fn counts(&self) -> (usize, usize) {
         (
             self.environments.len(),
@@ -208,6 +246,9 @@ pub struct TrustContext {
     pub local_approval_id: Vec<u8>,
     pub location: Vec<u8>,
     pub version: String,
+    /// The pinned approval signing key (`.secrets/approval_signing_key`),
+    /// which seals approval artifacts and capability tokens.
+    pub approval_signing_key: Option<Zeroizing<[u8; 32]>>,
     #[cfg(unix)]
     pin: Arc<TrustPin>,
 }
@@ -280,7 +321,10 @@ impl TrustContext {
             None => false,
         };
         #[cfg(unix)]
-        let approval_key_pin = pin_approval_signing_key(&root_path, &folder)?;
+        let (approval_key_pin, approval_signing_key) =
+            pin_approval_signing_key(&root_path, &folder)?;
+        #[cfg(not(unix))]
+        let approval_signing_key = None;
         let mut nonce = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(&mut nonce[..])
             .map_err(|_| AgentError("operating-system randomness unavailable".into()))?;
@@ -295,6 +339,7 @@ impl TrustContext {
             local_approval_id,
             location,
             version: "0.4.0".to_owned(),
+            approval_signing_key,
             #[cfg(unix)]
             pin: Arc::new(TrustPin {
                 state: std::sync::Mutex::new(PinState {
@@ -452,18 +497,22 @@ impl From<std::io::Error> for ApprovalKeyReadError {
     }
 }
 
+/// The pinned approval signing key file and, when it parsed, the key itself.
 #[cfg(unix)]
-fn pin_approval_signing_key(root: &Path, folder: &File) -> Result<ApprovalKeyPin, AgentError> {
+type PinnedApprovalKey = (ApprovalKeyPin, Option<Zeroizing<[u8; 32]>>);
+
+#[cfg(unix)]
+fn pin_approval_signing_key(root: &Path, folder: &File) -> Result<PinnedApprovalKey, AgentError> {
     match ensure_approval_signing_key(root, folder) {
         Ok(()) | Err(EnsureApprovalKeyError::Ignorable) => {}
         Err(EnsureApprovalKeyError::Structural(error)) => return Err(error),
     }
     match read_approval_signing_key(folder) {
         Ok(Some((blob, file_id))) => {
-            let _ = kv_approvals::artifacts::parse_signing_key(&blob);
-            Ok((Some(file_id), Some(Sha256::digest(&blob).into())))
+            let key = kv_approvals::artifacts::parse_signing_key(&blob).ok();
+            Ok(((Some(file_id), Some(Sha256::digest(&blob).into())), key))
         }
-        Ok(None) | Err(ApprovalKeyReadError::TooLarge) => Ok((None, None)),
+        Ok(None) | Err(ApprovalKeyReadError::TooLarge) => Ok(((None, None), None)),
         Err(ApprovalKeyReadError::NotRegular) => Err(AgentError(
             "the approval signing key must be a regular file".into(),
         )),
@@ -720,6 +769,7 @@ pub fn run_agent_with_api_caller(
     let socket_meta = fs::symlink_metadata(&socket_path)?;
     let socket_id = file_identity(&socket_meta);
     let lifecycle = Lifecycle::new();
+    let shared = Arc::new(Shared::new());
     let signal_guard = StopSignalGuard::install()?;
     let trust = Arc::new(trust);
     let master_key = Arc::new(master_key);
@@ -752,6 +802,7 @@ pub fn run_agent_with_api_caller(
                     }
                 };
                 let worker_lifecycle = Arc::clone(&lifecycle);
+                let worker_shared = Arc::clone(&shared);
                 let cache = Arc::clone(&cache);
                 let trust = Arc::clone(&trust);
                 let master_key = Arc::clone(&master_key);
@@ -785,6 +836,7 @@ pub fn run_agent_with_api_caller(
                             &api_caller,
                             &audit,
                             &worker_lifecycle,
+                            &worker_shared,
                             &connection_guard,
                             &memory_hardening,
                             CONNECTION_TIMEOUT,
@@ -824,15 +876,33 @@ pub fn run_agent_with_api_caller(
         if signal_guard.requested() {
             lifecycle.signal_stop();
         }
-        if let Some(outcome) = lifecycle.poll_drain(Duration::from_millis(20)) {
+        if let Some(outcome) =
+            lifecycle.poll_drain(Duration::from_millis(20), &|| shared.runs.count_live())
+        {
             break outcome;
+        }
+        // Live kv_run programs are work this drain waits for too: each is ended
+        // inside the same deadline (Python `_retire_trust_context`).
+        if lifecycle.stop_budget().is_some() {
+            shared.runs.end_due_runs(&lifecycle);
         }
         workers.reap_finished();
     };
+    shared.runs.end_due_runs(&lifecycle);
     if drain.cut_off != 0 {
         workers.shutdown_non_control();
     }
     lifecycle.retire();
+    // Programs the stop ended whose own path did not finish before the service
+    // leaves: one end record each (Python `_fallback_run_records`).
+    for entry in shared.runs.fallback_records() {
+        let mut fields = serde_json::Map::new();
+        fields.insert("program".into(), json!(entry.program));
+        fields.insert("run_id".into(), json!(entry.run_id));
+        fields.insert("ended_by".into(), json!("stop"));
+        fields.insert("cleanup_finished".into(), json!(false));
+        let _ = audit.emit("run_ended_by_stop", fields);
+    }
     // Give the stop answer and already-prepared retirement refusals a separate,
     // bounded delivery allowance. No new data-bearing reply can be committed.
     let answers_until = Instant::now() + Duration::from_secs(2);
@@ -866,6 +936,37 @@ pub fn run_agent(
     ))
 }
 
+/// Python's `_stopping` latch: set from the first stop (or signal) on.
+#[cfg(unix)]
+fn stopping_latched(lifecycle: &Lifecycle) -> bool {
+    !matches!(lifecycle.phase(), lifecycle::Phase::Running)
+}
+
+/// Daemon-wide state every connection shares (Python's closures over
+/// `run_agent` locals): the tracked-file list for the hook.
+#[cfg(unix)]
+pub(crate) struct Shared {
+    pub(crate) tracked: tracked::Tracked,
+    pub(crate) runs: runs::Runs,
+    pub(crate) ledger: kv_grants::ledger::Ledger,
+    pub(crate) host: kv_sandbox::bwrap::SandboxHost,
+    /// Python `trust.request_records`: the approval requests this session filed.
+    pub(crate) requests: kv_requests::request_records::RequestRecords,
+}
+
+#[cfg(unix)]
+impl Shared {
+    pub(crate) fn new() -> Self {
+        Self {
+            tracked: tracked::Tracked::new(),
+            runs: runs::Runs::new(),
+            ledger: kv_grants::ledger::Ledger::new(),
+            host: kv_sandbox::bwrap::SandboxHost::detect(),
+            requests: kv_requests::request_records::RequestRecords::new(None),
+        }
+    }
+}
+
 #[cfg(unix)]
 #[allow(clippy::too_many_arguments)]
 fn handle_connection(
@@ -884,6 +985,7 @@ fn handle_connection(
     api_caller: &kv_broker::ApiCaller,
     audit: &kv_audit::Audit,
     lifecycle: &Arc<Lifecycle>,
+    shared: &Shared,
     connection: &ConnectionGuard,
     memory_hardening: &Value,
     request_timeout: Duration,
@@ -962,6 +1064,50 @@ fn handle_connection(
         )?;
         return Ok(());
     }
+    // Script-facing broker capabilities are authenticated by the scoped capability token
+    // itself, never by the daemon token: secret-bearing capsules hide ~/.kv.
+    if cmd == "cap_api" {
+        if let Err(error) = validate_http_call_request(request, true) {
+            replies.write(stream, &json!({"error":error}))?;
+            return Ok(());
+        }
+        let env = request
+            .get("env")
+            .and_then(Value::as_str)
+            .or_else(|| approved.get("default_env").and_then(Value::as_str))
+            .unwrap_or("dev");
+        let registered = kv_store::config::list_environments(root).unwrap_or_default();
+        if let Err(error) = kv_store::envname::validate_registered_name(env, &registered) {
+            // `_daemon_env_error`: the reason without the caller's text.
+            let text = error.to_string();
+            let shown = if text.starts_with("ambiguous environment name") {
+                "ambiguous environment name"
+            } else {
+                "invalid environment name"
+            };
+            replies.write(stream, &json!({"error":shown}))?;
+            return Ok(());
+        }
+        let response = capapi::handle(&capapi::CapCtx {
+            root,
+            store,
+            cache,
+            trust,
+            providers,
+            policy: http_policy,
+            caller: api_caller,
+            permits,
+            lifecycle,
+            connection,
+            shared,
+            audit,
+            env,
+            request,
+        });
+        let _ = capapi::audit(audit, providers, permits, request, &response);
+        replies.write(stream, &response)?;
+        return Ok(());
+    }
     let supplied = request.get("token").and_then(Value::as_str).unwrap_or("");
     if supplied.len() > 128 || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
         replies.write(stream, &json!({"error":"authentication required"}))?;
@@ -971,6 +1117,12 @@ fn handle_connection(
         && let Err(error) = validate_api_request(request)
     {
         replies.write(stream, &json!({"error":error}))?;
+        return Ok(());
+    }
+    if cmd == "run"
+        && let Err(error) = validate_run_request(request)
+    {
+        replies.write(stream, &json!({"error":error,"exit_code":1}))?;
         return Ok(());
     }
     if cmd.is_empty() || cmd.len() > 32 {
@@ -1019,6 +1171,7 @@ fn handle_connection(
                 &cache,
                 providers,
                 http_policy,
+                shared,
             ),
             Err(_) => json!({"error":"secret cache is unavailable"}),
         },
@@ -1045,6 +1198,61 @@ fn handle_connection(
             json!({"environments":environments,"invalid_environments":[]})
         }
         "lock" => json!({"locking":true,"ended":true}),
+        "run" => {
+            // Python: the run's work window opens at admission and closes once the
+            // program has started; the hard-lock pin is observed under it.
+            let work = match lifecycle.try_commit_for_with_charge(connection, || {
+                trust.observe_held().map_err(permits::hard_lock_error)
+            }) {
+                Ok(work) => work,
+                Err(CommitError::Stopping) => {
+                    replies.write(
+                        stream,
+                        &json!({
+                            "error":"the agent is stopping; new requests are refused",
+                            "error_code":"agent_stopping",
+                            "exit_code":1,
+                        }),
+                    )?;
+                    return Ok(());
+                }
+                Err(CommitError::Charge(mut refusal)) => {
+                    if refusal.is_object() {
+                        refusal["exit_code"] = json!(1);
+                    }
+                    replies.write(stream, &refusal)?;
+                    return Ok(());
+                }
+            };
+            let env = request
+                .get("env")
+                .and_then(Value::as_str)
+                .or_else(|| approved.get("default_env").and_then(Value::as_str))
+                .unwrap_or("dev");
+            let outcome = run::handle_run(run::RunCtx {
+                root,
+                root_text,
+                store,
+                cache,
+                trust,
+                approved,
+                providers,
+                audit,
+                lifecycle,
+                shared,
+                env,
+                request,
+                known_commands: &known,
+                work: Some(work),
+            });
+            if outcome.control {
+                // A stop-time answer rides the control lane, as Python's does.
+                connection.mark_control();
+                kv_proto::write_reply(stream, &outcome.response)?;
+                return Ok(());
+            }
+            outcome.response
+        }
         "permit_requests" => json!({
             "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
             "pauses": [],
@@ -1095,27 +1303,31 @@ fn handle_connection(
             // Register the reply as control before retirement can close idle
             // sockets. Control answers contain no vault data or work authority.
             connection.mark_control();
-            let response = match lifecycle.request_stop(choice) {
+            let response = match lifecycle.request_stop(choice, shared.runs.count_running()) {
                 StopPlan::AwaitingChoice { in_flight } => {
-                    json!({"in_flight":in_flight,"awaiting_choice":true,"runs":[]})
+                    json!({"in_flight":in_flight,"awaiting_choice":true,
+                        "runs":shared.runs.running_brief()})
                 }
                 StopPlan::AlreadyStopping { wait_seconds } => {
-                    json!({"stopping":true,"wait_seconds":wait_seconds,"runs":[]})
+                    json!({"stopping":true,"wait_seconds":wait_seconds,
+                        "runs":shared.runs.running_brief()})
                 }
                 StopPlan::Drain { .. } => {
-                    let outcome = lifecycle.wait_for_drain();
+                    let outcome = shared.runs.drain(lifecycle);
                     json!({"stopping":true,"wait_seconds":outcome.wait_seconds,
-                        "cut_off":outcome.cut_off,"ended_runs":[]})
+                        "cut_off":outcome.cut_off,"ended_runs":shared.runs.ended_brief()})
                 }
             };
             kv_proto::write_reply(stream, &response)?;
             return Ok(());
         }
-        // No run has created files yet (kv_run arrives with the sandbox stage), so the
-        // hook's dynamic layer is told the truth: nothing is tracked.
-        "tracked_files" => json!({"files": []}),
+        "tracked_files" => shared.tracked.tracked_files(stopping_latched(lifecycle)),
         "check_file" => match request.get("path") {
-            Some(Value::String(_)) => json!({"tracked": false}),
+            Some(Value::String(path)) => shared.tracked.check_file(
+                path,
+                std::slice::from_ref(&root_text.to_owned()),
+                stopping_latched(lifecycle),
+            ),
             _ => json!({"error": "check_file requires a path"}),
         },
         other => json!({"error":format!("{other} is not supported by this kv service yet")}),
@@ -1462,6 +1674,7 @@ fn status_response(
     cache: &SecretCache,
     provider_snapshot: &kv_broker::ProviderTable,
     http_policy_snapshot: &kv_broker::HttpPolicySnapshot,
+    shared: &Shared,
 ) -> Value {
     let environments = config
         .get("environments")
@@ -1483,7 +1696,7 @@ fn status_response(
     json!({
         "running":true,
         "session_nonce":hex(&trust.session_nonce[..]),
-        "runs_used":{},
+        "runs_used":shared.ledger.run_counts(),
         "pid":std::process::id(),
         "root":root,
         "environments":environments,
@@ -1498,12 +1711,128 @@ fn status_response(
         "enforcement":kv_proto::ENFORCEMENT_GENERATION,
         "session":if trust.protected {"protected"} else {"unprotected"},
         "hard_locked":trust.hard_locked().is_some(),
-        "runs":[]
+        // The live kv_run programs, so a stop can say what it ends.
+        "runs":shared.runs.running_brief()
     })
 }
 
 #[cfg(unix)]
+/// Python `_validate_request` for `run`: `_validate_argv`, `_validate_str_list`
+/// and `_validate_str` with the reference's limits and wording.
+fn validate_run_request(request: &serde_json::Map<String, Value>) -> Result<(), String> {
+    const MAX_ARGV_COUNT: usize = 50;
+    const MAX_ARGV_LEN: usize = 4096;
+    const MAX_ENV_NAMES_COUNT: usize = 1000;
+    const MAX_SECRET_NAME_LEN: usize = 256;
+    const MAX_CAPABILITY_NAMES_COUNT: usize = 16;
+    const MAX_CAPABILITY_NAME_LEN: usize = 256;
+    const MAX_CWD_LEN: usize = 4096;
+
+    fn check_str(
+        value: Option<&Value>,
+        field: &str,
+        max_len: usize,
+        required: bool,
+        allow_empty: bool,
+    ) -> Result<(), String> {
+        let value = match value {
+            None | Some(Value::Null) => {
+                return if required {
+                    Err(format!("{field} is required"))
+                } else {
+                    Ok(())
+                };
+            }
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(format!("{field} must be a string"));
+        };
+        if !allow_empty && text.is_empty() {
+            return Err(format!("{field} must not be empty"));
+        }
+        if text.len() > max_len {
+            return Err(format!("{field} exceeds {max_len} bytes"));
+        }
+        Ok(())
+    }
+
+    fn check_str_list(
+        value: Option<&Value>,
+        field: &str,
+        max_items: usize,
+        max_item_len: usize,
+    ) -> Result<(), String> {
+        let items = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(Value::Array(items)) => items,
+            Some(_) => return Err(format!("{field} must be a list")),
+        };
+        if items.len() > max_items {
+            return Err(format!("{field} has too many items (max {max_items})"));
+        }
+        for (i, item) in items.iter().enumerate() {
+            check_str(
+                Some(item),
+                &format!("{field}[{i}]"),
+                max_item_len,
+                true,
+                false,
+            )?;
+        }
+        Ok(())
+    }
+
+    let argv = match request.get("argv") {
+        None | Some(Value::Null) => return Err("argv is required".into()),
+        Some(Value::Array(items)) => items,
+        Some(_) => return Err("argv must be a list".into()),
+    };
+    if argv.is_empty() {
+        return Err("argv must not be empty".into());
+    }
+    if argv.len() > MAX_ARGV_COUNT {
+        return Err(format!("argv has too many items (max {MAX_ARGV_COUNT})"));
+    }
+    for (i, item) in argv.iter().enumerate() {
+        check_str(Some(item), &format!("argv[{i}]"), MAX_ARGV_LEN, true, i > 0)?;
+    }
+    check_str_list(
+        request.get("env_names"),
+        "env_names",
+        MAX_ENV_NAMES_COUNT,
+        MAX_SECRET_NAME_LEN,
+    )?;
+    check_str_list(
+        request.get("capability_names"),
+        "capability_names",
+        MAX_CAPABILITY_NAMES_COUNT,
+        MAX_CAPABILITY_NAME_LEN,
+    )?;
+    let raw_secrets =
+        matches!(request.get("env_names"), Some(Value::Array(items)) if !items.is_empty());
+    let capabilities =
+        matches!(request.get("capability_names"), Some(Value::Array(items)) if !items.is_empty());
+    if raw_secrets && capabilities {
+        return Err("kv_run cannot mix raw secrets and capabilities".into());
+    }
+    check_str(request.get("cwd"), "cwd", MAX_CWD_LEN, false, false)?;
+    match request.get("private_cwd") {
+        None | Some(Value::Null) | Some(Value::Bool(_)) => {}
+        Some(_) => return Err("private_cwd must be a boolean".into()),
+    }
+    Ok(())
+}
+
 fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), String> {
+    validate_http_call_request(request, false)
+}
+
+/// `_validate_agent_request` for `api` (daemon token) and `cap_api` (capability token).
+fn validate_http_call_request(
+    request: &serde_json::Map<String, Value>,
+    capability: bool,
+) -> Result<(), String> {
     fn string_field<'a>(
         request: &'a serde_json::Map<String, Value>,
         field: &str,
@@ -1541,6 +1870,12 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
     }
     if request.contains_key("reason") {
         string_field(request, "reason", 512, false, true)?;
+    }
+    if capability {
+        if request.contains_key("pause_id") {
+            string_field(request, "pause_id", 128, true, false)?;
+        }
+        string_field(request, "capability_token", 256, true, false)?;
     }
     string_field(request, "provider", 128, true, false)?;
     string_field(request, "path", 4096, true, false)?;
@@ -1580,6 +1915,9 @@ fn validate_api_request(request: &serde_json::Map<String, Value>) -> Result<(), 
                 return Err(format!("headers[{index}] value exceeds 4096 bytes"));
             }
         }
+    }
+    if capability && !request.get("run_identity").is_some_and(Value::is_object) {
+        return Err("run_identity must be an object".into());
     }
     Ok(())
 }
@@ -1696,6 +2034,7 @@ fn api_call_response(
             caller,
             api_request.clone(),
             decision.get("policy_rule"),
+            None,
         ) {
             Ok(id) => Some(id),
             Err(response) => return response,
@@ -1720,6 +2059,7 @@ fn api_call_response(
                                 provider,
                                 caller_headers,
                                 preview,
+                                None,
                             ),
                         )
                         .map_err(permits::invalid_error)
@@ -2173,6 +2513,7 @@ mod tests {
             local_approval_id: Vec::new(),
             location: Vec::new(),
             version: "0.4.0".into(),
+            approval_signing_key: None,
             pin: Arc::new(TrustPin {
                 state: Mutex::new(PinState {
                     root: directory.0.clone(),
@@ -2233,6 +2574,7 @@ mod tests {
             local_approval_id: Vec::new(),
             location: Vec::new(),
             version: "0.4.0".into(),
+            approval_signing_key: None,
             pin: Arc::new(TrustPin {
                 state: std::sync::Mutex::new(PinState {
                     root: std::path::PathBuf::from("."),
@@ -2321,6 +2663,7 @@ mod tests {
             local_approval_id: Vec::new(),
             location: Vec::new(),
             version: "0.4.0".into(),
+            approval_signing_key: None,
             pin: Arc::new(TrustPin {
                 state: std::sync::Mutex::new(PinState {
                     root: std::path::PathBuf::from("."),
@@ -2343,6 +2686,7 @@ mod tests {
         let api_caller = kv_broker::ApiCaller::new();
         let audit = kv_audit::Audit::new(".");
         let lifecycle = Lifecycle::new();
+        let shared = Shared::new();
         let mut workers = WorkerTracker::new();
         let connection = workers.register_connection(&server).unwrap();
         let memory_hardening = json!({});
@@ -2365,6 +2709,7 @@ mod tests {
                 &api_caller,
                 &audit,
                 &lifecycle,
+                &shared,
                 &connection,
                 &memory_hardening,
                 timeout,

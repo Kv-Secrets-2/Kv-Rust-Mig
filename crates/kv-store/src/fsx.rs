@@ -561,6 +561,29 @@ pub fn lock_storage(secrets_dir: &Path) -> Result<StorageLock, StoreError> {
     })
 }
 
+pub(crate) fn lock_authorization(secrets_dir: &Path) -> Result<Option<StorageLock>, StoreError> {
+    let identity = lock_identity(secrets_dir, "storage.lock")?;
+    let held = LOCK_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .any(|lock| lock.rank == 1 && lock.identity == identity)
+    });
+    if held {
+        return Ok(None);
+    }
+    lock_storage(secrets_dir)
+        .map(Some)
+        .map_err(|error| match error {
+            StoreError::Io(ref io) if io.kind() != io::ErrorKind::PermissionDenied => {
+                StoreError::ConfigConflict(
+                    "authorization store is busy or unavailable; retry".into(),
+                )
+            }
+            other => other,
+        })
+}
+
 pub(crate) fn lock_config(secrets_dir: &Path) -> Result<ConfigLock, StoreError> {
     if !check_directory(secrets_dir)? {
         return Err(StoreError::Structure(format!(

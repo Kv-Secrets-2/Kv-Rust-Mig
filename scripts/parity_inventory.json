@@ -2,17 +2,8 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 87,
+  "minimum_comparisons": 107,
   "targets": {
-    "kv-requests/approval_requests_parity": [
-      "approval_requests_match_python"
-    ],
-    "kv-requests/policy_requests_parity": [
-      "policy_requests_match_python"
-    ],
-    "kv-requests/request_records_parity": [
-      "request_records_match_python"
-    ],
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
       "agent_status_and_commands_match_in_both_directions",
@@ -34,6 +25,15 @@
       "unprotected_session_refuses_before_lookup_or_preview_like_python",
       "protected_approval_allows_review_but_refuses_registration_like_python"
     ],
+    "kv-agent/stage6_capapi": [
+      "capability_run_api_calls_match_python",
+      "capability_run_permit_matches_python"
+    ],
+    "kv-agent/stage6_run": [
+      "run_replies_match_python_on_the_same_vault",
+      "secret_bearing_run_with_an_owner_grant_matches_python",
+      "stop_waits_for_a_running_program_and_ends_it_on_now"
+    ],
     "kv-agent/stage6_shutdown": [
       "invalid_stop_choices_and_idle_client_cleanup_match_python",
       "stop_wait_drains_provider_and_refuses_new_dispatch_like_python",
@@ -41,24 +41,6 @@
       "pending_provider_safety_check_cannot_send_after_stop_like_python",
       "sigterm_with_idle_clients_cleans_runtime_within_bound_like_python",
       "daemon_audit_refusal_warns_only_opted_in_replies_like_python"
-    ],
-    "kv-audit/kv_audit": [
-      "codec::tests::attribution_fields_match_python_reference",
-      "codec::tests::numeric_spelling_matches_python_reference",
-      "codec::tests::complete_entry_bytes_and_nonstring_previous_hash_match_python",
-      "codec::tests::canonical_python_repr_printability_inventory",
-      "codec::requester_tests::requester_and_label_fields_match_python_reference",
-      "codec::requester_tests::canonical_requester_hidden_category_inventory"
-    ],
-    "kv-audit/interoperability": [
-      "alternating_and_concurrent_writers_match_python_chain_and_exact_counts",
-      "overflow_float_records_remain_chain_compatible_with_python",
-      "python_log_lock_causes_bounded_drop_warning_and_recovery",
-      "python_health_lock_preserves_unknown_loss_through_recovery",
-      "refusal_recovery_health_and_warning_leases_match_python",
-      "persisted_health_validation_and_loss_updates_match_python",
-      "missing_lost_health_is_untrusted_despite_python_reference_exception",
-      "python_lock_replacement_marks_order_uncertain_for_fresh_rust_readers"
     ],
     "kv-approvals/fixtures": [
       "rust_signed_owner_grant_and_permit_verify_in_python_when_configured"
@@ -76,22 +58,73 @@
     "kv-approvals/verify_parity": [
       "verifier_core_matches_python"
     ],
+    "kv-audit/interoperability": [
+      "alternating_and_concurrent_writers_match_python_chain_and_exact_counts",
+      "overflow_float_records_remain_chain_compatible_with_python",
+      "python_log_lock_causes_bounded_drop_warning_and_recovery",
+      "python_health_lock_preserves_unknown_loss_through_recovery",
+      "refusal_recovery_health_and_warning_leases_match_python",
+      "persisted_health_validation_and_loss_updates_match_python",
+      "missing_lost_health_is_untrusted_despite_python_reference_exception",
+      "python_lock_replacement_marks_order_uncertain_for_fresh_rust_readers"
+    ],
+    "kv-audit/kv_audit": [
+      "codec::tests::attribution_fields_match_python_reference",
+      "codec::tests::numeric_spelling_matches_python_reference",
+      "codec::tests::complete_entry_bytes_and_nonstring_previous_hash_match_python",
+      "codec::tests::canonical_python_repr_printability_inventory",
+      "codec::requester_tests::requester_and_label_fields_match_python_reference",
+      "codec::requester_tests::canonical_requester_hidden_category_inventory"
+    ],
+    "kv-broker/http_policy": [
+      "http_policy_rule_helpers_match_python"
+    ],
     "kv-broker/kv_broker": [
       "caller::tests::url_safety_matches_python_for_ip_literals_and_localhost"
+    ],
+    "kv-broker/preview": [
+      "prepared_previews_match_python_reference"
+    ],
+    "kv-broker/provider_config": [
+      "provider_validation_and_default_policy_match_python"
     ],
     "kv-broker/python_parity": [
       "http_policy_matches_python_over_canonical_targets_and_malformed_rules",
       "provider_table_matches_python_snapshot",
       "redaction_matches_python_for_500_generated_cases"
     ],
-    "kv-broker/preview": [
-      "prepared_previews_match_python_reference"
+    "kv-cli/allow_commands": [
+      "command_and_network_owner_sequences_match_python",
+      "command_policy_storage_matches_python"
+    ],
+    "kv-cli/approval_mode": [
+      "approval_mode_owner_sequence_matches_python",
+      "approval_mode_storage_and_authorization_lock_match_python"
+    ],
+    "kv-cli/approvals_permit_parity": [
+      "approving_a_one_call_permit_matches_python"
     ],
     "kv-cli/cli_blackbox": [
       "owner_flow_matches_python_reference"
     ],
+    "kv-cli/command_policy": [
+      "command_policy_owner_sequences_match_python",
+      "command_policy_parser_matches_python"
+    ],
+    "kv-cli/http_policy": [
+      "http_policy_owner_sequences_match_python",
+      "http_policy_parser_matches_python"
+    ],
+    "kv-cli/owner_config_interop": [
+      "owner_configs_unlock_in_both_daemons",
+      "owner_config_top_level_help_matches_python"
+    ],
     "kv-cli/preflight_parity": [
       "preflight_cli_matches_python"
+    ],
+    "kv-cli/providers": [
+      "provider_owner_sequences_match_python",
+      "provider_parser_matches_python"
     ],
     "kv-cli/stage7_mcp_cli": [
       "mcp_server_command_line_matches_python"
@@ -99,9 +132,8 @@
     "kv-crypto/kv_crypto": [
       "python_digits::tests::passphrase_strength_matches_python_reference_digit_corpus"
     ],
-    "kv-mcp/stage7_mcp": [
-      "transcripts_match_python_with_and_without_the_daemon",
-      "key_kinds_and_fatal_frames_match_python"
+    "kv-grants/grants_parity": [
+      "grants_and_tokens_match_python"
     ],
     "kv-grants/normalize_parity": [
       "normalization_matches_python"
@@ -109,14 +141,15 @@
     "kv-grants/store_parity": [
       "stores_match_python"
     ],
-    "kv-grants/grants_parity": [
-      "grants_and_tokens_match_python"
-    ],
     "kv-hook/bash_parity": [
       "bash_text_analysis_matches_python"
     ],
     "kv-hook/hook_parity": [
       "decisions_match_python"
+    ],
+    "kv-mcp/stage7_mcp": [
+      "transcripts_match_python_with_and_without_the_daemon",
+      "key_kinds_and_fatal_frames_match_python"
     ],
     "kv-preflight/agent_code_parity": [
       "agent_code_matches_python"
@@ -129,6 +162,15 @@
     ],
     "kv-proto/kv_proto": [
       "unix_transport::tests::reply_modes_match_live_python_reference"
+    ],
+    "kv-requests/approval_requests_parity": [
+      "approval_requests_match_python"
+    ],
+    "kv-requests/policy_requests_parity": [
+      "policy_requests_match_python"
+    ],
+    "kv-requests/request_records_parity": [
+      "request_records_match_python"
     ],
     "kv-sandbox/classify_parity": [
       "classify_decisions_match_python"
@@ -152,9 +194,6 @@
       "approval_stores_match_python_for_valid_invalid_and_conservative_inputs",
       "python_string_rendering_matches_generated_json_values"
     ],
-    "kv-store/kv_store": [
-      "pyjson::tests::python_json_body_serialization_matches_reference"
-    ],
     "kv-store/config": [
       "python_config_writer_and_gitignore_merge_match_rust_byte_for_byte",
       "python_and_rust_config_aware_environment_lifecycle_match"
@@ -163,6 +202,9 @@
       "python_and_rust_config_lifecycle_steps_match",
       "python_and_rust_operations_interleave_on_one_vault_copy",
       "rust_and_python_backup_restore_interoperate"
+    ],
+    "kv-store/kv_store": [
+      "pyjson::tests::python_json_body_serialization_matches_reference"
     ],
     "kv-store/python_parity": [
       "python_and_rust_drawer_operations_have_matching_storage_and_cross_reads",

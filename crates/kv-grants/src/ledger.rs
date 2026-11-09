@@ -429,6 +429,65 @@ impl Ledger {
     }
 
     /// Whether the pass's time is over by its signed end or the monotonic clock.
+    /// Python `spend_permit` with a `token_hash`: whether this pass may spend a
+    /// one-call permit signed for `grant_id`/`run_id` and `capability`, in the
+    /// words Python refuses with. Debits nothing: `spend_pass` follows once the
+    /// permit itself is spent.
+    pub fn check_pass_for_permit(
+        &self,
+        token_hash: &str,
+        now_epoch: i64,
+        capability: &str,
+        grant_id: Option<&str>,
+        run_id: Option<&str>,
+    ) -> Result<(), AdmissionRefused> {
+        let mut inner = self.lock();
+        let parent_revoked = inner
+            .passes
+            .get(token_hash)
+            .and_then(|pass| pass.record.get("grant_id"))
+            .and_then(Value::as_str)
+            .and_then(|id| inner.runs.get(id))
+            .is_some_and(|run| run.revoked.as_deref() == Some("immediate"));
+        let Some(pass) = inner.passes.get_mut(token_hash) else {
+            return Err(AdmissionRefused::new(
+                "capability pass expired or exhausted",
+            ));
+        };
+        if pass.revoked || pass.time_over(now_epoch) || (pass.left <= 0 && pass.left_by.is_none()) {
+            return Err(AdmissionRefused::new(
+                "capability pass expired or exhausted",
+            ));
+        }
+        let other = AdmissionRefused::new("this permit belongs to another run or provider");
+        if pass.wallet {
+            return Err(other);
+        }
+        let services: Vec<&str> = match &pass.left_by {
+            Some(left_by) => left_by.keys().map(String::as_str).collect(),
+            None => pass
+                .record
+                .get("capability_name")
+                .and_then(Value::as_str)
+                .into_iter()
+                .collect(),
+        };
+        if parent_revoked
+            || pass.record.get("grant_id").and_then(Value::as_str) != grant_id
+            || pass
+                .record
+                .get("created_from_run_id")
+                .and_then(Value::as_str)
+                != run_id
+            || !services.contains(&capability)
+        {
+            return Err(other);
+        }
+        // `_charge_service` before the debit: an exhausted service refuses here, with the
+        // permit still unspent.
+        pass.charge_service(Some(capability)).map(|_| ())
+    }
+
     pub fn time_over(&self, token_hash: &str, now_epoch: i64) -> bool {
         self.lock()
             .passes

@@ -53,6 +53,11 @@ impl SealedArgsFd {
     }
 
     /// The raw number for `--args N` (Python `fileno`); `None` once taken.
+    /// The descriptor to pass to the child, while kv still holds it.
+    pub fn as_fd(&self) -> Option<std::os::fd::BorrowedFd<'_>> {
+        self.fd.as_ref().map(std::os::fd::AsFd::as_fd)
+    }
+
     pub fn raw(&self) -> Option<i32> {
         use std::os::fd::AsRawFd;
         self.fd.as_ref().map(AsRawFd::as_raw_fd)
@@ -93,6 +98,11 @@ impl Drop for SealedArgsFd {
 impl SealedArgsFd {
     pub fn new(_args: &[String]) -> Result<Self, RunEnvError> {
         Err(RunEnvError::SealedArgsUnavailable)
+    }
+
+    #[cfg(unix)]
+    pub fn as_fd(&self) -> Option<std::os::fd::BorrowedFd<'_>> {
+        None
     }
 
     pub fn raw(&self) -> Option<i32> {

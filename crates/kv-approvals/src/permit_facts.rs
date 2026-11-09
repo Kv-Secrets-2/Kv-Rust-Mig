@@ -8,7 +8,8 @@ use unicode_normalization::UnicodeNormalization;
 use crate::canonical::canonical_json;
 use crate::permit_session::{CallFacts, PERMIT_TTL_SECONDS, PermitError, SessionBinding};
 
-const FACT_KEYS: &[&str] = &[
+/// The keys of a one-call permit's facts (`_PERMIT_FACT_KEYS`).
+pub const FACT_KEYS: &[&str] = &[
     "permit_id",
     "request_id",
     "signer",
@@ -86,11 +87,22 @@ pub(crate) fn build(
             "body cannot be shown in full on the approval screen",
         ));
     }
+    if call.grant_id.is_none() != call.run_id.is_none()
+        || call.grant_id.is_some_and(str::is_empty)
+        || call.run_id.is_some_and(str::is_empty)
+    {
+        return Err(PermitError::refused(
+            "a script permit requires its grant and run",
+        ));
+    }
+    if call.wait_seconds.is_some_and(|wait| wait < 1) {
+        return Err(PermitError::refused("the owner's chosen wait is invalid"));
+    }
     if !wall.is_finite() || wall < i64::MIN as f64 || wall >= i64::MAX as f64 {
         return Err(unsafe_display());
     }
     let expires = (wall.trunc() as i64)
-        .checked_add(PERMIT_TTL_SECONDS)
+        .checked_add(call.wait_seconds.unwrap_or(PERMIT_TTL_SECONDS))
         .ok_or_else(unsafe_display)?;
     let mut header_names: Vec<String> = call
         .header_names
@@ -128,7 +140,7 @@ pub(crate) fn build(
         "caller_headers_sha256": hex::encode(Sha256::digest(header_digest.as_bytes())),
         "body_present": call.body_bytes.is_some(), "body_sha256": hex::encode(Sha256::digest(body)),
         "body_length": body.len(), "expires_at_epoch": expires,
-        "grant_id": null, "run_id": null,
+        "grant_id": call.grant_id, "run_id": call.run_id,
     });
     let encoded_facts = canonical_json(&facts).map_err(|_| unsafe_display())?;
     let encoded_headers = canonical_json(&Value::Object(call.caller_headers.clone()))
@@ -503,6 +515,9 @@ print(json.dumps({'python':list(sys.version_info[:2]),'cases':out}))
                 header_names: &names,
                 caller_headers: case["headers"].as_object().unwrap(),
                 body_bytes: body.as_deref(),
+                grant_id: None,
+                run_id: None,
+                wait_seconds: None,
             };
             let actual = match build(
                 &binding,

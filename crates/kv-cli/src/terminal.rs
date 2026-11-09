@@ -226,6 +226,47 @@ fn check_controlling(tty: &impl rustix::fd::AsFd) -> Result<(), PromptError> {
     Ok(())
 }
 
+pub fn check_owner_terminal() -> Result<(), PromptError> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags};
+        let tty = rustix::fs::open(
+            "/dev/tty",
+            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| PromptError::Refused(refusal()))?;
+        check_controlling(&tty)
+    }
+    #[cfg(not(unix))]
+    {
+        Err(PromptError::Refused(refusal()))
+    }
+}
+
+pub fn owner_input(prompt: &str) -> Result<String, PromptError> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags};
+        let tty = rustix::fs::open(
+            "/dev/tty",
+            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| PromptError::Refused(refusal()))?;
+        check_controlling(&tty)?;
+        write_all_fd(&tty, prompt.as_bytes())?;
+        std::str::from_utf8(&read_line_fd(&tty)?)
+            .map(str::to_owned)
+            .map_err(|_| PromptError::Refused(NOT_TEXT.into()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = prompt;
+        Err(PromptError::Refused(refusal()))
+    }
+}
+
 /// `owner_terminal.read_secret(prompt)`.
 pub fn owner_read_secret(prompt: &str) -> Result<String, PromptError> {
     #[cfg(unix)]

@@ -63,6 +63,11 @@ pub struct CallFacts<'a> {
     pub header_names: &'a [String],
     pub caller_headers: &'a Map<String, Value>,
     pub body_bytes: Option<&'a [u8]>,
+    /// A capability run's permit: the grant and run it belongs to (both or neither).
+    pub grant_id: Option<&'a str>,
+    pub run_id: Option<&'a str>,
+    /// The owner's chosen wait for a capability run's permit, instead of the default TTL.
+    pub wait_seconds: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -500,6 +505,43 @@ impl SessionPermits {
         entry.spent = true;
         Ok(())
     }
+    /// Python `spend_permit` for a capability run's call: the permit must have
+    /// been signed for this very grant and run. The pass itself is the grant
+    /// ledger's to check and debit.
+    pub fn spend_for_run(
+        &self,
+        matched: &MatchedPermit,
+        grant_id: &str,
+        run_id: &str,
+    ) -> Result<(), PermitError> {
+        self.protected()?;
+        let mut state = self.state();
+        let entry = state
+            .permits
+            .get_mut(&matched.permit_id)
+            .ok_or_else(|| PermitError::refused("permit is missing"))?;
+        if entry.spent {
+            return Err(PermitError::refused("permit already spent"));
+        }
+        if entry.canonical != matched.canonical || entry.facts["permit_id"] != matched.permit_id {
+            return Err(PermitError::refused(
+                "this call differs from the approved permit",
+            ));
+        }
+        if self.over(&entry.facts, entry.mono_end, self.0.clock.wall_seconds()) {
+            return Err(PermitError::refused("permit expired"));
+        }
+        if entry.facts["grant_id"].as_str() != Some(grant_id)
+            || entry.facts["run_id"].as_str() != Some(run_id)
+        {
+            return Err(PermitError::refused(
+                "this permit belongs to another run or provider",
+            ));
+        }
+        entry.spent = true;
+        Ok(())
+    }
+
     pub fn wait_over(&self, permit_id: &str) -> Option<WaitOver> {
         let mut state = self.state();
         if state.permits.contains_key(permit_id) {

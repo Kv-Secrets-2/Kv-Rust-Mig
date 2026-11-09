@@ -7,6 +7,12 @@ pub mod pause;
 pub mod permit;
 mod permit_facts;
 mod permit_render;
+
+/// What the owner CLI shows and checks about a permit request (`approval_render`).
+pub mod permit_review {
+    pub use crate::permit_facts::FACT_KEYS;
+    pub use crate::permit_render::render_review;
+}
 pub mod permit_session;
 pub mod risk_card;
 pub mod verify;

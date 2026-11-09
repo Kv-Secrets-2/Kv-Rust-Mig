@@ -233,6 +233,7 @@ fn trust_context() -> TrustContext {
         local_approval_id: Vec::new(),
         location: Vec::new(),
         version: "0.4.0".into(),
+        approval_signing_key: None,
         pin: Arc::new(TrustPin {
             state: Mutex::new(PinState {
                 root: PathBuf::from("."),
@@ -433,6 +434,7 @@ fn dispatch(audit: &kv_audit::Audit, request: Value, retired: bool) -> Value {
     let trust = trust_context();
     let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
     let permits = permits::for_session(&trust, Arc::clone(&providers));
+    let shared = super::Shared::new();
     handle_connection(
         &mut server,
         Path::new("."),
@@ -449,6 +451,7 @@ fn dispatch(audit: &kv_audit::Audit, request: Value, retired: bool) -> Value {
         &kv_broker::ApiCaller::new(),
         audit,
         &lifecycle,
+        &shared,
         &connection,
         &json!({}),
         Duration::from_secs(2),

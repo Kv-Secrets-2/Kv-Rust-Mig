@@ -121,7 +121,8 @@ pub(crate) fn validate_review(
     render_review(facts, body_text, caller_headers).map(|_| ())
 }
 
-pub(crate) fn render_review(
+/// Python `render_permit_request`: the lines the owner reads before signing.
+pub fn render_review(
     facts: &Value,
     body_text: &str,
     caller_headers: &Map<String, Value>,
@@ -1053,6 +1054,9 @@ print(json.dumps({"python":list(sys.version_info[:2]),
             header_names: &[],
             caller_headers: &headers,
             body_bytes: Some(body.as_bytes()),
+            grant_id: None,
+            run_id: None,
+            wait_seconds: None,
         };
         let session = crate::permit_session::SessionPermits::new(binding);
         let error = session

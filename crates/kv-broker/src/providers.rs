@@ -76,6 +76,51 @@ pub fn is_builtin_provider_name(name: &str) -> bool {
     )
 }
 
+fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.0),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+    }
+}
+
+pub fn validate_db_provider(config: &Value) -> Result<(), String> {
+    let ptype = config.get("provider_type").unwrap_or(&Value::Null);
+    let fields: &[&str] = match ptype.as_str() {
+        Some("postgres" | "mysql") => &["host", "database", "username", "secret_name"],
+        Some("redis") => &["host", "secret_name"],
+        _ => {
+            return Err(format!(
+                "unknown database type: {}",
+                match ptype {
+                    Value::Null => "None".into(),
+                    Value::String(s) => s.clone(),
+                    Value::Bool(true) => "True".into(),
+                    Value::Bool(false) => "False".into(),
+                    value => value.to_string(),
+                }
+            ));
+        }
+    };
+    validate_required_fields(config, fields)
+}
+
+pub fn validate_ssh_provider(config: &Value) -> Result<(), String> {
+    validate_required_fields(config, &["host", "username", "secret_name"])
+}
+
+fn validate_required_fields(config: &Value, fields: &[&str]) -> Result<(), String> {
+    for field in fields {
+        if !config.get(*field).is_some_and(truthy) {
+            return Err(format!("missing required field: {field}"));
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_http_provider(config: &Value) -> Result<(), String> {
     let Some(config) = config.as_object() else {
         return Err("provider must be an object".into());
@@ -259,30 +304,18 @@ pub fn build_provider_table(config: &Value) -> (ProviderTable, usize) {
             }
             normalized
         } else {
-            let valid =
-                match ptype {
-                    "postgres" | "mysql" => ["host", "database", "username", "secret_name"]
-                        .iter()
-                        .all(|field| {
-                            raw.get(*field)
-                                .is_some_and(|value| !value.is_null() && value != "")
-                        }),
-                    "redis" => ["host", "secret_name"].iter().all(|field| {
-                        raw.get(*field)
-                            .is_some_and(|value| !value.is_null() && value != "")
-                    }),
-                    "ssh" => ["host", "username", "secret_name"].iter().all(|field| {
-                        raw.get(*field)
-                            .is_some_and(|value| !value.is_null() && value != "")
-                    }),
-                    _ => false,
-                };
-            if !valid {
-                continue;
-            }
             let mut value = Map::new();
             value.insert("provider_type".into(), Value::String(ptype.into()));
             value.extend(raw.clone());
+            let config = Value::Object(value.clone());
+            let valid = match ptype {
+                "postgres" | "mysql" | "redis" => validate_db_provider(&config),
+                "ssh" => validate_ssh_provider(&config),
+                _ => continue,
+            };
+            if valid.is_err() {
+                continue;
+            }
             value
         };
         candidate.insert(name.clone(), Value::Object(std::mem::take(&mut normalized)));

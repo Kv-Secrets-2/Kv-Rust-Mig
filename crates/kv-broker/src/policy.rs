@@ -7,6 +7,23 @@ use sha2::{Digest, Sha256};
 const SAFE_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS"];
 const UNSAFE_METHODS: &[&str] = &["POST", "PUT", "PATCH", "DELETE"];
 const BUILTIN_NAMES: &[&str] = &["openai", "anthropic", "google", "github", "google-cloud"];
+
+pub fn default_http_policy() -> Value {
+    let providers = crate::providers::snapshot_providers(&json!({}));
+    let mut policy = Map::new();
+    for name in BUILTIN_NAMES {
+        let provider = &providers[*name];
+        policy.insert(
+            (*name).into(),
+            json!({
+                "origin": provider["base_url"].as_str().unwrap_or("").trim_end_matches('/'),
+                "secret_name": provider["secret_name"],
+                "rules": [],
+            }),
+        );
+    }
+    Value::Object(policy)
+}
 const METHOD_OVERRIDE_HEADERS: &[&str] = &[
     "x-http-method-override",
     "x-method-override",
@@ -497,6 +514,104 @@ fn valid_query_key(value: &str) -> bool {
 
 pub fn validate_http_provider_policy(policy: &Value) -> Option<String> {
     validate_provider_policy(policy).err()
+}
+
+#[derive(Default)]
+pub struct HttpRuleOptions {
+    pub id: String,
+    pub methods: Vec<String>,
+    pub path: Option<String>,
+    pub path_prefix: Option<String>,
+    pub query_keys: Vec<String>,
+    pub allowed_headers: Vec<String>,
+}
+
+pub fn http_policy_rule(options: &HttpRuleOptions) -> Result<Value, String> {
+    let raw = if options.methods.is_empty() {
+        vec!["GET".into()]
+    } else {
+        options.methods.clone()
+    };
+    let mut methods = Vec::new();
+    for method in raw {
+        let value = method.to_uppercase();
+        if !SAFE_METHODS.contains(&value.as_str()) && !UNSAFE_METHODS.contains(&value.as_str()) {
+            return Err(format!("unsupported HTTP method: {method}"));
+        }
+        methods.push(value);
+    }
+    let mut rule = json!({"id":options.id,"methods":methods,"path":options.path});
+    if methods
+        .iter()
+        .any(|method| UNSAFE_METHODS.contains(&method.as_str()))
+    {
+        rule["approval"] = json!("per-call");
+    }
+    if let Some(prefix) = &options.path_prefix {
+        rule.as_object_mut()
+            .expect("rule object")
+            .shift_remove("path");
+        rule["path_prefix"] = json!(prefix);
+    }
+    if !options.query_keys.is_empty() {
+        rule["allow_query"] = json!(true);
+        rule["query_keys"] = json!(options.query_keys);
+    }
+    if !options.allowed_headers.is_empty() {
+        rule["allowed_headers"] = json!(options.allowed_headers);
+    }
+    Ok(rule)
+}
+
+pub fn http_policy_route_label(rule: &Value) -> Result<String, String> {
+    let (kind, selector) = match rule.get("path").filter(|v| !v.is_null()) {
+        Some(value) => ("path", value),
+        None => ("prefix", rule.get("path_prefix").unwrap_or(&Value::Null)),
+    };
+    let methods = match rule.get("methods") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(methods)) => methods
+            .iter()
+            .map(|method| {
+                method
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "HTTP policy methods must be strings".to_owned())
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("HTTP policy methods must be an array".into()),
+    };
+    let selector = match selector {
+        Value::String(value) => value.clone(),
+        Value::Null
+            if !rule
+                .as_object()
+                .is_some_and(|r| r.contains_key("path_prefix")) =>
+        {
+            "?".into()
+        }
+        value => value.to_string(),
+    };
+    Ok(format!("{} {kind}:{selector}", methods.join(",")))
+}
+
+pub fn validate_http_policy_binding(entry: &Value, provider: &Value) -> Option<String> {
+    let (Some(origin), Some(secret)) = (
+        entry.get("origin").and_then(Value::as_str),
+        entry.get("secret_name").and_then(Value::as_str),
+    ) else {
+        return Some("provider HTTP policy must bind origin and secret_name".into());
+    };
+    if provider
+        .get("base_url")
+        .and_then(Value::as_str)
+        .map(|v| v.trim_end_matches('/'))
+        != Some(origin.trim_end_matches('/'))
+        || provider.get("secret_name") != Some(&Value::String(secret.into()))
+    {
+        return Some("provider configuration does not match HTTP policy binding".into());
+    }
+    None
 }
 
 fn path_matches(rule: &Rule, path: &str) -> bool {

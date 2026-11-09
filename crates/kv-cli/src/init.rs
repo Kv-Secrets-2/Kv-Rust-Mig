@@ -546,12 +546,18 @@ pub fn cmd_init(p: &Palette, location: Option<&str>, path: Option<&str>) -> CmdR
     ui::info(&format!("{}Quick start:{}", p.white, p.reset));
     ui::cmd(p, "kv unlock", "Open your vault");
     ui::cmd(p, "kv set API_KEY", "Store a secret");
-    ui::cmd(p, "kv export", "Write the environment as a .env file");
+    ui::cmd(
+        p,
+        "kv run --no-secrets -- python app.py",
+        "Run ordinary work without vault secrets",
+    );
     ui::blank();
     ui::info(&format!("{}HTTP API policy:{}", p.white, p.reset));
     ui::info("  New vaults deny every kv_api route.");
     ui::info(&format!(
-        "  Before using kv_api, add an exact rule to {}{}{} (this build has no kv policy command yet).",
+        "  Before using kv_api, add an exact rule with {}kv policy http add{} (it is saved in {}{}{}).",
+        p.green,
+        p.reset,
         p.green,
         check_path.join("config.json").display(),
         p.reset
