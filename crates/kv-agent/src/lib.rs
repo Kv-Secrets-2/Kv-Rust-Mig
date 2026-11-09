@@ -8,9 +8,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(unix)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 #[cfg(unix)]
-use std::sync::{LazyLock, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(unix)]
 use std::thread;
 #[cfg(unix)]
@@ -35,6 +35,8 @@ use std::os::unix::fs::MetadataExt;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+#[cfg(all(unix, test))]
+mod audit_reply_tests;
 #[cfg(unix)]
 mod lifecycle;
 #[cfg(unix)]
@@ -678,6 +680,7 @@ pub fn run_agent_with_api_caller(
     let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
     let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
+    let audit = kv_audit::Audit::new(kv_proto::runtime_dir()?);
     let mut workers = WorkerTracker::new();
     let mut accept_error = None;
 
@@ -710,6 +713,7 @@ pub fn run_agent_with_api_caller(
                 let providers = Arc::clone(&providers);
                 let http_policy = Arc::clone(&http_policy);
                 let api_caller = Arc::clone(&api_caller);
+                let audit = audit.clone();
                 let root = root.clone();
                 let root_text = root_text.clone();
                 let memory_hardening = memory_hardening.clone();
@@ -729,6 +733,7 @@ pub fn run_agent_with_api_caller(
                             &providers,
                             &http_policy,
                             &api_caller,
+                            &audit,
                             &worker_lifecycle,
                             &connection_guard,
                             &memory_hardening,
@@ -826,6 +831,7 @@ fn handle_connection(
     providers: &kv_broker::ProviderTable,
     http_policy: &kv_broker::HttpPolicySnapshot,
     api_caller: &kv_broker::ApiCaller,
+    audit: &kv_audit::Audit,
     lifecycle: &Arc<Lifecycle>,
     connection: &ConnectionGuard,
     memory_hardening: &Value,
@@ -837,6 +843,8 @@ fn handle_connection(
         trust,
         cache,
         cmd: "",
+        audit,
+        audit_warning: false,
     };
     let request = match read_request_with_timeout(stream, request_timeout) {
         Ok(Some(request)) => request,
@@ -855,6 +863,7 @@ fn handle_connection(
     };
     let cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
     replies.cmd = cmd;
+    replies.audit_warning = request.get("audit_warning") == Some(&Value::Bool(true));
     if cmd == "enforcement" {
         connection.mark_control();
         kv_proto::write_reply(
@@ -1003,7 +1012,10 @@ fn handle_connection(
                 lifecycle,
                 connection,
             );
+            // The writer implements Python's drop/count/warn policy. An audit
+            // refusal cannot undo a provider operation that already happened.
             let _ = audit_api_call(
+                audit,
                 request,
                 env,
                 &response,
@@ -1056,6 +1068,8 @@ struct Replies<'a> {
     trust: &'a TrustContext,
     cache: &'a Mutex<SecretCache>,
     cmd: &'a str,
+    audit: &'a kv_audit::Audit,
+    audit_warning: bool,
 }
 
 #[cfg(unix)]
@@ -1075,7 +1089,12 @@ impl Replies<'_> {
         signed_hard_lock: Option<&Value>,
     ) -> Result<(), AgentError> {
         if let Ok(_window) = self.lifecycle.try_commit_for(self.connection) {
-            kv_proto::write_reply(stream, response)?;
+            write_audited_reply(
+                stream,
+                response,
+                self.audit,
+                self.audit_warning && signed_hard_lock.is_none(),
+            )?;
             return Ok(());
         }
         // As in Python, never acknowledge a hard lock while earlier committed
@@ -1112,9 +1131,56 @@ impl Replies<'_> {
             }
             value
         };
-        kv_proto::write_reply(stream, &replacement)?;
+        write_audited_reply(
+            stream,
+            &replacement,
+            self.audit,
+            self.audit_warning && signed_hard_lock.is_none(),
+        )?;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn write_audited_reply<W: Write>(
+    writer: &mut W,
+    response: &Value,
+    audit: &kv_audit::Audit,
+    wants_warning: bool,
+) -> Result<(), AgentError> {
+    let serialize = |value: &Value| {
+        kv_store::pyjson::to_vec_python(value, false).map_err(|error| AgentError(error.to_string()))
+    };
+    let mut answer = response.clone();
+    let mut encoded = serialize(&answer)?;
+    if encoded.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+        answer = json!({"error":"response too large", "response_truncated":true,
+            "max_response_bytes":kv_proto::MAX_AGENT_RESPONSE_BYTES});
+        encoded = serialize(&answer)?;
+    }
+    // Lease only after the final bounded/hard-lock answer is chosen. Its Drop
+    // returns an undelivered warning on serialization, write, or flush failure.
+    let mut warning = if wants_warning && answer.is_object() {
+        audit.take_warning()
+    } else {
+        None
+    };
+    if let Some(lease) = &warning {
+        answer["audit_warning"] = json!(lease.as_str());
+        let with_warning = serialize(&answer)?;
+        if with_warning.len() <= kv_proto::MAX_AGENT_RESPONSE_BYTES {
+            encoded = with_warning;
+        } else {
+            // Keep the original bounded bytes; the warning remains owed.
+            drop(warning.take());
+        }
+    }
+    writer.write_all(&encoded)?;
+    writer.flush()?;
+    if let Some(warning) = warning {
+        warning.delivered();
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -1556,53 +1622,13 @@ fn strip_allowed(mut decision: Value) -> Value {
 
 #[cfg(unix)]
 fn audit_api_call(
+    audit: &kv_audit::Audit,
     request: &serde_json::Map<String, Value>,
     env: &str,
     response: &Value,
     duration_ms: u64,
-) -> Result<(), AgentError> {
-    use std::fs::{OpenOptions, create_dir_all};
-    use std::io::{Read, Seek, SeekFrom, Write};
-    use std::os::unix::fs::PermissionsExt;
-
-    static AUDIT_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-    let _guard = AUDIT_LOCK
-        .lock()
-        .map_err(|_| AgentError("audit lock is poisoned".into()))?;
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| AgentError("home directory is unavailable".into()))?;
-    let directory = Path::new(&home).join(".kv");
-    create_dir_all(&directory)?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
-    let path = directory.join("audit.jsonl");
-    let mut file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .append(true)
-        .open(&path)?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    let mut existing = String::new();
-    file.seek(SeekFrom::Start(0))?;
-    file.read_to_string(&mut existing)?;
-    let previous = existing
-        .lines()
-        .rev()
-        .find_map(|line| serde_json::from_str::<Value>(line).ok())
-        .and_then(|entry| entry.get("hash").and_then(Value::as_str).map(str::to_owned))
-        .unwrap_or_else(|| "genesis".into());
-    file.seek(SeekFrom::End(0))?;
-
-    let now = time::OffsetDateTime::now_utc();
-    let format = time::format_description::parse_borrowed::<3>(
-        "[year]-[month]-[day]T[hour]:[minute]:[second]Z",
-    )
-    .map_err(|error| AgentError(error.to_string()))?;
-    let timestamp = now
-        .format(&format)
-        .map_err(|error| AgentError(error.to_string()))?;
+) -> Result<(), kv_audit::LossReason> {
     let mut entry = serde_json::Map::new();
-    entry.insert("ts".into(), Value::String(timestamp));
-    entry.insert("event".into(), Value::String("api_call".into()));
     entry.insert(
         "provider".into(),
         request
@@ -1655,7 +1681,9 @@ fn audit_api_call(
             ("session_id", 80),
         ] {
             if let Some(value) = context.get(key).and_then(Value::as_str) {
-                let value = value.trim();
+                let value = value.trim_matches(|character: char| {
+                    character.is_whitespace() || matches!(character, '\u{001c}'..='\u{001f}')
+                });
                 if !value.is_empty() {
                     entry.insert(
                         key.into(),
@@ -1665,28 +1693,7 @@ fn audit_api_call(
             }
         }
     }
-    let entry_value = Value::Object(entry);
-    let entry_json =
-        serde_json::to_string(&entry_value).map_err(|error| AgentError(error.to_string()))?;
-    let mut digest = Sha256::new();
-    digest.update(format!("{previous}:{entry_json}").as_bytes());
-    let hash = digest
-        .finalize()
-        .iter()
-        .take(8)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let mut final_entry = entry_value
-        .as_object()
-        .cloned()
-        .ok_or_else(|| AgentError("audit entry is invalid".into()))?;
-    final_entry.insert("hash".into(), Value::String(hash));
-    final_entry.insert("prev".into(), Value::String(previous));
-    let final_json = serde_json::to_string(&Value::Object(final_entry))
-        .map_err(|error| AgentError(error.to_string()))?;
-    writeln!(file, "{final_json}")?;
-    file.flush()?;
-    Ok(())
+    audit.emit("api_call", entry)
 }
 
 #[cfg(unix)]
@@ -2054,6 +2061,7 @@ mod tests {
         let providers = kv_broker::build_provider_table(&approved).0;
         let http_policy = kv_broker::load_http_policy_snapshot(&approved);
         let api_caller = kv_broker::ApiCaller::new();
+        let audit = kv_audit::Audit::new(".");
         let lifecycle = Lifecycle::new();
         let mut workers = WorkerTracker::new();
         let connection = workers.register_connection(&server).unwrap();
@@ -2074,6 +2082,7 @@ mod tests {
                 &providers,
                 &http_policy,
                 &api_caller,
+                &audit,
                 &lifecycle,
                 &connection,
                 &memory_hardening,

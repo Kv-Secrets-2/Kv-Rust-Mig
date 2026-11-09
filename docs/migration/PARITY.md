@@ -91,8 +91,10 @@ short names and explicitly verify the socket path fits the macOS/Linux limit.
    exactly one validated-reference marker under its test name. Missing tests,
    skipped comparisons, ignored tests, duplicate markers, unexpected comparison
    markers and inconsistent result summaries fail. The inventory currently has
-   **35 comparison tests**; individual tests contain many cases. These include
-   live socket framing/timeouts and five daemon shutdown comparisons.
+   **48 comparison tests**; individual tests contain many cases. These include
+   socket framing/timeouts, daemon shutdown, audit-chain interoperability,
+   failure accounting, and warning delivery. The audit corruption tests also
+   verify the documented conservative handling of a reference exception.
 4. Produce Rust crypto vectors and require Python to open them. On the canonical
    lane, also exhaustively verify the generated Unicode digit table.
 5. Write `report.json` plus build, discovery, test and reverse-check logs. A failed

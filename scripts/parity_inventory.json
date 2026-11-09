@@ -2,7 +2,7 @@
   "schema_version": 1,
   "reference_commit": "9a497d91a0f6e95b0949deaf8f5c431f9a4333c0",
   "reference_version": "0.4.0",
-  "minimum_comparisons": 35,
+  "minimum_comparisons": 48,
   "targets": {
     "kv-agent/stage4_agent": [
       "python_client_matches_rust_agent_and_stop_cleans_runtime_files",
@@ -17,7 +17,24 @@
       "stop_wait_drains_provider_and_refuses_new_dispatch_like_python",
       "stop_now_cuts_off_provider_with_one_short_budget_like_python",
       "pending_provider_safety_check_cannot_send_after_stop_like_python",
-      "sigterm_with_idle_clients_cleans_runtime_within_bound_like_python"
+      "sigterm_with_idle_clients_cleans_runtime_within_bound_like_python",
+      "daemon_audit_refusal_warns_only_opted_in_replies_like_python"
+    ],
+    "kv-audit/kv_audit": [
+      "codec::tests::attribution_fields_match_python_reference",
+      "codec::tests::numeric_spelling_matches_python_reference",
+      "codec::tests::complete_entry_bytes_and_nonstring_previous_hash_match_python",
+      "codec::tests::canonical_python_repr_printability_inventory"
+    ],
+    "kv-audit/interoperability": [
+      "alternating_and_concurrent_writers_match_python_chain_and_exact_counts",
+      "overflow_float_records_remain_chain_compatible_with_python",
+      "python_log_lock_causes_bounded_drop_warning_and_recovery",
+      "python_health_lock_preserves_unknown_loss_through_recovery",
+      "refusal_recovery_health_and_warning_leases_match_python",
+      "persisted_health_validation_and_loss_updates_match_python",
+      "missing_lost_health_is_untrusted_despite_python_reference_exception",
+      "python_lock_replacement_marks_order_uncertain_for_fresh_rust_readers"
     ],
     "kv-approvals/fixtures": ["rust_signed_owner_grant_and_permit_verify_in_python_when_configured"],
     "kv-broker/kv_broker": ["caller::tests::url_safety_matches_python_for_ip_literals_and_localhost"],
