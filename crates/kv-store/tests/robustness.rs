@@ -211,6 +211,28 @@ fn symlinked_storage_directories_are_refused() {
     assert_eq!(fs::read_dir(&outside_records).unwrap().count(), 0);
 }
 
+#[cfg(unix)]
+#[test]
+fn unreferenced_record_count_rejects_a_symlinked_records_directory() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TestDir::new("unreferenced-symlink");
+    let (secrets_dir, store, _) = store_in(&temp, "copy");
+    let env_dir = secrets_dir
+        .join("drawers")
+        .join("envs")
+        .join(store.env_id("dev"));
+    fs::create_dir_all(&env_dir).unwrap();
+    let outside_records = temp.path().join("outside-records");
+    fs::create_dir(&outside_records).unwrap();
+    symlink(&outside_records, env_dir.join("records")).unwrap();
+
+    assert!(matches!(
+        store.unreferenced_record_count("dev"),
+        Err(StoreError::Structure(_))
+    ));
+}
+
 #[test]
 fn over_limit_index_is_rejected() {
     let temp = TestDir::new("large-index");
