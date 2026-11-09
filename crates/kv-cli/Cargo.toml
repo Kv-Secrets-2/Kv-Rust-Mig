@@ -1,0 +1,16 @@
+[package]
+name = "kv-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "kv"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

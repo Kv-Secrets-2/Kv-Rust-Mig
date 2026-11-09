@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.5.0-dev"
+license = "MIT"
+rust-version = "1.97"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
