@@ -109,6 +109,13 @@ fn verifier_command_distinguishes_valid_missing_truncated_and_lost_history() {
 
 #[test]
 fn verifier_command_reports_corruption_and_refuses_exposed_trust_files() {
+    let help = Command::new(env!("CARGO_BIN_EXE_kv-audit-verify"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_eq!(help.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&help.stdout).contains("usage: kv-audit-verify"));
+
     let temp = Temp::new();
     let directory = temp.0.join("audit");
     let position = write_log(&directory);
@@ -131,9 +138,6 @@ fn verifier_command_reports_corruption_and_refuses_exposed_trust_files() {
 
     let exposed = temp.0.join("exposed-trust.json");
     fs::copy(&trust, &exposed).unwrap();
-    let mut file = OpenOptions::new().write(true).open(&exposed).unwrap();
-    use std::io::Write;
-    file.write_all(b"").unwrap();
     let metadata = fs::metadata(&exposed).unwrap();
     let mut permissions = metadata.permissions();
     use std::os::unix::fs::PermissionsExt;

@@ -176,6 +176,14 @@ mod implementation {
         let mut trust_file = None;
         let mut arguments = std::env::args().skip(1);
         while let Some(argument) = arguments.next() {
+            if matches!(argument.as_str(), "--help" | "-h") {
+                println!("{}", usage());
+                return;
+            }
+            if !matches!(argument.as_str(), "--directory" | "--trust-file") {
+                eprintln!("unknown argument {argument}\n{}", usage());
+                std::process::exit(EXIT_USAGE);
+            }
             let Some(value) = arguments.next() else {
                 eprintln!("missing value for {argument}\n{}", usage());
                 std::process::exit(EXIT_USAGE);
@@ -183,10 +191,7 @@ mod implementation {
             match argument.as_str() {
                 "--directory" => directory = Some(value),
                 "--trust-file" => trust_file = Some(value),
-                _ => {
-                    eprintln!("unknown argument {argument}\n{}", usage());
-                    std::process::exit(EXIT_USAGE);
-                }
+                _ => unreachable!("argument kind was validated"),
             }
         }
         let Some(directory) = directory else {
