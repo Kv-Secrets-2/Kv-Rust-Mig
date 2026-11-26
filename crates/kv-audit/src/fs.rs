@@ -15,7 +15,8 @@ use serde_json::Value;
 #[path = "darwin.rs"]
 mod darwin;
 
-const LOG: &str = "audit.jsonl";
+pub(crate) const LOG: &str = "audit.jsonl";
+pub(crate) const LOG_LOCK: &str = "audit.lock";
 const HEALTH: &str = "audit-health.json";
 const UNKEPT: &str = "audit-health.unkept";
 const UNCERTAIN: &str = "audit.uncertain";
@@ -41,6 +42,13 @@ pub(crate) struct LockFailure {
 pub(crate) enum AppendFailure {
     FileRefused,
     WriteFailed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DurableAppendFailure {
+    FileRefused,
+    WriteFailed,
+    SyncFailed,
 }
 
 fn invalid(message: &str) -> io::Error {
@@ -87,6 +95,11 @@ fn create_directory(path: &Path) -> io::Result<()> {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub fn darwin_file_has_acl(file: &File) -> io::Result<bool> {
+    darwin::has_acl(file)
+}
+
 impl Directory {
     /// With `create == false`, opening is a read-only probe: no mkdir/chmod/ACL repair.
     pub(crate) fn open(path: &Path, create: bool) -> io::Result<Self> {
@@ -119,6 +132,37 @@ impl Directory {
             flags,
             Mode::from_bits_truncate(0o600),
         )?))
+    }
+
+    pub(crate) fn open_single_read(&self, name: &str) -> io::Result<File> {
+        let file = self.open_child(name, OFlags::RDONLY)?;
+        single_file(&file)?;
+        Ok(file)
+    }
+
+    /// Synchronize every parent directory that can contain this directory's
+    /// name, ending at the filesystem root. A first-use journal creation is
+    /// durable only after each of those entries has been committed.
+    pub(crate) fn sync_parent_chain(&self) -> io::Result<()> {
+        let mut child = self.file.try_clone()?;
+        for _ in 0..1024 {
+            let parent = File::from(unix::openat(
+                &child,
+                "..",
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?);
+            let child_metadata = child.metadata()?;
+            let parent_metadata = parent.metadata()?;
+            if child_metadata.dev() == parent_metadata.dev()
+                && child_metadata.ino() == parent_metadata.ino()
+            {
+                return Ok(());
+            }
+            parent.sync_all()?;
+            child = parent;
+        }
+        Err(invalid("directory ancestry exceeds durability scan bound"))
     }
 
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {
@@ -251,6 +295,47 @@ impl Directory {
 
     pub(crate) fn append(&self, bytes: &[u8]) -> Result<(), AppendFailure> {
         self.append_with_close(bytes, close_file)
+    }
+
+    /// Append and commit both the log file and its directory entry before
+    /// returning. Unlike `append`, this is a durability barrier for records
+    /// whose completion authorizes later privileged work.
+    pub(crate) fn append_durable(&self, bytes: &[u8]) -> Result<(), DurableAppendFailure> {
+        self.append_durable_with_io(
+            bytes,
+            |file, bytes| file.write_all(bytes),
+            |file| file.sync_all(),
+            close_file,
+            |directory| directory.sync_all(),
+        )
+    }
+
+    fn append_durable_with_io(
+        &self,
+        bytes: &[u8],
+        mut write: impl FnMut(&mut File, &[u8]) -> io::Result<()>,
+        mut sync: impl FnMut(&File) -> io::Result<()>,
+        close: impl FnOnce(File) -> io::Result<()>,
+        mut sync_directory: impl FnMut(&File) -> io::Result<()>,
+    ) -> Result<(), DurableAppendFailure> {
+        let mut file = self
+            .open_child(LOG, OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND)
+            .map_err(|_| DurableAppendFailure::FileRefused)?;
+        single_file(&file).map_err(|_| DurableAppendFailure::FileRefused)?;
+        harden(&file, 0o600).map_err(|_| DurableAppendFailure::FileRefused)?;
+        let written = write(&mut file, bytes);
+        let synced = written.as_ref().ok().map(|()| sync(&file));
+        let closed = close(file);
+        if written.is_err() {
+            return Err(DurableAppendFailure::WriteFailed);
+        }
+        if synced.is_some_and(|result| result.is_err()) || closed.is_err() {
+            return Err(DurableAppendFailure::SyncFailed);
+        }
+        if sync_directory(&self.file).is_err() {
+            return Err(DurableAppendFailure::SyncFailed);
+        }
+        Ok(())
     }
 
     fn append_with_close(
@@ -569,6 +654,89 @@ mod tests {
         });
         assert_eq!(result, Err(AppendFailure::WriteFailed));
         assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"written\n");
+    }
+
+    #[test]
+    fn durable_append_syncs_file_before_close_and_directory_before_success() {
+        use std::cell::RefCell;
+
+        let temp = Temp::new();
+        let directory = Directory::open(&temp.0, true).unwrap();
+        let events = RefCell::new(Vec::new());
+        directory
+            .append_durable_with_io(
+                b"durable\n",
+                |file, bytes| {
+                    events.borrow_mut().push("write");
+                    file.write_all(bytes)
+                },
+                |file| {
+                    events.borrow_mut().push("file_sync");
+                    file.sync_all()
+                },
+                |file| {
+                    events.borrow_mut().push("close");
+                    close_file(file)
+                },
+                |directory| {
+                    events.borrow_mut().push("directory_sync");
+                    directory.sync_all()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            events.borrow().as_slice(),
+            ["write", "file_sync", "close", "directory_sync"]
+        );
+        assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"durable\n");
+    }
+
+    #[test]
+    fn durable_append_classifies_injected_write_sync_close_and_directory_failures() {
+        let temp = Temp::new();
+        let directory = Directory::open(&temp.0, true).unwrap();
+        let write_failed = directory.append_durable_with_io(
+            b"not-written\n",
+            |_, _| Err(io::Error::other("injected write failure")),
+            |file| file.sync_all(),
+            close_file,
+            |directory| directory.sync_all(),
+        );
+        assert_eq!(write_failed, Err(DurableAppendFailure::WriteFailed));
+
+        for (close_fails, directory_fails) in [(false, false), (true, false), (false, true)] {
+            if temp.0.join(LOG).exists() {
+                fs::remove_file(temp.0.join(LOG)).unwrap();
+            }
+            let result = directory.append_durable_with_io(
+                b"sync-case\n",
+                |file, bytes| file.write_all(bytes),
+                |file| {
+                    if close_fails || directory_fails {
+                        file.sync_all()
+                    } else {
+                        Err(io::Error::other("injected sync failure"))
+                    }
+                },
+                |file| {
+                    if close_fails {
+                        drop(file);
+                        Err(io::Error::other("injected close failure"))
+                    } else {
+                        close_file(file)
+                    }
+                },
+                |directory| {
+                    if directory_fails {
+                        Err(io::Error::other("injected directory sync failure"))
+                    } else {
+                        directory.sync_all()
+                    }
+                },
+            );
+            assert_eq!(result, Err(DurableAppendFailure::SyncFailed));
+            assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"sync-case\n");
+        }
     }
 
     #[test]
