@@ -1130,6 +1130,17 @@ finally:
     }
 
     #[test]
+    fn broker_request_debug_redacts_json_value() {
+        let request = BrokerRequest {
+            value: serde_json::json!({"token":"dummy-secret"}),
+            wire: RequestWire::FramedV1,
+        };
+        let rendered = format!("{request:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("dummy-secret"));
+    }
+
+    #[test]
     fn broker_reader_accepts_framed_and_legacy_requests_with_matching_replies() {
         let (mut client, mut server) = UnixStream::pair().unwrap();
         let framed_worker = thread::spawn(move || {
