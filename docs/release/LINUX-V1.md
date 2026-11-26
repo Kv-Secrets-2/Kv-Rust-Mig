@@ -2,7 +2,9 @@
 
 This guide describes the locked standalone Linux v1 surface of the Rust `kv`
 binary in this repository. It is not a Python migration guide and it does not
-describe the broader migration plan.
+describe the broader migration plan. It defines the release gate: an
+intermediate `main` commit is not v1-ready until every behavior described here
+is implemented in that commit.
 
 ## What v1 is
 
@@ -63,19 +65,25 @@ Python or build tools. Download the archive and its adjacent checksum from a
 trusted run or release location, then verify and install it:
 
 ```sh
-# Run from the directory containing both files.
-sha256sum -c kv-<version>-x86_64-unknown-linux-musl.tar.gz.sha256
+# Replace the version with the archive version, then run these commands from
+# the directory containing both files.
+KV_VERSION=0.5.0-dev
+ARCHIVE="kv-${KV_VERSION}-x86_64-unknown-linux-musl.tar.gz"
 
-tar -xzf kv-<version>-x86_64-unknown-linux-musl.tar.gz
-install -m 0755 \
-  kv-<version>-x86_64-unknown-linux-musl/kv \
-  ~/.local/bin/kv
+sha256sum -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+install -D -m 0755 \
+  "kv-${KV_VERSION}-x86_64-unknown-linux-musl/kv" \
+  "$HOME/.local/bin/kv"
 
-kv version
+"$HOME/.local/bin/kv" version
 ```
 
-`kv version` must print `kv <version>` for the same `<version>` embedded in
-the archive name. Do not use the archive when checksum verification fails.
+The final command must print `kv $KV_VERSION`. `install -D` creates
+`~/.local/bin` when needed, and invoking the installed path directly avoids
+accidentally checking a different `kv` earlier on `PATH`. Add `~/.local/bin`
+to `PATH` for subsequent `kv` commands. Do not use the archive when checksum
+verification fails.
 
 Install bubblewrap with the operating-system package manager before first
 use. On Debian/Ubuntu, for example:
@@ -232,7 +240,9 @@ The inbox shows the pending one-call permit, including the fixed provider and
 method. Open the owner review with:
 
 ```sh
-kv approvals approve permit_request_<id>
+# Copy the full request ID printed by the request step or inbox.
+REQUEST_ID=permit_request_...
+kv approvals approve "$REQUEST_ID"
 ```
 
 The approval command requires an owner terminal and the vault passphrase. It
@@ -249,7 +259,8 @@ If the request should not proceed, use the explicit denial command instead of
 only closing the review:
 
 ```sh
-kv approvals deny permit_request_<id>
+# Use the same full request ID reviewed above.
+kv approvals deny "$REQUEST_ID"
 ```
 
 Denial also requires the owner terminal and passphrase. It is terminal in the
@@ -262,8 +273,10 @@ Use the exact retry printed by the request step, substituting the approved
 permit ID:
 
 ```sh
+# Copy the full permit ID from the successful approval output.
+PERMIT_ID=permit_...
 kv api anthropic-count-tokens \
-  --permit-id <permit-id> \
+  --permit-id "$PERMIT_ID" \
   -- 'count these tokens'
 ```
 
