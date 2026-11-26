@@ -544,7 +544,7 @@ pub fn cmd_init(p: &Palette, location: Option<&str>, path: Option<&str>) -> CmdR
     print_recovery_key_box(p, &token, false, &target.root, &wrap)?;
     ui::blank();
     ui::info(&format!("{}Quick start:{}", p.white, p.reset));
-    if !is_within(&target.workspace, &target.root) {
+    if target.root != target.workspace {
         ui::cmd(
             p,
             &format!(
