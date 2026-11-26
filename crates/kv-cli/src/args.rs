@@ -39,6 +39,7 @@ pub enum Command {
     },
     Lock,
     Status,
+    Doctor,
     ApprovalMode(Option<String>),
     Allow(Option<String>),
     Deny(String),
@@ -94,7 +95,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,export,envs,env,vault,status,version,unlock,lock,approvals}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,export,envs,env,vault,status,doctor,version,unlock,lock,approvals}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -259,6 +260,15 @@ const SPECS: &[Spec] = &[
     Spec {
         name: "status",
         usage: "usage: kv status [-h]\n",
+        help: "\noptions:\n  -h, --help  show this help message and exit\n",
+        positionals: &[],
+        env: false,
+        flags: &[],
+        options: &[],
+    },
+    Spec {
+        name: "doctor",
+        usage: "usage: kv doctor [-h]\n",
         help: "\noptions:\n  -h, --help  show this help message and exit\n",
         positionals: &[],
         env: false,
@@ -642,6 +652,7 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
         },
         "lock" => Command::Lock,
         "status" => Command::Status,
+        "doctor" => Command::Doctor,
         "allow" => Command::Allow(positionals.next()),
         "deny" => Command::Deny(positionals.next().unwrap_or_default()),
         "network-allow" => Command::NetworkAllow(positionals.next()),
