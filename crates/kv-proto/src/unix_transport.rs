@@ -498,6 +498,47 @@ pub struct BrokerRequest {
     pub wire: RequestWire,
 }
 
+/// A broker-request read failure with the request encoding detected before
+/// the failure. `wire` is absent only when the first byte itself could not be
+/// read (or the socket could not be prepared), before either encoding was
+/// identified.
+pub struct BrokerRequestReadError {
+    wire: Option<RequestWire>,
+    error: ProtocolError,
+}
+
+impl BrokerRequestReadError {
+    fn new(wire: Option<RequestWire>, error: ProtocolError) -> Self {
+        Self { wire, error }
+    }
+
+    pub fn wire(&self) -> Option<RequestWire> {
+        self.wire
+    }
+
+    pub fn into_error(self) -> ProtocolError {
+        self.error
+    }
+}
+
+impl std::fmt::Debug for BrokerRequestReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrokerRequestReadError")
+            .field("wire", &self.wire)
+            .field("error", &self.error)
+            .finish()
+    }
+}
+
+impl std::fmt::Display for BrokerRequestReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for BrokerRequestReadError {}
+
 impl std::fmt::Debug for BrokerRequest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -542,25 +583,47 @@ fn read_legacy_json_after_first(
 /// Read one broker request in either the current framed encoding or the legacy
 /// unframed JSON encoding. Framed input starts with the versioned magic; every
 /// other byte is handled by the legacy JSON reader, so existing Rust callers do
-/// not need a wire-format negotiation step.
+/// not need a wire-format negotiation step. This compatibility wrapper keeps
+/// the original error type; callers that must answer a malformed request in
+/// its own encoding use [`read_broker_request_until_preserving_wire`].
 pub fn read_broker_request_until(
     socket: &mut UnixStream,
     deadline: Instant,
 ) -> Result<Option<BrokerRequest>, ProtocolError> {
-    socket.set_nonblocking(true)?;
+    read_broker_request_until_preserving_wire(socket, deadline)
+        .map_err(BrokerRequestReadError::into_error)
+}
+
+/// Variant of [`read_broker_request_until`] whose errors retain the wire
+/// encoding as soon as the first byte has identified it. This does not extend
+/// the caller's deadline or alter any size limit.
+pub fn read_broker_request_until_preserving_wire(
+    socket: &mut UnixStream,
+    deadline: Instant,
+) -> Result<Option<BrokerRequest>, BrokerRequestReadError> {
+    socket
+        .set_nonblocking(true)
+        .map_err(|error| BrokerRequestReadError::new(None, error.into()))?;
     let mut first = [0_u8; 1];
-    if !read_exact_or_empty_eof(socket, &mut first, deadline)? {
+    if !read_exact_or_empty_eof(socket, &mut first, deadline)
+        .map_err(|error| BrokerRequestReadError::new(None, error.into()))?
+    {
         return Ok(None);
     }
     if first[0] == IPC_FRAME_MAGIC[0] {
-        let frame = read_frame_after_first(socket, first[0], deadline, Some(FrameKind::Request))?;
+        let frame = read_frame_after_first(socket, first[0], deadline, Some(FrameKind::Request))
+            .map_err(|error| BrokerRequestReadError::new(Some(RequestWire::FramedV1), error))?;
+        let value = parse_json_payload(&frame.payload)
+            .map_err(|error| BrokerRequestReadError::new(Some(RequestWire::FramedV1), error))?;
         return Ok(Some(BrokerRequest {
-            value: parse_json_payload(&frame.payload)?,
+            value,
             wire: RequestWire::FramedV1,
         }));
     }
+    let value = read_legacy_json_after_first(socket, first[0], deadline)
+        .map_err(|error| BrokerRequestReadError::new(Some(RequestWire::LegacyJson), error))?;
     Ok(Some(BrokerRequest {
-        value: read_legacy_json_after_first(socket, first[0], deadline)?,
+        value,
         wire: RequestWire::LegacyJson,
     }))
 }
@@ -1130,6 +1193,17 @@ finally:
     }
 
     #[test]
+    fn broker_request_debug_redacts_json_value() {
+        let request = BrokerRequest {
+            value: serde_json::json!({"token":"dummy-secret"}),
+            wire: RequestWire::FramedV1,
+        };
+        let rendered = format!("{request:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("dummy-secret"));
+    }
+
+    #[test]
     fn broker_reader_accepts_framed_and_legacy_requests_with_matching_replies() {
         let (mut client, mut server) = UnixStream::pair().unwrap();
         let framed_worker = thread::spawn(move || {
@@ -1188,6 +1262,67 @@ finally:
             serde_json::json!({"ok":true})
         );
         legacy_worker.join().unwrap();
+    }
+
+    #[test]
+    fn broker_read_errors_preserve_the_detected_wire() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.write_all(b"{").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::LegacyJson));
+        assert!(matches!(error.into_error(), ProtocolError::Json(_)));
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let malformed = crate::encode_frame(FrameKind::Request, b"{").unwrap();
+        client.write_all(&malformed).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::FramedV1));
+        assert!(matches!(error.into_error(), ProtocolError::Json(_)));
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let writer = thread::spawn(move || {
+            let _ = client.write_all(&vec![b' '; MAX_MSG + 1]);
+            let _ = client.shutdown(std::net::Shutdown::Write);
+        });
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::LegacyJson));
+        assert!(matches!(error.into_error(), ProtocolError::RequestTooLarge));
+        writer.join().unwrap();
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let mut header = [0_u8; IPC_FRAME_HEADER_LEN];
+        header[..4].copy_from_slice(&IPC_FRAME_MAGIC);
+        header[4..6].copy_from_slice(&crate::IPC_FRAME_VERSION.to_be_bytes());
+        header[6] = 1;
+        header[8..12].copy_from_slice(&((MAX_MSG + 1) as u32).to_be_bytes());
+        client.write_all(&header).unwrap();
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::FramedV1));
+        assert!(matches!(
+            error.into_error(),
+            ProtocolError::Frame(crate::FrameError::PayloadTooLarge {
+                kind: FrameKind::Request,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1407,6 +1542,32 @@ finally:
             Duration::from_secs(2),
         )
         .unwrap();
+        assert_eq!(answer, serde_json::json!({"ok":true}));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn framed_status_skips_preflight_and_fields_cannot_forge_command_or_token() {
+        let path = SocketPath::new();
+        let listener = UnixListener::bind(&path.0).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut socket = accept_bounded(&listener);
+            let request = read_frame_request_until(&mut socket, deadline)
+                .unwrap()
+                .expect("framed status request");
+            assert_eq!(request["cmd"], "status");
+            assert_eq!(request["token"], "trusted-token");
+            write_frame_response_until(&mut socket, &serde_json::json!({"ok":true}), deadline)
+                .unwrap();
+        });
+        let mut fields = serde_json::Map::new();
+        fields.insert("cmd".into(), serde_json::json!("forged"));
+        fields.insert("token".into(), serde_json::json!("forged"));
+        fields.insert("dummy_secret".into(), serde_json::json!("dummy"));
+        let request = crate::request_document("status", "trusted-token".into(), &fields, true);
+        let answer =
+            crate::framed_agent_exchange(&path.0, &request, Duration::from_secs(2)).unwrap();
         assert_eq!(answer, serde_json::json!({"ok":true}));
         server.join().unwrap();
     }

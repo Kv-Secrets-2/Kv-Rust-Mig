@@ -20,10 +20,11 @@ pub use frame::{
 mod unix_transport;
 #[cfg(unix)]
 pub use unix_transport::{
-    BrokerRequest, RequestWire, connect_unix, exchange_frames, exchange_frames_until,
-    read_broker_request_until, read_complete_reply, read_frame_request_until,
-    read_frame_response_until, read_frame_until, write_all_until, write_broker_response_until,
-    write_frame_request_until, write_frame_response_until, write_frame_until,
+    BrokerRequest, BrokerRequestReadError, RequestWire, connect_unix, exchange_frames,
+    exchange_frames_until, read_broker_request_until, read_broker_request_until_preserving_wire,
+    read_complete_reply, read_frame_request_until, read_frame_response_until, read_frame_until,
+    write_all_until, write_broker_response_until, write_frame_request_until,
+    write_frame_response_until, write_frame_until,
 };
 
 pub const MAX_MSG: usize = 1024 * 1024;
