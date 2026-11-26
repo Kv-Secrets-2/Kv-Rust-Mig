@@ -61,7 +61,8 @@ mod tracked;
 mod withhold;
 #[cfg(unix)]
 use lifecycle::{
-    CommitError, ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker,
+    CommitError, ConnectionGuard, LONG_WAIT_SECONDS, Lifecycle, Phase, StopChoice, StopPlan,
+    WorkerTracker,
 };
 
 #[cfg(unix)]
@@ -1157,7 +1158,7 @@ fn handle_connection(
     memory_hardening: &Value,
     request_timeout: Duration,
 ) -> Result<(), AgentError> {
-    let deadline = Instant::now() + request_timeout;
+    let mut deadline = Instant::now() + request_timeout;
     let mut replies = Replies {
         lifecycle,
         connection,
@@ -1188,6 +1189,14 @@ fn handle_connection(
         return Ok(());
     };
     let cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
+    if cmd == "stop" {
+        // The initial deadline bounds receipt of a complete request. A valid
+        // stop can then wait through the lifecycle's long drain before its
+        // control outcome is written, so it needs a fresh drain-plus-reply
+        // budget rather than the already elapsed request deadline.
+        deadline = Instant::now() + Duration::from_secs(LONG_WAIT_SECONDS) + request_timeout;
+        replies.deadline = deadline;
+    }
     replies.cmd = cmd;
     replies.audit_warning = request.get("audit_warning") == Some(&Value::Bool(true));
     if cmd == "enforcement" {
@@ -3110,5 +3119,101 @@ mod tests {
             "the one absolute connection deadline is already spent when the request read times out"
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_wait_outcome_survives_the_initial_request_deadline() {
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let store = DrawerStore::open(".", Key32::new([0; 32]));
+        let cache = Mutex::new(SecretCache::default());
+        let master_key = Key32::new([0; 32]);
+        let trust = TrustContext {
+            session_nonce: Zeroizing::new([0; 32]),
+            daemon_auth_key: Key32::new([0; 32]),
+            grant_state_key: Key32::new([0; 32]),
+            token_key: Key32::new([0; 32]),
+            protected: false,
+            owner_public_key: None,
+            owner_key_id: String::new(),
+            local_approval_id: Vec::new(),
+            location: Vec::new(),
+            version: "0.4.0".into(),
+            approval_signing_key: None,
+            pin: Arc::new(TrustPin {
+                state: std::sync::Mutex::new(PinState {
+                    root: std::path::PathBuf::from("."),
+                    folder_id: (0, 0),
+                    folder: Some(File::open(".").unwrap()),
+                    key_id: None,
+                    key_digest: None,
+                    approval_key_id: None,
+                    approval_key_digest: None,
+                    latched: None,
+                    closed: false,
+                }),
+            }),
+        };
+        let approved = json!({});
+        let token = Zeroizing::new(String::new());
+        let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+        let permits = permits::for_session(&trust, Arc::clone(&providers));
+        let http_policy = kv_broker::load_http_policy_snapshot(&approved);
+        let api_caller = kv_broker::ApiCaller::new();
+        let audit = kv_audit::Audit::new(".");
+        let lifecycle = Lifecycle::with_test_waits(
+            Duration::from_millis(10),
+            Duration::from_millis(150),
+            Duration::from_millis(10),
+        );
+        let work = lifecycle.try_commit().unwrap();
+        let shared = Shared::new();
+        let mut workers = WorkerTracker::new();
+        let connection = workers.register_connection(&server).unwrap();
+        let memory_hardening = json!({});
+        let timeout = Duration::from_millis(30);
+        let worker = thread::spawn(move || {
+            handle_connection(
+                &mut server,
+                Path::new("."),
+                "",
+                &store,
+                &cache,
+                &master_key,
+                &trust,
+                &approved,
+                &token,
+                &providers,
+                &permits,
+                &http_policy,
+                &api_caller,
+                &audit,
+                None,
+                &lifecycle,
+                &shared,
+                &connection,
+                &memory_hardening,
+                timeout,
+            )
+        });
+        let write_deadline = Instant::now() + Duration::from_secs(1);
+        kv_proto::write_frame_request_until(
+            &mut client,
+            &json!({"cmd":"stop","choice":"wait"}),
+            write_deadline,
+        )
+        .unwrap();
+        let response = kv_proto::read_frame_response_until(
+            &mut client,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(response["stopping"], true);
+        assert_eq!(response["cut_off"], 1);
+        worker.join().unwrap().unwrap();
+        drop(work);
     }
 }

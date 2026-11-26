@@ -97,6 +97,19 @@ impl Lifecycle {
         Self::with_settings(Settings::default())
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_test_waits(
+        short_wait: Duration,
+        long_wait: Duration,
+        choice_wait: Duration,
+    ) -> Arc<Self> {
+        Self::with_settings(Settings {
+            short_wait,
+            long_wait,
+            choice_wait,
+        })
+    }
+
     fn with_settings(settings: Settings) -> Arc<Self> {
         Arc::new(Self {
             settings,
