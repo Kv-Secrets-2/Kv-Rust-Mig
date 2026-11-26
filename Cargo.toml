@@ -11,6 +11,15 @@ rust-version = "1.97"
 [workspace.lints.rust]
 unsafe_code = "deny"
 
+# Owner-terminal integration flows repeatedly unwrap vault keys. Keep scrypt's
+# memory-hard mixing optimized even in debug builds; unoptimized scrypt otherwise
+# makes correct passphrase verification look like a stalled terminal for minutes.
+[profile.dev.package.scrypt]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
 [profile.release]
 lto = true
 codegen-units = 1
