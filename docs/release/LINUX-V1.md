@@ -81,9 +81,20 @@ install -D -m 0755 \
 
 The final command must print `kv $KV_VERSION`. `install -D` creates
 `~/.local/bin` when needed, and invoking the installed path directly avoids
-accidentally checking a different `kv` earlier on `PATH`. Add `~/.local/bin`
-to `PATH` for subsequent `kv` commands. Do not use the archive when checksum
-verification fails.
+accidentally checking a different `kv` earlier on `PATH`. Do not use the
+archive when checksum verification fails.
+
+Before the first-run journey, put the new installation first on `PATH` and
+confirm that bare `kv` resolves to it:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+command -v kv
+```
+
+`command -v kv` must print exactly `$HOME/.local/bin/kv` (with `$HOME`
+expanded). If it prints another path, do not continue with bare `kv` commands
+until `PATH` is corrected.
 
 Install bubblewrap with the operating-system package manager before first
 use. On Debian/Ubuntu, for example:
@@ -259,7 +270,8 @@ If the request should not proceed, use the explicit denial command instead of
 only closing the review:
 
 ```sh
-# Use the same full request ID reviewed above.
+# Copy the full request ID printed by the request step or inbox.
+REQUEST_ID=permit_request_...
 kv approvals deny "$REQUEST_ID"
 ```
 
