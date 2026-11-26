@@ -46,6 +46,39 @@ jobs:
         env:
           TMPDIR: ${{ runner.os == 'Windows' && runner.temp || '/var/tmp' }}
           CARGO_TERM_COLOR: never
+      - name: Run fixed operation loopback tests
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/v1-anthropic-operation.log"
+          cargo test -p kv-cli --locked --features test-provider-loopback --test v1_anthropic_operation 2>&1 | tee "$log"
+          python - <<'PYEOF'
+          import re
+          from pathlib import Path
+          import os
+
+          text = (Path(os.environ["RUNNER_TEMP"]) / "v1-anthropic-operation.log").read_text(errors="replace")
+          running = [int(count) for count in re.findall(r"^running (\d+) tests?$", text, re.MULTILINE)]
+          summaries = re.findall(
+              r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out",
+              text,
+              re.MULTILINE,
+          )
+          if not running or len(running) != len(summaries):
+              raise SystemExit("fixed-operation guard failed: could not prove a nonempty test execution")
+          if sum(running) == 0:
+              raise SystemExit("fixed-operation guard failed: cargo selected zero tests")
+          passed = sum(int(summary[1]) for summary in summaries)
+          failed = sum(int(summary[2]) for summary in summaries)
+          if failed != 0 or any(summary[0] != "ok" for summary in summaries):
+              raise SystemExit("fixed-operation guard failed: one or more selected tests failed")
+          if passed == 0:
+              raise SystemExit("fixed-operation guard failed: all selected tests were ignored")
+          PYEOF
+        env:
+          TMPDIR: /var/tmp
+          CARGO_TERM_COLOR: never
       - name: Report native failure identifiers
         if: failure()
         shell: bash
