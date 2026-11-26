@@ -31,15 +31,61 @@ if [[ -z "$target_dir" ]]; then
 fi
 
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
-toml_cargo_home=${cargo_home//\\/\\\\}
-toml_cargo_home=${toml_cargo_home//\"/\\\"}
-remap_config="build.rustflags=[\"--remap-path-prefix=$toml_cargo_home/registry/src=/cargo/registry/src\"]"
+path_remap="--remap-path-prefix=$cargo_home/registry/src=/cargo/registry/src"
 
-# Use Cargo's own rustflags machinery rather than RUSTFLAGS or a rustc wrapper:
-# the array form preserves spaces, participates in Cargo's build fingerprint, and
-# merges with array-valued rustflags from Cargo configuration without affecting
-# host build-script compilations.
-cargo --config "$remap_config" build --release --locked --target "$target" -p kv-cli
+helper_dir=$(mktemp -d "${TMPDIR:-/tmp}/kv-release-rustflags.XXXXXX")
+staging=
+cleanup() {
+  rm -rf "$helper_dir"
+  if [[ -n "$staging" ]]; then
+    rm -rf "$staging"
+  fi
+}
+trap cleanup EXIT
+
+probe_dir=$helper_dir/probe
+mkdir -p "$probe_dir/src"
+cp scripts/release/cargo-rustflags-probe.rs "$probe_dir/build.rs"
+: > "$probe_dir/src/lib.rs"
+cat > "$probe_dir/Cargo.toml" <<'PROBE_EOF'
+[package]
+name = "kv-release-rustflags-probe"
+version = "0.0.0"
+edition = "2021"
+build = "build.rs"
+
+[workspace]
+PROBE_EOF
+
+probe_output=$helper_dir/rustflags-encoded
+KV_RUSTFLAGS_PROBE_OUT="$probe_output" cargo build --quiet --offline \
+  --manifest-path "$probe_dir/Cargo.toml" \
+  --release \
+  --target "$target" \
+  --target-dir "$helper_dir/probe-target"
+if [[ ! -f "$probe_output" ]]; then
+  echo "Cargo did not expose effective rustflags through the probe build script" >&2
+  exit 1
+fi
+
+if [[ "$path_remap" == *$'\x1f'* ]]; then
+  echo "CARGO_HOME cannot contain the CARGO_ENCODED_RUSTFLAGS separator" >&2
+  exit 1
+fi
+
+# Ask Cargo itself for the effective target flags through an isolated probe in
+# this working directory, then append the release remap in Cargo's encoded
+# representation. The encoding preserves array entries containing spaces and
+# avoids merging an array-valued override into a string-valued config key.
+probe_rustflags=$(cat "$probe_output" && printf x)
+probe_rustflags=${probe_rustflags%x}
+if [[ -n "$probe_rustflags" ]]; then
+  CARGO_ENCODED_RUSTFLAGS="$probe_rustflags"$'\x1f'"$path_remap"
+else
+  CARGO_ENCODED_RUSTFLAGS=$path_remap
+fi
+export CARGO_ENCODED_RUSTFLAGS
+cargo build --release --locked --target "$target" -p kv-cli
 
 binary=$target_dir/$target/release/kv
 if [[ ! -x "$binary" ]]; then
@@ -71,7 +117,6 @@ archive_name=$name.tar.gz
 checksum_name=$archive_name.sha256
 mkdir -p "$out_dir"
 staging=$(mktemp -d "$out_dir/staging.XXXXXX")
-trap 'rm -rf "$staging"' EXIT
 
 mkdir "$staging/$name"
 install -m 0755 "$binary" "$staging/$name/kv"
