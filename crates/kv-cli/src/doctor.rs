@@ -97,6 +97,27 @@ fn filesystem_is_read_only(path: &Path) -> Result<bool, rustix::io::Errno> {
         .contains(rustix::fs::StatVfsMountFlags::RDONLY))
 }
 
+#[cfg(target_os = "linux")]
+fn has_immutable_attribute(path: &Path) -> Result<bool, rustix::io::Errno> {
+    let metadata = rustix::fs::statx(
+        rustix::fs::CWD,
+        path,
+        rustix::fs::AtFlags::NO_AUTOMOUNT | rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        rustix::fs::StatxFlags::empty(),
+    )?;
+    Ok(metadata
+        .stx_attributes_mask
+        .contains(rustix::fs::StatxAttributes::IMMUTABLE)
+        && metadata
+            .stx_attributes
+            .contains(rustix::fs::StatxAttributes::IMMUTABLE))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn has_immutable_attribute(_path: &Path) -> Result<bool, rustix::io::Errno> {
+    Ok(false)
+}
+
 #[cfg(not(unix))]
 fn allows_write_search(_path: &Path) -> bool {
     true
@@ -109,6 +130,11 @@ fn allows_read(_path: &Path) -> bool {
 
 #[cfg(not(unix))]
 fn filesystem_is_read_only(_path: &Path) -> Result<bool, std::io::Error> {
+    Ok(false)
+}
+
+#[cfg(not(unix))]
+fn has_immutable_attribute(_path: &Path) -> Result<bool, std::io::Error> {
     Ok(false)
 }
 
@@ -343,6 +369,24 @@ fn home_checks(home: Option<&Path>) -> Vec<Check> {
                     "~/.kv filesystem cannot be inspected: {error}"
                 ))];
             }
+        }
+        match has_immutable_attribute(&kv) {
+            Ok(true) => {
+                return vec![Check::fail(
+                    "~/.kv is immutable; kv cannot repair or maintain local vault state",
+                )];
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return vec![Check::fail(format!(
+                    "~/.kv attributes cannot be inspected: {error}"
+                ))];
+            }
+        }
+        if mode_bits(&metadata).is_some_and(|mode| mode & 0o300 == 0o300) {
+            return vec![Check::fail(
+                "~/.kv write/search access is denied despite owner permissions; kv cannot maintain local vault state",
+            )];
         }
     }
     if let Some(problem) = privacy_problem(&metadata) {
