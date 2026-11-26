@@ -57,26 +57,20 @@ fn top_level_help_matches_the_v1_surface() {
 }
 
 #[test]
-fn mcp_server_help_is_not_shipped() {
-    let scratch = Scratch::new("mcp-help");
-    let (code, text) = run(&scratch, &["mcp-server", "--help"]);
-    assert_eq!(code, 0, "{text}");
-    assert!(text.contains("not part of the Linux v1 surface"), "{text}");
-    assert_absent(
-        &text,
-        &[
-            "--allow-execute",
-            "--allow-mutate",
-            "--allow-reveal",
-            "--allow-direct-vault-access",
-            "kv_run",
-            "kv_query",
-            "kv_ssh",
-            "database/Redis",
-            "remote SSH",
-            "subprocess",
-        ],
-    );
+fn mcp_server_invocation_is_refused_without_starting_mcp() {
+    let scratch = Scratch::new("mcp-refusal");
+    for args in [
+        vec!["mcp-server"],
+        vec!["mcp-server", "--help"],
+        vec!["mcp-server", "--allow-execute"],
+    ] {
+        let (code, text) = run(&scratch, &args);
+        assert_eq!(code, 1, "{args:?}: {text}");
+        assert_eq!(
+            text, "kv mcp-server is not part of the Linux v1 surface.\n",
+            "{args:?}"
+        );
+    }
 }
 
 #[test]
