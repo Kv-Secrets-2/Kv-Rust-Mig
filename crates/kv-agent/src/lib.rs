@@ -3124,7 +3124,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stop_wait_outcome_survives_the_initial_request_deadline() {
-        use std::io::Write;
         use std::os::unix::net::UnixStream;
 
         let (mut client, mut server) = UnixStream::pair().unwrap();
