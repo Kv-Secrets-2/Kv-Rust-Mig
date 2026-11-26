@@ -182,6 +182,24 @@ fn signed_denial_is_terminal_and_revokes_unspent_approval() {
         DenialStatus::AlreadyDenied
     );
 
+    let wrong_key = OwnerSeed::new([38; 32]);
+    let facts = request.facts();
+    let wrong_payload = json!({
+        "signer": crate::permit::SIGNER,
+        "request_id": facts["request_id"],
+        "permit_id": facts["permit_id"],
+        "session_nonce": facts["session_nonce"],
+        "location": facts["location"],
+        "local_approval_id": facts["local_approval_id"],
+        "owner_key_id": facts["owner_key_id"],
+    });
+    let wrong_denial =
+        crate::permit_denial::attach_permit_denial(&wrong_payload, &wrong_key).unwrap();
+    assert_eq!(
+        error(fixture.registry.deny(&wrong_denial)).message,
+        "invalid owner permit denial"
+    );
+
     let request = fixture.request();
     let artifact = fixture.approve(&request);
     let denial = fixture.denial(&request);

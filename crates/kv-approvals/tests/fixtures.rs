@@ -154,9 +154,10 @@ fn frame_and_all_wire_message_vectors_match_python() {
         let input = hex_bytes(&vector["in"]);
         assert_eq!(hex::encode(wire::frame(&input)), vector["out"]);
     }
-    assert!(
-        MessageKind::ALL.len() >= root["wire_messages"].as_array().unwrap().len(),
-        "every Python fixture kind must remain represented; Rust-only v1 kinds may be additional"
+    assert_eq!(
+        MessageKind::ALL.len(),
+        root["wire_messages"].as_array().unwrap().len() + 1,
+        "the Python fixture kinds plus the Rust-only permit-denial ack must be represented"
     );
     for vector in root["wire_messages"].as_array().unwrap() {
         let kind = MessageKind::from_name(vector["type"].as_str().unwrap()).unwrap();
