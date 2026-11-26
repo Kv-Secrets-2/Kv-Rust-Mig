@@ -101,16 +101,17 @@ that checkpoint outside this lifecycle.
 
 `admit(action, metadata)` performs these operations in order:
 
-1. validate the action and caller metadata;
+1. validate the action, caller metadata, and canonical absolute journal
+   namespace (no relative path, `..`, or symlink component);
 2. open or create the audit directory using ordinary audit provisioning;
 3. serialize on the audit-directory log lock (with the same bounded two-second
    wait used by writers);
 4. load the independent trusted checkpoint;
 5. verify every journal record from the start against that checkpoint,
    including canonical bytes, sequence, links, vault identity, and HMACs;
-6. at trusted genesis, synchronize the physical and lexical ancestor
-   directories whose entries form the audit path, including symlink entries,
-   even when the audit path already existed before this lifecycle opened it;
+6. at trusted genesis, synchronize the physical ancestor directories whose
+   entries form the canonical audit path, even when that path already existed
+   before this lifecycle opened it;
 7. append exactly one authenticated admission record, synchronize the file,
    close it, and synchronize the audit directory;
 8. re-check lock identity and durably publish the advanced checkpoint; and
@@ -144,9 +145,10 @@ being silently paired.
 This parent-chain barrier is part of privileged-admission provisioning only.
 Ordinary audit/CLI directory creation intentionally does not perform it, so
 ordinary logging is not blocked merely because an existing ancestor cannot be
-opened for synchronization. Privileged admission is stricter: if any ancestor
-cannot be opened and synchronized, there is no positive durability evidence for
-the journal path and admission fails closed.
+opened for synchronization. Privileged admission is stricter: it requires a
+canonical absolute namespace path, and if any ancestor cannot be opened and
+synchronized, there is no positive durability evidence for the journal path
+and admission fails closed.
 
 Lifecycle actions are non-empty ASCII strings of at most 128 bytes using
 alphanumerics or `._-:/+`. `privileged_admission` and `privileged_outcome` are

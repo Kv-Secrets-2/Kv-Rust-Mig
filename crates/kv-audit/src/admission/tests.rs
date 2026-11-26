@@ -16,7 +16,7 @@ impl Temp {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).expect("isolated admission test directory");
-        Self(path)
+        Self(fs::canonicalize(path).expect("canonical admission test directory"))
     }
 
     fn audit_dir(&self) -> PathBuf {
@@ -331,6 +331,34 @@ fn journal_write_and_sync_failures_block_checkpoint_and_effect() {
             assert_eq!(retry_effect.load(Ordering::SeqCst), 0);
         }
     }
+}
+
+#[test]
+fn admission_rejects_dotdot_namespace_before_side_effects() {
+    let temp = Temp::new();
+    let decoy = temp.0.join("decoy");
+    fs::create_dir(&decoy).unwrap();
+    let fixture = fixture_in(temp, decoy.join("..").join("audit"));
+
+    let result = fixture.journal.admit("broker.http.get", Map::new());
+    assert_eq!(result.err(), Some(LifecycleError::FolderRefused));
+    assert!(checkpoint_state(&fixture).1.is_empty());
+    assert!(!fixture.temp.0.join("audit").exists());
+}
+
+#[test]
+fn admission_rejects_symlink_namespace_before_side_effects() {
+    let temp = Temp::new();
+    let target = temp.0.join("target");
+    fs::create_dir(&target).unwrap();
+    let link = temp.0.join("linked-target");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let fixture = fixture_in(temp, link.join("audit"));
+
+    let result = fixture.journal.admit("broker.http.get", Map::new());
+    assert_eq!(result.err(), Some(LifecycleError::FolderRefused));
+    assert!(checkpoint_state(&fixture).1.is_empty());
+    assert!(!target.join("audit").exists());
 }
 
 #[test]
