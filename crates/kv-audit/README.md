@@ -102,18 +102,19 @@ that checkpoint outside this lifecycle.
 `admit(action, metadata)` performs these operations in order:
 
 1. validate the action and caller metadata;
-2. open or create the audit directory. When hierarchy components are missing,
-   create them outermost-first and synchronize each newly created component in
-   its parent before creating the next one;
+2. open or create the audit directory using ordinary audit provisioning;
 3. serialize on the audit-directory log lock (with the same bounded two-second
    wait used by writers);
 4. load the independent trusted checkpoint;
 5. verify every journal record from the start against that checkpoint,
    including canonical bytes, sequence, links, vault identity, and HMACs;
-6. append exactly one authenticated admission record, synchronize the file,
+6. at trusted genesis, synchronize every ancestor directory whose entries form
+   the audit path, even when the audit path already existed before this
+   lifecycle opened it;
+7. append exactly one authenticated admission record, synchronize the file,
    close it, and synchronize the audit directory;
-7. re-check lock identity and durably publish the advanced checkpoint; and
-8. only then return an `Admission` token.
+8. re-check lock identity and durably publish the advanced checkpoint; and
+9. only then return an `Admission` token.
 
 Any failure returns a closed `LifecycleError` and no usable token exists. The
 token is intentionally not `Clone`: `Admission::run(effect)` consumes it and is
@@ -140,10 +141,12 @@ are reported as `Conflicted`; outcomes without an admission and malformed
 lifecycle-shaped records are counted separately in `AdmissionReport` instead of
 being silently paired.
 
-Only parents of newly created hierarchy components are synchronized.
-Pre-existing ancestors are traversed but are not opened for synchronization, so
-an execute-only ancestor does not by itself block admission. If the parent of a
-newly created component cannot be synchronized, creation fails closed.
+This parent-chain barrier is part of privileged-admission provisioning only.
+Ordinary audit/CLI directory creation intentionally does not perform it, so
+ordinary logging is not blocked merely because an existing ancestor cannot be
+opened for synchronization. Privileged admission is stricter: if any ancestor
+cannot be opened and synchronized, there is no positive durability evidence for
+the journal path and admission fails closed.
 
 Lifecycle actions are non-empty ASCII strings of at most 128 bytes using
 alphanumerics or `._-:/+`. `privileged_admission` and `privileged_outcome` are
@@ -153,10 +156,9 @@ fields described above. Metadata remains subject to the canonical JSON, 1 MiB
 record, and nesting limits and must exclude secrets and request/response
 bodies.
 
-Crash behavior is deliberately conservative. If new-directory creation or
-parent synchronization fails, the lifecycle attempts to remove the incomplete
-new hierarchy and stops before journal append, checkpoint publication,
-admission-token creation, or any effect callback. If append or
+Crash behavior is deliberately conservative. If genesis parent-chain
+synchronization fails, the lifecycle stops before journal append, checkpoint
+publication, admission-token creation, or any effect callback. If append or
 later synchronization fails, bytes may or may not have reached the journal;
 because the checkpoint is not advanced in that case, a partially or completely
 landed record makes the next verification fail closed (`beyond_checkpoint`,

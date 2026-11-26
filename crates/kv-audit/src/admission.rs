@@ -1,12 +1,12 @@
 //! Durable privileged-admission and terminal-outcome lifecycle.
 //!
-//! The ordering is deliberately strict: newly created journal directory
-//! hierarchies are committed through their parent directories before a lifecycle
-//! write; then, while the audit log lock is held, the broker-owned checkpoint is
-//! read, the complete journal is authenticated to that checkpoint, the admission
-//! record is appended with file and directory synchronization, and the advanced
-//! checkpoint is published durably. Only then does [`AdmissionJournal::admit`]
-//! return a usable [`Admission`]. Dropping an
+//! The ordering is deliberately strict: while the audit log lock is held, the
+//! broker-owned checkpoint is read, the complete journal is authenticated to
+//! that checkpoint, a genesis journal path is committed through its parent
+//! chain even when that path already exists, the admission record is appended
+//! with file and directory synchronization, and the advanced checkpoint is
+//! published durably. Only then does [`AdmissionJournal::admit`] return a
+//! usable [`Admission`]. Dropping an
 //! admission never repeats or completes its effect; in a journal that verifies
 //! against its checkpoint, an admission without a later terminal outcome is
 //! reported as unknown.
@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -174,6 +175,7 @@ impl TerminalOutcome {
 }
 
 type AppendDurable = dyn Fn(&Directory, &[u8]) -> Result<(), DurableAppendFailure> + Send + Sync;
+type ParentChainSync = dyn Fn(&Directory) -> io::Result<()> + Send + Sync;
 
 struct Inner {
     directory: PathBuf,
@@ -181,6 +183,7 @@ struct Inner {
     identity: VaultIdentity,
     checkpoint: Mutex<Box<dyn TrustedCheckpoint + Send>>,
     append_durable: Box<AppendDurable>,
+    sync_parent_chain: Box<ParentChainSync>,
 }
 
 /// Authenticated privileged-admission journal. Clones share the checkpoint
@@ -261,6 +264,7 @@ impl AdmissionJournal {
             identity,
             checkpoint,
             Box::new(|directory, bytes| directory.append_durable(bytes)),
+            Box::new(|directory| directory.sync_parent_chain()),
         )
     }
 
@@ -271,8 +275,16 @@ impl AdmissionJournal {
         identity: VaultIdentity,
         checkpoint: Box<dyn TrustedCheckpoint + Send>,
         append_durable: Box<AppendDurable>,
+        sync_parent_chain: Box<ParentChainSync>,
     ) -> Self {
-        Self::with_parts(directory, key, identity, checkpoint, append_durable)
+        Self::with_parts(
+            directory,
+            key,
+            identity,
+            checkpoint,
+            append_durable,
+            sync_parent_chain,
+        )
     }
 
     fn with_parts(
@@ -281,6 +293,7 @@ impl AdmissionJournal {
         identity: VaultIdentity,
         checkpoint: Box<dyn TrustedCheckpoint + Send>,
         append_durable: Box<AppendDurable>,
+        sync_parent_chain: Box<ParentChainSync>,
     ) -> Self {
         Self(Arc::new(Inner {
             directory: directory.into(),
@@ -288,6 +301,7 @@ impl AdmissionJournal {
             identity,
             checkpoint: Mutex::new(checkpoint),
             append_durable,
+            sync_parent_chain,
         }))
     }
 
@@ -359,6 +373,10 @@ impl AdmissionJournal {
             ChainVerification::Valid { position } => position,
             other => return Err(verification_error(other)),
         };
+        if position.count == 0 {
+            (self.0.sync_parent_chain)(&directory)
+                .map_err(|_| LifecycleError::JournalSyncFailed)?;
+        }
         if !directory.lock_matches(&log_lock, LOG_LOCK).unwrap_or(false) {
             return Err(LifecycleError::LockUnavailable);
         }

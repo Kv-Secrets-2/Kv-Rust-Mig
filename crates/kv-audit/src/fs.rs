@@ -4,7 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::fd::IntoRawFd;
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use rustix::fs::{self as unix, AtFlags, Mode, OFlags};
@@ -79,109 +79,22 @@ fn single_file(file: &File) -> io::Result<()> {
     Ok(())
 }
 
-fn parent_path(path: &Path) -> Option<PathBuf> {
-    path.parent().map(|parent| {
-        if parent.as_os_str().is_empty() {
-            PathBuf::from(".")
-        } else {
-            parent.to_path_buf()
-        }
-    })
-}
-
-fn open_directory_path(path: &Path) -> io::Result<File> {
-    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
-    unix::open(path, flags, Mode::empty())
-        .map(File::from)
-        .map_err(Into::into)
-}
-
-fn sync_directory_path(path: &Path) -> io::Result<()> {
-    let file = open_directory_path(path)?;
-    file.sync_all()?;
-    close_file(file)
-}
-
-fn missing_directory_components(path: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut missing = Vec::new();
-    let mut current = path.to_path_buf();
-    loop {
-        match fs::symlink_metadata(&current) {
-            Ok(_) => break,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                missing.push(current.clone());
-                let Some(parent) = current
-                    .parent()
-                    .filter(|parent| !parent.as_os_str().is_empty())
-                else {
-                    break;
-                };
-                current = parent.to_path_buf();
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(missing)
-}
-
-fn create_missing_directory(path: &Path, audit_leaf: bool) -> io::Result<bool> {
-    let result = if audit_leaf {
-        fs::DirBuilder::new().mode(0o700).create(path)
-    } else {
-        fs::create_dir(path)
-    };
-    match result {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-fn remove_created_directories(created: &[PathBuf]) {
-    for path in created.iter().rev() {
-        let _ = fs::remove_dir(path);
-    }
-}
-
 fn create_directory(path: &Path) -> io::Result<()> {
-    create_directory_with_sync(path, sync_directory_path)
-}
-
-fn create_directory_with_sync(
-    path: &Path,
-    mut sync_parent: impl FnMut(&Path) -> io::Result<()>,
-) -> io::Result<()> {
     // Match makedirs: missing ancestors use ordinary directory permissions;
     // only the audit directory itself is created private from its first inode.
-    // Record the missing chain before creation so only newly created entries
-    // are synchronized. Pre-existing ancestors need traversal permission, not
-    // read permission, and do not gain a new directory entry here.
-    let missing = missing_directory_components(path)?;
-    if missing.is_empty() {
-        return Ok(());
+    // This ordinary provisioning path deliberately performs no parent-chain
+    // durability barrier; privileged admissions add that stricter barrier.
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
     }
-    let mut created = Vec::new();
-    for component in missing.iter().rev() {
-        let created_here = match create_missing_directory(component, component == path) {
-            Ok(created_here) => created_here,
-            Err(error) => {
-                remove_created_directories(&created);
-                return Err(error);
-            }
-        };
-        if created_here {
-            created.push(component.clone());
-        }
-        let Some(parent) = parent_path(component) else {
-            remove_created_directories(&created);
-            return Err(invalid("audit directory has no parent"));
-        };
-        if let Err(error) = sync_parent(&parent) {
-            remove_created_directories(&created);
-            return Err(error);
-        }
+    match fs::DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
     }
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -227,6 +140,38 @@ impl Directory {
         let file = self.open_child(name, OFlags::RDONLY)?;
         single_file(&file)?;
         Ok(file)
+    }
+
+    /// Synchronize every ancestor directory whose entries form this directory's
+    /// path, stopping at the filesystem root. Privileged admission uses this
+    /// strict barrier at genesis even when the journal path already exists.
+    pub(crate) fn sync_parent_chain(&self) -> io::Result<()> {
+        self.sync_parent_chain_with(|parent| parent.sync_all())
+    }
+
+    fn sync_parent_chain_with(
+        &self,
+        mut sync_parent: impl FnMut(&File) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut child = self.file.try_clone()?;
+        for _ in 0..1024 {
+            let parent = File::from(unix::openat(
+                &child,
+                "..",
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?);
+            let child_metadata = child.metadata()?;
+            let parent_metadata = parent.metadata()?;
+            if child_metadata.dev() == parent_metadata.dev()
+                && child_metadata.ino() == parent_metadata.ino()
+            {
+                return Ok(());
+            }
+            sync_parent(&parent)?;
+            child = parent;
+        }
+        Err(invalid("directory ancestry exceeds durability scan bound"))
     }
 
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {
@@ -721,46 +666,50 @@ mod tests {
     }
 
     #[test]
-    fn create_directory_syncs_new_parent_chain_outermost_first() {
+    fn parent_chain_sync_walks_multilevel_parents_in_order() {
         use std::cell::RefCell;
 
         let temp = Temp::new();
-        let existing = temp.0.join("existing");
-        fs::create_dir(&existing).unwrap();
-        let outer = existing.join("outer");
+        let outer = temp.0.join("outer");
         let inner = outer.join("inner");
-        let audit = inner.join("audit");
-        let events = RefCell::new(Vec::new());
-        create_directory_with_sync(&audit, |parent| {
-            events.borrow_mut().push(parent.to_path_buf());
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(
-            events.borrow().as_slice(),
-            [existing.clone(), outer.clone(), inner.clone()].as_slice()
-        );
-        assert!(audit.is_dir());
-        assert_eq!(fs::metadata(&audit).unwrap().mode() & 0o777, 0o700);
+        let leaf = inner.join("audit");
+        fs::create_dir_all(&leaf).unwrap();
+        let directory = Directory::open(&leaf, false).unwrap();
+        let synced = RefCell::new(Vec::new());
+        directory
+            .sync_parent_chain_with(|parent| {
+                let metadata = parent.metadata()?;
+                synced.borrow_mut().push((metadata.dev(), metadata.ino()));
+                parent.sync_all()
+            })
+            .unwrap();
+
+        let synced = synced.borrow();
+        assert!(synced.len() >= 3);
+        for ((dev, ino), path) in synced.iter().zip([inner, outer, temp.0.clone()].iter()) {
+            let metadata = fs::metadata(path).unwrap();
+            assert_eq!((*dev, *ino), (metadata.dev(), metadata.ino()));
+        }
     }
 
     #[test]
-    fn create_directory_parent_sync_failure_rolls_back_new_chain() {
+    fn ordinary_directory_creation_separates_cli_logging_from_admission_barrier() {
+        use std::os::unix::fs::PermissionsExt;
+
         let temp = Temp::new();
-        let outer = temp.0.join("outer");
-        let inner = outer.join("inner");
-        let audit = inner.join("audit");
-        let result = create_directory_with_sync(&audit, |parent| {
-            if parent == outer.as_path() {
-                Err(io::Error::other("injected parent sync failure"))
-            } else {
-                Ok(())
-            }
-        });
-        assert!(result.is_err());
-        assert!(!audit.exists());
-        assert!(!inner.exists());
-        assert!(!outer.exists());
+        let gateway = temp.0.join("gateway");
+        let parent = gateway.join("parent");
+        fs::create_dir(&gateway).unwrap();
+        fs::create_dir(&parent).unwrap();
+        fs::set_permissions(&gateway, fs::Permissions::from_mode(0o300)).unwrap();
+        let audit = parent.join("audit");
+        let directory = Directory::open(&audit, true).unwrap();
+        directory.append(b"ordinary audit record\n").unwrap();
+        assert_eq!(
+            fs::read(audit.join(LOG)).unwrap(),
+            b"ordinary audit record\n"
+        );
+        fs::set_permissions(&gateway, fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]
