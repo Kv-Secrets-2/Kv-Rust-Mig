@@ -437,15 +437,28 @@ fn absolute_deadline(timeout: Duration) -> Result<Instant, ProtocolError> {
     })
 }
 
-fn request_document(cmd: &str, token: String, fields: &Map<String, Value>) -> Value {
+fn request_document(
+    cmd: &str,
+    token: String,
+    fields: &Map<String, Value>,
+    protect_trusted_fields: bool,
+) -> Value {
     let mut request = Map::new();
-    for (name, value) in fields {
-        if name != "cmd" && name != "token" {
+    if protect_trusted_fields {
+        for (name, value) in fields {
+            if name != "cmd" && name != "token" {
+                request.insert(name.clone(), value.clone());
+            }
+        }
+        request.insert("cmd".into(), Value::String(cmd.into()));
+        request.insert("token".into(), Value::String(token));
+    } else {
+        request.insert("cmd".into(), Value::String(cmd.into()));
+        request.insert("token".into(), Value::String(token));
+        for (name, value) in fields {
             request.insert(name.clone(), value.clone());
         }
     }
-    request.insert("cmd".into(), Value::String(cmd.into()));
-    request.insert("token".into(), Value::String(token));
     request.entry("audit_warning").or_insert(Value::Bool(false));
     Value::Object(request)
 }
@@ -455,11 +468,12 @@ fn agent_request_document(
     root: &Path,
     cmd: &str,
     fields: &Map<String, Value>,
+    protect_trusted_fields: bool,
 ) -> Result<Value, ProtocolError> {
     let runtime = runtime_dir()?;
     let token_path = agent_token_path(Some(root))?;
     let token = private_token(&token_path, &runtime);
-    Ok(request_document(cmd, token, fields))
+    Ok(request_document(cmd, token, fields, protect_trusted_fields))
 }
 
 pub fn agent_request(
@@ -505,7 +519,7 @@ pub fn agent_request_with_timeout(
                 return Err(ProtocolError::Message(OUTDATED_SERVICE_REFUSAL.into()));
             }
         }
-        let request = agent_request_document(root, cmd, fields)?;
+        let request = agent_request_document(root, cmd, fields, false)?;
         unix_transport::exchange(&path, &request, timeout, false)
     }
 }
@@ -547,7 +561,7 @@ pub fn agent_request_framed_with_deadline(
     {
         let root = root.as_ref();
         let path = agent_socket_path(Some(root))?;
-        let request = agent_request_document(root, cmd, fields)?;
+        let request = agent_request_document(root, cmd, fields, true)?;
         framed_agent_exchange(&path, &request, timeout)
     }
 }
@@ -613,10 +627,20 @@ mod tests {
         fields.insert("cmd".into(), json!("forged"));
         fields.insert("token".into(), json!("forged"));
         fields.insert("dummy_secret".into(), json!("dummy"));
-        let request = request_document("status", "trusted-token".into(), &fields);
+        let request = request_document("status", "trusted-token".into(), &fields, true);
         assert_eq!(request["cmd"], "status");
         assert_eq!(request["token"], "trusted-token");
         assert_eq!(request["dummy_secret"], "dummy");
+    }
+
+    #[test]
+    fn legacy_request_fields_keep_legacy_override_behavior() {
+        let mut fields = Map::new();
+        fields.insert("cmd".into(), json!("caller-cmd"));
+        fields.insert("token".into(), json!("caller-token"));
+        let request = request_document("status", "trusted-token".into(), &fields, false);
+        assert_eq!(request["cmd"], "caller-cmd");
+        assert_eq!(request["token"], "caller-token");
     }
 
     #[test]
