@@ -60,7 +60,8 @@ fn top_level_help_matches_the_v1_surface() {
 fn mcp_server_help_is_not_shipped() {
     let scratch = Scratch::new("mcp-help");
     let (code, text) = run(&scratch, &["mcp-server", "--help"]);
-    assert_ne!(code, 0, "{text}");
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("not part of the Linux v1 surface"), "{text}");
     assert_absent(
         &text,
         &[
@@ -106,6 +107,11 @@ fn provider_help_is_fixed_endpoint_v1_only() {
             "database",
         ],
     );
+
+    let (code, text) = run(&scratch, &["provider", "add", "--", "--help"]);
+    assert_eq!(code, 2, "{text}");
+    assert!(text.contains("--secret"), "{text}");
+    assert!(!text.contains("built-in provider definitions"), "{text}");
 }
 
 #[test]
@@ -185,7 +191,8 @@ fn init_quick_start_enters_custom_vault_before_owner_commands() {
         return;
     };
     let scratch = Scratch::new("custom-init");
-    let vault = scratch.root.join("vault-root");
+    std::fs::create_dir(scratch.proj().join(".secrets")).unwrap();
+    let vault = scratch.root.clone();
     let vault_text = vault.to_str().unwrap().to_owned();
     let args = [
         "init",
