@@ -1,5 +1,5 @@
 #[cfg(unix)]
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 #[cfg(unix)]
 use std::fs::File;
@@ -45,8 +45,6 @@ mod capapi;
 mod capture;
 #[cfg(unix)]
 mod lifecycle;
-#[cfg(unix)]
-mod owner_grants;
 #[cfg(unix)]
 mod permits;
 #[cfg(unix)]
@@ -776,7 +774,15 @@ pub fn run_agent_with_api_caller(
     let trust = Arc::new(trust);
     let master_key = Arc::new(master_key);
     let approved = Arc::new(approved.value);
-    let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+    #[cfg(feature = "test-provider-loopback")]
+    let mut provider_table = kv_broker::build_provider_table(&approved).0;
+    #[cfg(not(feature = "test-provider-loopback"))]
+    let provider_table = kv_broker::build_provider_table(&approved).0;
+    #[cfg(feature = "test-provider-loopback")]
+    if let Some(anthropic) = provider_table.get_mut("anthropic") {
+        anthropic["base_url"] = json!(v1_anthropic_base_url());
+    }
+    let providers = Arc::new(provider_table);
     let permits = permits::for_session(&trust, Arc::clone(&providers));
     let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
@@ -954,6 +960,9 @@ pub(crate) struct Shared {
     pub(crate) host: kv_sandbox::bwrap::SandboxHost,
     /// Python `trust.request_records`: the approval requests this session filed.
     pub(crate) requests: kv_requests::request_records::RequestRecords,
+    /// Owner-refused one-call permits for this daemon session. Restart clears
+    /// both the refusals and the session permits they refuse.
+    pub(crate) denied_permits: Mutex<BTreeSet<String>>,
 }
 
 #[cfg(unix)]
@@ -965,7 +974,164 @@ impl Shared {
             ledger: kv_grants::ledger::Ledger::new(),
             host: kv_sandbox::bwrap::SandboxHost::detect(),
             requests: kv_requests::request_records::RequestRecords::new(None),
+            denied_permits: Mutex::new(BTreeSet::new()),
         }
+    }
+}
+
+#[cfg(unix)]
+const V1_COUNT_TOKENS_CMD: &str = "v1_anthropic_count_tokens";
+#[cfg(unix)]
+const V1_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
+#[cfg(unix)]
+const V1_COUNT_TOKENS_MODEL: &str = "claude-3-5-haiku-latest";
+#[cfg(unix)]
+const V1_COUNT_TOKENS_RULE: &str = "v1-anthropic-count-tokens";
+
+/// Build the one typed v1 broker operation. Callers supply text and optional
+/// approval state only; provider, method, path, headers, model and payload
+/// shape are fixed here so a client cannot turn this into arbitrary HTTP.
+#[cfg(unix)]
+fn v1_count_tokens_call(
+    request: &serde_json::Map<String, Value>,
+) -> Result<serde_json::Map<String, Value>, Value> {
+    const ALLOWED: &[&str] = &[
+        "cmd",
+        "token",
+        "audit_warning",
+        "env",
+        "permit_id",
+        "input",
+        "audit_ctx",
+        "reason",
+    ];
+    if request.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
+        return Err(
+            json!({"error":"unsupported field for the fixed v1 broker operation","error_code":"unsupported_operation"}),
+        );
+    }
+    let Some(input) = request.get("input").and_then(Value::as_str) else {
+        return Err(json!({"error":"input must be a string","error_code":"invalid_operation"}));
+    };
+    if input.is_empty() || input.len() > 16 * 1024 {
+        return Err(
+            json!({"error":"input must be 1..16384 bytes","error_code":"invalid_operation"}),
+        );
+    }
+    if let Some(permit_id) = request.get("permit_id")
+        && permit_id
+            .as_str()
+            .is_none_or(|id| id.is_empty() || id.len() > 128)
+    {
+        return Err(
+            json!({"error":"permit_id must be a string of at most 128 bytes","error_code":"invalid_operation"}),
+        );
+    }
+    let mut operation = serde_json::Map::new();
+    operation.insert("provider".into(), json!("anthropic"));
+    operation.insert("method".into(), json!("POST"));
+    operation.insert("path".into(), json!(V1_COUNT_TOKENS_PATH));
+    operation.insert("headers".into(), json!({}));
+    operation.insert(
+        "body".into(),
+        json!({
+            "model": V1_COUNT_TOKENS_MODEL,
+            "messages": [{"role":"user", "content": input}],
+        }),
+    );
+    for key in ["env", "permit_id", "audit_ctx", "reason"] {
+        if let Some(value) = request.get(key) {
+            operation.insert(key.into(), value.clone());
+        }
+    }
+    Ok(operation)
+}
+
+#[cfg(unix)]
+fn v1_anthropic_base_url() -> &'static str {
+    // Production is fixed to the real Anthropic origin. The test-only feature
+    // keeps the same host name but moves the fixture to a fixed high loopback
+    // port; it is never enabled in release builds and has no runtime override.
+    #[cfg(feature = "test-provider-loopback")]
+    {
+        "https://api.anthropic.com:18443"
+    }
+    #[cfg(not(feature = "test-provider-loopback"))]
+    {
+        "https://api.anthropic.com"
+    }
+}
+
+#[cfg(unix)]
+fn v1_count_tokens_provider() -> (kv_broker::ProviderTable, kv_broker::HttpPolicySnapshot) {
+    let base_url = v1_anthropic_base_url();
+    let builtin = kv_broker::snapshot_providers(&json!({}));
+    let mut provider = builtin.get("anthropic").cloned().unwrap_or_else(|| {
+        json!({
+            "base_url":"https://api.anthropic.com",
+            "secret_name":"ANTHROPIC_API_KEY",
+            "auth_type":"x-api-key",
+            "default_headers":{"Content-Type":"application/json","anthropic-version":"2023-06-01"}
+        })
+    });
+    provider["base_url"] = json!(base_url);
+    let mut providers = kv_broker::ProviderTable::new();
+    providers.insert("anthropic".into(), provider);
+    let policy = kv_broker::HttpPolicySnapshot {
+        configured: true,
+        legacy_providers: None,
+        providers: json!({
+            "anthropic": {
+                "origin":base_url,
+                "secret_name":"ANTHROPIC_API_KEY",
+                "rules":[{
+                    "id":V1_COUNT_TOKENS_RULE,
+                    "methods":["POST"],
+                    "path":V1_COUNT_TOKENS_PATH,
+                    "approval":"per-call"
+                }]
+            }
+        }),
+    };
+    (providers, policy)
+}
+
+#[cfg(unix)]
+fn permit_is_denied(shared: &Shared, permit_id: Option<&Value>) -> bool {
+    let Some(permit_id) = permit_id.and_then(Value::as_str) else {
+        return false;
+    };
+    shared
+        .denied_permits
+        .lock()
+        .map(|denied| denied.contains(permit_id))
+        .unwrap_or(true)
+}
+
+#[cfg(unix)]
+fn permit_denied_response() -> Value {
+    json!({"error":"the owner denied this permit; it is never sent","error_code":"permit_denied"})
+}
+
+#[cfg(unix)]
+fn refuse_permit_response(
+    shared: &Shared,
+    permits: &SessionPermits,
+    request: &serde_json::Map<String, Value>,
+) -> Value {
+    let Some(request_id) = request.get("request_id").and_then(Value::as_str) else {
+        return json!({"error":"request_id is required","error_code":"bad_request"});
+    };
+    let Some(review) = permits.review(request_id) else {
+        return json!({"error":"permit request is missing or expired","error_code":"permit_invalid"});
+    };
+    let permit_id = review.permit_id();
+    match shared.denied_permits.lock() {
+        Ok(mut denied) => {
+            denied.insert(permit_id.to_owned());
+            json!({"refused":true,"request_id":request_id,"permit_id":permit_id})
+        }
+        Err(_) => json!({"error":"permit denial state is unavailable","error_code":"internal"}),
     }
 }
 
@@ -1071,6 +1237,20 @@ fn handle_connection(
         )?;
         return Ok(());
     }
+    let broker_v1_command = cmd == V1_COUNT_TOKENS_CMD
+        || cmd == "refuse_permit"
+        || cmd == "permit_requests"
+        || kv_proto::OWNER_ENDPOINTS.contains(&cmd);
+    if broker_v1_command && replies.wire != kv_proto::RequestWire::FramedV1 {
+        replies.write(
+            stream,
+            &json!({
+                "error":"v1 broker operations require framed KVIP IPC",
+                "error_code":"unsupported_wire"
+            }),
+        )?;
+        return Ok(());
+    }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
         let _ = serve_owner_endpoint(
             stream, cmd, request, trust, root, approved, master_key, providers, permits, shared,
@@ -1096,6 +1276,20 @@ fn handle_connection(
             &json!({
                 "error":error.to_string(),
                 "error_code":"config_authority_changed"
+            }),
+        )?;
+        return Ok(());
+    }
+    // v1 has one typed broker operation. Legacy arbitrary HTTP, database/SSH
+    // broker commands and process execution are refused at the daemon boundary
+    // even if an older client or CLI still knows how to ask for them.
+    if matches!(cmd, "api" | "cap_api" | "query" | "ssh" | "run") {
+        replies.write(
+            stream,
+            &json!({
+                "error":"unsupported legacy operation in v1; use the fixed built-in broker operation",
+                "error_code":"unsupported_operation",
+                "exit_code":1,
             }),
         )?;
         return Ok(());
@@ -1176,9 +1370,9 @@ fn handle_connection(
         "cap_api",
         "check_file",
         "tracked_files",
-        "record_request",
         "stop",
         "permit_requests",
+        V1_COUNT_TOKENS_CMD,
         "lock",
         "dashboard_snapshot",
         "owner_pause_right",
@@ -1303,8 +1497,44 @@ fn handle_connection(
             "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
             "pauses": [],
         }),
-        "record_request" => {
-            requests::record_request(root, root_text, approved, shared, trust, request)
+        "refuse_permit" => refuse_permit_response(shared, permits, request),
+        V1_COUNT_TOKENS_CMD => {
+            let api_started = std::time::Instant::now();
+            let env = request
+                .get("env")
+                .and_then(Value::as_str)
+                .or_else(|| approved.get("default_env").and_then(Value::as_str))
+                .unwrap_or("dev");
+            match v1_count_tokens_call(request) {
+                Err(error) => error,
+                Ok(operation) => {
+                    let (operation_providers, operation_policy) = v1_count_tokens_provider();
+                    let response = api_call_response(
+                        &operation,
+                        env,
+                        store,
+                        cache,
+                        &operation_providers,
+                        &operation_policy,
+                        api_caller,
+                        trust,
+                        permits,
+                        shared,
+                        audit,
+                        lifecycle,
+                        connection,
+                    );
+                    let _ = audit_api_call(
+                        audit,
+                        &operation,
+                        env,
+                        &response,
+                        api_started.elapsed().as_millis() as u64,
+                        permits,
+                    );
+                    response
+                }
+            }
         }
         "api" => {
             let api_started = std::time::Instant::now();
@@ -1323,6 +1553,7 @@ fn handle_connection(
                 api_caller,
                 trust,
                 permits,
+                shared,
                 audit,
                 lifecycle,
                 connection,
@@ -1607,7 +1838,7 @@ fn serve_owner_endpoint(
     master_key: &Key32,
     providers: &kv_broker::ProviderTable,
     permits: &SessionPermits,
-    shared: &Shared,
+    _shared: &Shared,
     replies: &Replies<'_>,
 ) -> Result<(), AgentError> {
     let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
@@ -1641,24 +1872,6 @@ fn serve_owner_endpoint(
                 return permits::owner_register(
                     trust,
                     permits,
-                    challenge.clone(),
-                    request,
-                    approved,
-                );
-            }
-            "owner_request_record" => {
-                return owner_grants::owner_request_record(
-                    trust,
-                    shared,
-                    challenge.clone(),
-                    request,
-                );
-            }
-            "owner_grant_register" => {
-                return owner_grants::owner_grant_register(
-                    trust,
-                    shared,
-                    providers,
                     challenge.clone(),
                     request,
                     approved,
@@ -2031,6 +2244,7 @@ fn api_call_response(
     caller: &kv_broker::ApiCaller,
     trust: &TrustContext,
     permits: &SessionPermits,
+    shared: &Shared,
     audit: &kv_audit::Audit,
     lifecycle: &Arc<Lifecycle>,
     connection: &ConnectionGuard,
@@ -2091,6 +2305,9 @@ fn api_call_response(
             "error":"this call does not match a one-call permit",
             "error_code":"permit_invalid"
         });
+    }
+    if per_call && permit_is_denied(shared, request.get("permit_id")) {
+        return permit_denied_response();
     }
     if per_call && let Err(error) = permits.precheck(request.get("permit_id")) {
         return permits::precheck_error(error);
@@ -2169,6 +2386,9 @@ fn api_call_response(
             let committed = lifecycle
                 .try_commit_for_with_charge(connection, || {
                     let pin = trust.observe_held().map_err(permits::hard_lock_error)?;
+                    if matched.is_some() && permit_is_denied(shared, request.get("permit_id")) {
+                        return Err(permit_denied_response());
+                    }
                     if let Some(matched) = matched {
                         permits.spend(&matched).map_err(permits::invalid_error)?;
                     }

@@ -3,6 +3,8 @@
 
 use super::{AgentError, TrustContext, owner_error, signed_owner};
 use kv_approvals::canonical::canonical_json;
+#[cfg(feature = "test-provider-loopback")]
+use kv_approvals::permit_session::PermitClock;
 use kv_approvals::permit_session::{
     CallFacts, PermitError, SessionBinding, SessionPermits, WaitOver,
 };
@@ -15,7 +17,7 @@ pub(super) fn for_session(
     trust: &TrustContext,
     providers: Arc<ProviderTable>,
 ) -> Arc<SessionPermits> {
-    Arc::new(SessionPermits::new(SessionBinding {
+    let binding = SessionBinding {
         protected: trust.protected,
         owner_public_key: trust.owner_public_key,
         owner_key_id: trust.owner_key_id.clone(),
@@ -23,7 +25,51 @@ pub(super) fn for_session(
         location: trust.location.clone(),
         session_nonce: *trust.session_nonce,
         providers,
-    }))
+    };
+    #[cfg(feature = "test-provider-loopback")]
+    if let Some(scale) = std::env::var("KV_TEST_PERMIT_CLOCK_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|scale| scale.is_finite() && *scale > 1.0)
+    {
+        return Arc::new(SessionPermits::with_clock(
+            binding,
+            Arc::new(ScaledTestClock::new(scale)),
+        ));
+    }
+    Arc::new(SessionPermits::new(binding))
+}
+
+#[cfg(feature = "test-provider-loopback")]
+struct ScaledTestClock {
+    scale: f64,
+    wall_start: f64,
+    mono_start: std::time::Instant,
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl ScaledTestClock {
+    fn new(scale: f64) -> Self {
+        let wall_start = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs_f64(),
+            Err(error) => -error.duration().as_secs_f64(),
+        };
+        Self {
+            scale,
+            wall_start,
+            mono_start: std::time::Instant::now(),
+        }
+    }
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl PermitClock for ScaledTestClock {
+    fn wall_seconds(&self) -> f64 {
+        self.wall_start + self.mono_start.elapsed().as_secs_f64() * self.scale
+    }
+    fn monotonic_seconds(&self) -> f64 {
+        self.mono_start.elapsed().as_secs_f64() * self.scale
+    }
 }
 
 fn fields(trust: &TrustContext, challenge: Vec<u8>) -> MessageFields {

@@ -3,7 +3,6 @@
 //! answer.
 
 use std::path::Path;
-use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
@@ -113,14 +112,9 @@ pub fn cmd_run(p: &Palette, args: RunArgs) -> CmdResult {
             ui::header(p, &format!("running via agent ({env})"));
             ui::blank();
         }
-        // The framed v1 exchange shares the daemon connection's absolute 130-second
-        // deadline; there is no legacy or unbounded retry for a brokered run.
-        let Ok(result) = kv_proto::agent_request_framed_with_deadline(
-            root,
-            "run",
-            &fields,
-            Duration::from_secs(130),
-        ) else {
+        // Python: `agent_request("run", timeout=None, ...)`; the program may run for
+        // as long as the service allows, so the client waits without a limit.
+        let Ok(result) = kv_proto::agent_request_with_timeout(root, "run", &fields, None) else {
             return Err(project::fail(p, "agent error: the agent did not answer"));
         };
         if let Some(error) = result.get("error") {

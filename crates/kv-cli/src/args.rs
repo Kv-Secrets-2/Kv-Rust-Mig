@@ -47,6 +47,7 @@ pub enum Command {
     Provider(crate::providercmd::ProviderAction),
     Policy(PolicyAction),
     Approvals(crate::approvalscmd::ApprovalsAction),
+    ApiOperation(crate::apiopcmd::ApiOperationArgs),
     AgentChild,
     Hook {
         mode: String,
@@ -523,6 +524,90 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
     Ok(parsed)
 }
 
+fn parse_api_operation(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let usage = crate::apiopcmd::USAGE;
+    if rest.iter().any(|value| value == "-h" || value == "--help") {
+        return Err(ParseError::Help(format!(
+            "{usage}
+
+Fixed built-in broker operation: count tokens with Anthropic without exposing the key.
+"
+        )));
+    }
+    let Some(operation) = rest.first() else {
+        return Err(ParseError::Usage(format!(
+            "{usage}
+kv api: error: the following arguments are required: operation
+"
+        )));
+    };
+    if operation != "anthropic-count-tokens" {
+        return Err(ParseError::Usage(format!(
+            "{usage}
+kv api: error: unsupported operation '{operation}' (choose from 'anthropic-count-tokens')
+"
+        )));
+    }
+    let mut input = None;
+    let mut permit_id = None;
+    let mut env = None;
+    let mut positional_only = false;
+    let mut index = 1;
+    while index < rest.len() {
+        let value = &rest[index];
+        if !positional_only && value == "--" {
+            positional_only = true;
+        } else if !positional_only && value == "--permit-id" {
+            index += 1;
+            let Some(permit) = rest.get(index) else {
+                return Err(ParseError::Usage(format!(
+                    "{usage}
+kv api: error: argument --permit-id: expected one argument
+"
+                )));
+            };
+            permit_id = Some(permit.clone());
+        } else if !positional_only && value.starts_with("--permit-id=") {
+            permit_id = Some(value["--permit-id=".len()..].to_owned());
+        } else if !positional_only && (value == "--env" || value == "-e") {
+            index += 1;
+            let Some(name) = rest.get(index) else {
+                return Err(ParseError::Usage(format!(
+                    "{usage}
+kv api: error: argument --env: expected one argument
+"
+                )));
+            };
+            env = Some(name.clone());
+        } else if !positional_only && value.starts_with("--env=") {
+            env = Some(value["--env=".len()..].to_owned());
+        } else if input.is_none() {
+            input = Some(value.clone());
+        } else {
+            return Err(ParseError::Usage(format!(
+                "{usage}
+kv api: error: unrecognized arguments: {value}
+"
+            )));
+        }
+        index += 1;
+    }
+    let Some(input) = input else {
+        return Err(ParseError::Usage(format!(
+            "{usage}
+kv api: error: the following arguments are required: INPUT
+"
+        )));
+    };
+    Ok(Some(Command::ApiOperation(
+        crate::apiopcmd::ApiOperationArgs {
+            input,
+            permit_id,
+            env,
+        },
+    )))
+}
+
 pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     let Some(first) = argv.first() else {
         return Ok(None);
@@ -550,6 +635,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "approvals" {
         return parse_approvals(&argv[1..]);
+    }
+    if first == "api" {
+        return parse_api_operation(&argv[1..]);
     }
     if first == "history" {
         return parse_history(&argv[1..]);
@@ -1197,132 +1285,6 @@ fn python_int(text: &str) -> Option<i64> {
     Some(if negative { -magnitude } else { magnitude })
 }
 
-fn parse_approval_request(rest: &[String]) -> Result<Option<Command>, ParseError> {
-    use crate::approvalscmd::ApprovalsAction;
-    let usage = "usage: kv approvals request [-h] [--secret NAME] [--capability api:PROVIDER]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N] [--ttl TTL]\n                            [--suggest-minutes SUGGEST_MINUTES] [--cwd CWD]\n                            [--source SOURCE] [--client CLIENT]\n                            [--session-id SESSION_ID] [--reason REASON]\n                            [--env ENV]\n                            ...\n";
-    let mut secret_names = Vec::new();
-    let mut capability_names = Vec::new();
-    let mut max_calls = None;
-    let mut calls_per_service = Vec::new();
-    let mut ttl = None;
-    let mut suggest_minutes = None;
-    let mut cwd = None;
-    let mut source = None;
-    let mut client = None;
-    let mut session_id = None;
-    let mut reason = None;
-    let mut env = None;
-    let mut cmd = Vec::new();
-    let mut index = 0;
-    let take_value = |rest: &[String],
-                      index: &mut usize,
-                      option: &str,
-                      inline: Option<String>|
-     -> Result<String, ParseError> {
-        if let Some(value) = inline {
-            return Ok(value);
-        }
-        *index += 1;
-        rest.get(*index).cloned().ok_or_else(|| {
-            ParseError::Usage(format!(
-                "{usage}kv approvals request: error: argument {option}: expected one argument\n"
-            ))
-        })
-    };
-    while index < rest.len() {
-        let value = &rest[index];
-        if value == "--" {
-            cmd.extend(rest[index + 1..].iter().cloned());
-            break;
-        }
-        if !value.starts_with('-') {
-            cmd.extend(rest[index..].iter().cloned());
-            break;
-        }
-        let (option, inline) = match value.split_once('=') {
-            Some((option, value)) => (option, Some(value.to_owned())),
-            None => (value.as_str(), None),
-        };
-        match option {
-            "--secret" => secret_names.push(take_value(rest, &mut index, option, inline)?),
-            "--capability" => capability_names.push(take_value(rest, &mut index, option, inline)?),
-            "--max-calls" => {
-                let raw = take_value(rest, &mut index, option, inline)?;
-                max_calls = python_int(&raw);
-                if max_calls.is_none() {
-                    return Err(ParseError::Usage(format!(
-                        "{usage}kv approvals request: error: argument --max-calls: invalid int value: '{raw}'\n"
-                    )));
-                }
-            }
-            "--max-calls-for" => {
-                let raw = take_value(rest, &mut index, option, inline)?;
-                let Some((service, count)) = raw.split_once('=') else {
-                    return Err(ParseError::Usage(format!(
-                        "{usage}kv approvals request: error: argument --max-calls-for: expected SERVICE=N\n"
-                    )));
-                };
-                let Some(count) = python_int(count) else {
-                    return Err(ParseError::Usage(format!(
-                        "{usage}kv approvals request: error: argument --max-calls-for: invalid int value: '{count}'\n"
-                    )));
-                };
-                calls_per_service.push((service.to_owned(), count));
-            }
-            "--ttl" => {
-                let raw = take_value(rest, &mut index, option, inline)?;
-                ttl = python_int(&raw);
-                if ttl.is_none() {
-                    return Err(ParseError::Usage(format!(
-                        "{usage}kv approvals request: error: argument --ttl: invalid int value: '{raw}'\n"
-                    )));
-                }
-            }
-            "--suggest-minutes" => {
-                let raw = take_value(rest, &mut index, option, inline)?;
-                suggest_minutes = python_int(&raw);
-                if suggest_minutes.is_none() {
-                    return Err(ParseError::Usage(format!(
-                        "{usage}kv approvals request: error: argument --suggest-minutes: invalid int value: '{raw}'\n"
-                    )));
-                }
-            }
-            "--cwd" => cwd = Some(take_value(rest, &mut index, option, inline)?),
-            "--source" => source = Some(take_value(rest, &mut index, option, inline)?),
-            "--client" => client = Some(take_value(rest, &mut index, option, inline)?),
-            "--session-id" => session_id = Some(take_value(rest, &mut index, option, inline)?),
-            "--reason" => reason = Some(take_value(rest, &mut index, option, inline)?),
-            "--env" | "-e" => env = Some(take_value(rest, &mut index, option, inline)?),
-            _ => {
-                return Err(ParseError::Usage(format!(
-                    "{usage}kv approvals request: error: unrecognized arguments: {value}\n"
-                )));
-            }
-        }
-        index += 1;
-    }
-    if cmd.is_empty() {
-        return Err(ParseError::Usage(format!(
-            "{usage}kv approvals request: error: the following arguments are required: cmd\n"
-        )));
-    }
-    Ok(Some(Command::Approvals(ApprovalsAction::Request {
-        cmd,
-        secret_names,
-        capability_names,
-        max_calls,
-        calls_per_service,
-        ttl,
-        suggest_minutes,
-        cwd,
-        source,
-        client,
-        session_id,
-        reason,
-        env,
-    })))
-}
-
 fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::approvalscmd::ApprovalsAction;
     let Some(action) = rest.first() else {
@@ -1398,8 +1360,27 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
             interval,
         })));
     }
-    if *choice == "request" {
-        return parse_approval_request(rest);
+    if *choice == "deny" {
+        let usage = "usage: kv approvals deny [-h] request_id
+";
+        let mut request_id = None;
+        for value in rest {
+            if value.starts_with('-') || request_id.replace(value.clone()).is_some() {
+                return Err(ParseError::Usage(format!(
+                    "{usage}kv approvals deny: error: unrecognized arguments: {value}
+"
+                )));
+            }
+        }
+        let Some(request_id) = request_id else {
+            return Err(ParseError::Usage(format!(
+                "{usage}kv approvals deny: error: the following arguments are required: request_id
+"
+            )));
+        };
+        return Ok(Some(Command::Approvals(ApprovalsAction::Deny {
+            request_id,
+        })));
     }
     if *choice != "approve" {
         return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(

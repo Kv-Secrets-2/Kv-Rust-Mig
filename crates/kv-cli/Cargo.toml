@@ -16,7 +16,6 @@ kv-agent = { path = "../kv-agent" }
 kv-hook = { path = "../kv-hook" }
 kv-store = { path = "../kv-store" }
 kv-requests = { path = "../kv-requests" }
-kv-grants = { path = "../kv-grants" }
 kv-sandbox = { path = "../kv-sandbox" }
 kv-crypto = { path = "../kv-crypto" }
 kv-proto = { path = "../kv-proto" }
@@ -41,7 +40,11 @@ kv-test-support = { path = "../kv-test-support" }
 kv-agent = { path = "../kv-agent" }
 kv-broker = { path = "../kv-broker" }
 rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2.5"
+
+[features]
+test-provider-loopback = ["kv-agent/test-provider-loopback"]
 
 [lints]
 workspace = true
