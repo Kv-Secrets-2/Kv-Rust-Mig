@@ -1404,7 +1404,15 @@ finally:
             }
             received.extend_from_slice(&chunk[..read]);
         }
-        assert!(received.contains(&b'K'));
+        let filler_remainder = filled - space.len();
+        assert!(
+            received.len() > filler_remainder + IPC_FRAME_HEADER_LEN,
+            "the deadline must expire only after the header and some payload bytes are written"
+        );
+        assert_eq!(
+            &received[filler_remainder..filler_remainder + IPC_FRAME_MAGIC.len()],
+            b"KVIP"
+        );
     }
 
     #[test]
