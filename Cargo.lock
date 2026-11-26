@@ -917,6 +917,7 @@ dependencies = [
  "kv-audit",
  "kv-broker",
  "kv-crypto",
+ "kv-grants",
  "kv-hook",
  "kv-mcp",
  "kv-preflight",

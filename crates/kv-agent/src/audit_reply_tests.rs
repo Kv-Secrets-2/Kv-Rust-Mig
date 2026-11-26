@@ -54,7 +54,7 @@ impl Drop for FailedAudit {
 
 fn reply(audit: &kv_audit::Audit, response: &Value, wants_warning: bool) -> Value {
     let mut bytes = Vec::new();
-    write_audited_reply(&mut bytes, response, audit, wants_warning).unwrap();
+    write_legacy_audited_reply(&mut bytes, response, audit, wants_warning).unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -141,7 +141,9 @@ fn failed_partial_send_returns_the_warning_for_one_later_reply() {
         limit: complete.len() - 1,
         flushed: false,
     };
-    assert!(write_audited_reply(&mut writer, &json!({"ok":true}), &fixture.audit, true).is_err());
+    assert!(
+        write_legacy_audited_reply(&mut writer, &json!({"ok":true}), &fixture.audit, true).is_err()
+    );
     assert_eq!(writer.bytes, complete[..complete.len() - 1]);
     assert!(
         !writer.flushed,
@@ -176,7 +178,9 @@ impl Write for FlushFailure {
 fn failed_flush_returns_the_warning_even_after_all_bytes_were_written() {
     let fixture = FailedAudit::new();
     let mut writer = FlushFailure::default();
-    assert!(write_audited_reply(&mut writer, &json!({"ok":true}), &fixture.audit, true).is_err());
+    assert!(
+        write_legacy_audited_reply(&mut writer, &json!({"ok":true}), &fixture.audit, true).is_err()
+    );
     assert_eq!(writer.flushes, 1);
     assert_eq!(
         serde_json::from_slice::<Value>(&writer.bytes).unwrap()["audit_warning"],
@@ -191,7 +195,7 @@ fn oversized_reply_replacement_carries_the_warning_within_the_wire_limit() {
     let fixture = FailedAudit::new();
     let response = json!({"payload":"x".repeat(kv_proto::MAX_AGENT_RESPONSE_BYTES)});
     let mut bytes = Vec::new();
-    write_audited_reply(&mut bytes, &response, &fixture.audit, true).unwrap();
+    write_legacy_audited_reply(&mut bytes, &response, &fixture.audit, true).unwrap();
     assert!(bytes.len() <= kv_proto::MAX_AGENT_RESPONSE_BYTES);
     assert_eq!(
         serde_json::from_slice::<Value>(&bytes).unwrap(),
@@ -212,7 +216,7 @@ fn exact_limit_reply_survives_when_its_warning_does_not_fit() {
     let expected = kv_store::pyjson::to_vec_python(&response, false).unwrap();
     assert_eq!(expected.len(), kv_proto::MAX_AGENT_RESPONSE_BYTES);
     let mut bytes = Vec::new();
-    write_audited_reply(&mut bytes, &response, &fixture.audit, true).unwrap();
+    write_legacy_audited_reply(&mut bytes, &response, &fixture.audit, true).unwrap();
     assert_eq!(
         bytes, expected,
         "a warning must not replace an otherwise valid bounded reply"
@@ -293,6 +297,8 @@ fn signed_owner_replies_keep_their_mac_and_leave_pending_warnings_alone() {
             cmd: "owner_channel",
             audit: &fixture.audit,
             audit_warning: true,
+            wire: kv_proto::RequestWire::LegacyJson,
+            deadline: Instant::now() + Duration::from_secs(5),
         };
         replies
             .write_with_hard_lock(&mut server, &response, Some(&hard_lock))
@@ -330,6 +336,8 @@ fn retired_ordinary_reply_attaches_warning_to_the_hard_lock_replacement() {
         cmd: "list",
         audit: &fixture.audit,
         audit_warning: true,
+        wire: kv_proto::RequestWire::LegacyJson,
+        deadline: Instant::now() + Duration::from_secs(5),
     };
     replies
         .write(&mut server, &json!({"keys":["secret-bearing-result"]}))
@@ -400,6 +408,8 @@ fn permit_owner_answers_prepared_before_a_latch_send_only_signed_hard_lock() {
             cmd: "owner_permit_request",
             audit: &fixture.audit,
             audit_warning: true,
+            wire: kv_proto::RequestWire::LegacyJson,
+            deadline: Instant::now() + Duration::from_secs(5),
         };
         replies
             .write_with_hard_lock(&mut server, &prepared, Some(&hard_lock))

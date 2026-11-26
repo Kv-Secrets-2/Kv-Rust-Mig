@@ -4,6 +4,7 @@
 //! loads a secret.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
@@ -251,6 +252,137 @@ pub(crate) fn create_run_approval_request(
         "approve_command": format!("kv approvals approve {id}"),
         "message": "A pending approval request was created. The user can approve or deny it from their own terminal.",
     }))
+}
+
+/// Python `_record_request`: a caller-described approval request, written and
+/// recorded by the daemon after the daemon recomputes its exact run identity and
+/// network decision. The caller supplies facts, never authority.
+pub(crate) fn record_request(
+    root: &Path,
+    root_text: &str,
+    approved: &Value,
+    shared: &crate::Shared,
+    trust: &crate::TrustContext,
+    request: &Map<String, Value>,
+) -> Value {
+    if !trust.protected {
+        return json!({"error":kv_approvals::permit_session::NO_PASSPHRASE_REFUSAL,"error_code":"no_passphrase"});
+    }
+    const ALLOWED: &[&str] = &[
+        "run_identity",
+        "argv",
+        "cwd",
+        "secret_names",
+        "capability_names",
+        "actor",
+        "reason",
+        "source",
+        "risk_level",
+        "ttl_seconds",
+        "max_calls",
+        "risk_card",
+        "calls_per_service",
+        "recommended_ttl_seconds",
+    ];
+    let Some(fields_value) = request.get("request").filter(|value| value.is_object()) else {
+        return json!({"error":"record_request needs a request object"});
+    };
+    let mut fields = fields_value.as_object().cloned().unwrap_or_default();
+    if fields.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
+        return json!({"error":"record_request needs a request object"});
+    }
+    let Some(run_identity) = fields.remove("run_identity") else {
+        return json!({"error":"record_request needs a request object"});
+    };
+    let argv: Vec<String> = fields
+        .get("argv")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let Some(cwd) = fields.get("cwd").and_then(Value::as_str) else {
+        return json!({"error":"record_request needs a request object"});
+    };
+    if !kv_sandbox::paths::is_abs(cwd) {
+        return json!({"error":"working directory must be an absolute path"});
+    }
+    let watched = [root_text.to_owned()];
+    if kv_sandbox::paths::inside_secrets_as_written(cwd, &watched) {
+        return json!({"error":"working directory must not be inside a vault folder"});
+    }
+    let Ok(request_cwd) = kv_sandbox::paths::resolve(cwd) else {
+        return json!({"error":"the working directory could not be resolved"});
+    };
+    if kv_sandbox::paths::inside_secrets_as_written(&request_cwd, &watched) {
+        return json!({"error":"working directory must not be inside a vault folder"});
+    }
+    fields.insert("cwd".into(), json!(request_cwd));
+    let (network, network_reason) = request_network(approved, &argv);
+    let secret_names: Vec<String> = fields
+        .get("secret_names")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let scope = kv_sandbox::identity::IdentityScope {
+        env_names: Some(&secret_names),
+        secret_scope: Some(json!(if secret_names.is_empty() {
+            "capability"
+        } else {
+            "selected"
+        })),
+        secrets_injected: true,
+    };
+    let computed = match kv_sandbox::identity::build_run_identity(
+        &argv,
+        fields["cwd"].as_str().unwrap_or(""),
+        &scope,
+        "run_request_record",
+        &watched,
+    ) {
+        Ok(identity) => identity,
+        Err(error) => return json!({"error":error.to_string()}),
+    };
+    let identity_matches = run_identity.as_object().is_some_and(|supplied| {
+        [
+            "command_fingerprint",
+            "script_kind",
+            "script_sha256",
+            "script_ref_hash",
+        ]
+        .iter()
+        .all(|key| supplied.get(*key) == computed.get(*key))
+    });
+    if !identity_matches {
+        return json!({"error":"run_identity does not match the command, folder, scope and script"});
+    }
+    fields.insert("run_identity".into(), run_identity);
+    fields.insert(
+        "environment".into(),
+        request.get("environment").cloned().unwrap_or(Value::Null),
+    );
+    fields.insert("network".into(), json!(network));
+    fields.insert("network_reason".into(), json!(network_reason));
+    let created = approvals::create_approval_request(root, &Value::Object(fields), &Hooks, None);
+    match created {
+        Ok(created) => {
+            if let Err(error) = shared.requests.record(&created, None) {
+                return json!({"error":error.to_string()});
+            }
+            json!({"request":created})
+        }
+        Err(error) => json!({"error":error.to_string()}),
+    }
 }
 
 /// Python `_create_run_policy_request`: file the pending command-policy request for an

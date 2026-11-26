@@ -46,6 +46,8 @@ mod capture;
 #[cfg(unix)]
 mod lifecycle;
 #[cfg(unix)]
+mod owner_grants;
+#[cfg(unix)]
 mod permits;
 #[cfg(unix)]
 mod requests;
@@ -968,6 +970,29 @@ impl Shared {
 }
 
 #[cfg(unix)]
+fn zeroize_json_value(value: &mut Value) {
+    use kv_crypto::Zeroize as _;
+    match value {
+        Value::String(text) => text.zeroize(),
+        Value::Array(items) => items.iter_mut().for_each(zeroize_json_value),
+        Value::Object(object) => object.values_mut().for_each(zeroize_json_value),
+        _ => {}
+    }
+}
+
+/// Framed transport wipes its byte buffers; this guard owns the parsed JSON
+/// values those buffers became and wipes strings on every exit path.
+#[cfg(unix)]
+struct ZeroizedRequest(Value);
+
+#[cfg(unix)]
+impl Drop for ZeroizedRequest {
+    fn drop(&mut self) {
+        zeroize_json_value(&mut self.0);
+    }
+}
+
+#[cfg(unix)]
 #[allow(clippy::too_many_arguments)]
 fn handle_connection(
     stream: &mut std::os::unix::net::UnixStream,
@@ -990,6 +1015,7 @@ fn handle_connection(
     memory_hardening: &Value,
     request_timeout: Duration,
 ) -> Result<(), AgentError> {
+    let deadline = Instant::now() + request_timeout;
     let mut replies = Replies {
         lifecycle,
         connection,
@@ -998,9 +1024,14 @@ fn handle_connection(
         cmd: "",
         audit,
         audit_warning: false,
+        wire: kv_proto::RequestWire::FramedV1,
+        deadline,
     };
-    let request = match read_request_with_timeout(stream, request_timeout) {
-        Ok(Some(request)) => request,
+    let request = match kv_proto::read_broker_request_until(stream, deadline) {
+        Ok(Some(request)) => {
+            replies.wire = request.wire;
+            ZeroizedRequest(request.value)
+        }
         Ok(None) => return Ok(()),
         Err(error) => {
             let _ = replies.write(stream, &request_error_response(&error));
@@ -1010,7 +1041,7 @@ fn handle_connection(
     if !connection.mark_dispatching() {
         return Ok(());
     }
-    let Some(request) = request.as_object() else {
+    let Some(request) = request.0.as_object() else {
         replies.write(stream, &json!({"error":"request must be a JSON object"}))?;
         return Ok(());
     };
@@ -1019,26 +1050,31 @@ fn handle_connection(
     replies.audit_warning = request.get("audit_warning") == Some(&Value::Bool(true));
     if cmd == "enforcement" {
         connection.mark_control();
-        kv_proto::write_reply(
+        kv_proto::write_broker_response_until(
             stream,
             &json!({"enforcement":kv_proto::ENFORCEMENT_GENERATION}),
+            replies.wire,
+            deadline,
         )?;
         return Ok(());
     }
     if lifecycle.phase() != Phase::Running && cmd != "stop" {
         connection.mark_control();
-        kv_proto::write_reply(
+        kv_proto::write_broker_response_until(
             stream,
             &json!({
                 "error":"the agent is stopping; new requests are refused",
                 "error_code":"agent_stopping"
             }),
+            replies.wire,
+            deadline,
         )?;
         return Ok(());
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
         let _ = serve_owner_endpoint(
-            stream, cmd, request, trust, root, approved, master_key, providers, permits, &replies,
+            stream, cmd, request, trust, root, approved, master_key, providers, permits, shared,
+            &replies,
         );
         return Ok(());
     }
@@ -1197,7 +1233,12 @@ fn handle_connection(
                 .unwrap_or_default();
             json!({"environments":environments,"invalid_environments":[]})
         }
-        "lock" => json!({"locking":true,"ended":true}),
+        "lock" => {
+            if let Ok(mut cache) = cache.lock() {
+                cache.environments.clear();
+            }
+            json!({"locking":true,"ended":true})
+        }
         "run" => {
             // Python: the run's work window opens at admission and closes once the
             // program has started; the hard-lock pin is observed under it.
@@ -1248,7 +1289,12 @@ fn handle_connection(
             if outcome.control {
                 // A stop-time answer rides the control lane, as Python's does.
                 connection.mark_control();
-                kv_proto::write_reply(stream, &outcome.response)?;
+                kv_proto::write_broker_response_until(
+                    stream,
+                    &outcome.response,
+                    replies.wire,
+                    deadline,
+                )?;
                 return Ok(());
             }
             outcome.response
@@ -1257,6 +1303,9 @@ fn handle_connection(
             "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
             "pauses": [],
         }),
+        "record_request" => {
+            requests::record_request(root, root_text, approved, shared, trust, request)
+        }
         "api" => {
             let api_started = std::time::Instant::now();
             let env = request
@@ -1318,7 +1367,7 @@ fn handle_connection(
                         "cut_off":outcome.cut_off,"ended_runs":shared.runs.ended_brief()})
                 }
             };
-            kv_proto::write_reply(stream, &response)?;
+            kv_proto::write_broker_response_until(stream, &response, replies.wire, deadline)?;
             return Ok(());
         }
         "tracked_files" => shared.tracked.tracked_files(stopping_latched(lifecycle)),
@@ -1348,6 +1397,8 @@ struct Replies<'a> {
     cmd: &'a str,
     audit: &'a kv_audit::Audit,
     audit_warning: bool,
+    wire: kv_proto::RequestWire,
+    deadline: Instant,
 }
 
 #[cfg(unix)]
@@ -1384,12 +1435,18 @@ impl Replies<'_> {
                 response,
                 self.audit,
                 self.audit_warning && signed_hard_lock.is_none(),
+                self.wire,
+                self.deadline,
             )?;
             return Ok(());
         }
         // As in Python, never acknowledge a hard lock while earlier committed
         // work remains. The foreground stop can close this socket sooner.
-        if self.lifecycle.wait_for_open_work(Duration::from_secs(135)) != 0 {
+        let wait_budget = self
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_secs(135));
+        if wait_budget.is_zero() || self.lifecycle.wait_for_open_work(wait_budget) != 0 {
             return Ok(());
         }
         if let Ok(mut cache) = self.cache.lock() {
@@ -1426,27 +1483,27 @@ impl Replies<'_> {
             &replacement,
             self.audit,
             self.audit_warning && signed_hard_lock.is_none(),
+            self.wire,
+            self.deadline,
         )?;
         Ok(())
     }
 }
 
 #[cfg(unix)]
-fn write_audited_reply<W: Write>(
-    writer: &mut W,
+fn prepare_audited_reply(
     response: &Value,
     audit: &kv_audit::Audit,
     wants_warning: bool,
-) -> Result<(), AgentError> {
+) -> Result<(Value, Option<kv_audit::WarningLease>), AgentError> {
     let serialize = |value: &Value| {
         kv_store::pyjson::to_vec_python(value, false).map_err(|error| AgentError(error.to_string()))
     };
     let mut answer = response.clone();
-    let mut encoded = serialize(&answer)?;
-    if encoded.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+    if serialize(&answer)?.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
         answer = json!({"error":"response too large", "response_truncated":true,
             "max_response_bytes":kv_proto::MAX_AGENT_RESPONSE_BYTES});
-        encoded = serialize(&answer)?;
+        serialize(&answer)?;
     }
     // Lease only after the final bounded/hard-lock answer is chosen. Its Drop
     // returns an undelivered warning on serialization, write, or flush failure.
@@ -1458,13 +1515,44 @@ fn write_audited_reply<W: Write>(
     if let Some(lease) = &warning {
         answer["audit_warning"] = json!(lease.as_str());
         let with_warning = serialize(&answer)?;
-        if with_warning.len() <= kv_proto::MAX_AGENT_RESPONSE_BYTES {
-            encoded = with_warning;
-        } else {
-            // Keep the original bounded bytes; the warning remains owed.
+        if with_warning.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+            if let Some(object) = answer.as_object_mut() {
+                object.remove("audit_warning");
+            }
+            // Keep the original bounded response; the warning remains owed.
             drop(warning.take());
         }
     }
+    Ok((answer, warning))
+}
+
+#[cfg(unix)]
+fn write_audited_reply(
+    stream: &mut std::os::unix::net::UnixStream,
+    response: &Value,
+    audit: &kv_audit::Audit,
+    wants_warning: bool,
+    wire: kv_proto::RequestWire,
+    deadline: Instant,
+) -> Result<(), AgentError> {
+    let (answer, warning) = prepare_audited_reply(response, audit, wants_warning)?;
+    kv_proto::write_broker_response_until(stream, &answer, wire, deadline)?;
+    if let Some(warning) = warning {
+        warning.delivered();
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, test))]
+fn write_legacy_audited_reply<W: Write>(
+    writer: &mut W,
+    response: &Value,
+    audit: &kv_audit::Audit,
+    wants_warning: bool,
+) -> Result<(), AgentError> {
+    let (answer, warning) = prepare_audited_reply(response, audit, wants_warning)?;
+    let encoded = kv_store::pyjson::to_vec_python(&answer, false)
+        .map_err(|error| AgentError(error.to_string()))?;
     writer.write_all(&encoded)?;
     writer.flush()?;
     if let Some(warning) = warning {
@@ -1519,6 +1607,7 @@ fn serve_owner_endpoint(
     master_key: &Key32,
     providers: &kv_broker::ProviderTable,
     permits: &SessionPermits,
+    shared: &Shared,
     replies: &Replies<'_>,
 ) -> Result<(), AgentError> {
     let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
@@ -1552,6 +1641,24 @@ fn serve_owner_endpoint(
                 return permits::owner_register(
                     trust,
                     permits,
+                    challenge.clone(),
+                    request,
+                    approved,
+                );
+            }
+            "owner_request_record" => {
+                return owner_grants::owner_request_record(
+                    trust,
+                    shared,
+                    challenge.clone(),
+                    request,
+                );
+            }
+            "owner_grant_register" => {
+                return owner_grants::owner_grant_register(
+                    trust,
+                    shared,
+                    providers,
                     challenge.clone(),
                     request,
                     approved,
@@ -1628,16 +1735,6 @@ fn owner_providers(providers: &kv_broker::ProviderTable) -> Vec<Vec<FieldValue>>
             ])
         })
         .collect()
-}
-
-#[cfg(unix)]
-fn read_request_with_timeout(
-    stream: &mut std::os::unix::net::UnixStream,
-    timeout: Duration,
-) -> Result<Option<Value>, kv_proto::ProtocolError> {
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    kv_proto::read_request(stream)
 }
 
 #[cfg(unix)]
@@ -2718,7 +2815,11 @@ mod tests {
         let mut reply = Vec::new();
         client.read_to_end(&mut reply).unwrap();
         worker.join().unwrap().unwrap();
-        assert_eq!(reply, br#"{"error": "TimeoutError: timed out"}"#);
+        assert_eq!(
+            reply,
+            Vec::<u8>::new(),
+            "the one absolute connection deadline is already spent when the request read times out"
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

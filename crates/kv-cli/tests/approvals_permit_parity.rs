@@ -15,6 +15,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -34,6 +35,7 @@ use url::Url;
 const HOST: &str = "permit-fixture.example";
 const API_SECRET: &str = "permit-fixture-secret";
 const YES: &str = "\\[y/N\\] =>y";
+static NEXT_SCENARIO: AtomicUsize = AtomicUsize::new(0);
 
 fn fixture_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/v0.4.0")
@@ -139,7 +141,9 @@ struct Scenario {
 impl Scenario {
     fn new(python: &OsStr) -> Self {
         // Short enough for a Unix socket path: /tmp/kvap<pid>/home/.kv/agent-<hash>.sock.
-        let temp = TestDir(std::env::temp_dir().join(format!("kvap{}", std::process::id())));
+        let unique = NEXT_SCENARIO.fetch_add(1, Ordering::Relaxed);
+        let temp =
+            TestDir(std::env::temp_dir().join(format!("kvap{}-{unique}", std::process::id())));
         let _ = fs::remove_dir_all(&temp.0);
         fs::create_dir(&temp.0).unwrap();
         let root = temp.0.join("vault");
@@ -375,10 +379,16 @@ fn approving_a_one_call_permit_matches_python() {
     let python_str = python.to_str().unwrap();
     let scenario = Scenario::new(&python);
     let passphrase_rule = format!("Passphrase: =>{}", FIXTURE_KEY.1);
-    let mut transcripts = Vec::new();
+    let mut python_cli_transcripts = Vec::new();
+    let mut rust_cli_transcript = None;
     for rust_daemon in [false, true] {
         let daemon = scenario.start(&python, rust_daemon);
         for rust_cli in [true, false] {
+            if rust_cli && !rust_daemon {
+                // The framed v1 client deliberately has no legacy execution fallback;
+                // the Python service does not implement that versioned transport.
+                continue;
+            }
             let required = scenario.request(&python, "api", &call());
             assert_eq!(required["error_code"], "permit_required", "{required}");
             let request_id = required["request_id"].as_str().unwrap().to_owned();
@@ -387,17 +397,19 @@ fn approving_a_one_call_permit_matches_python() {
             } else {
                 vec![python_str, "-m", "kv"]
             };
-            let rust_inbox = inbox(&[kv_bin()], &scenario);
             let python_inbox = inbox(&[python_str, "-m", "kv"], &scenario);
-            assert_eq!(rust_inbox, python_inbox, "inbox with a pending permit");
-            assert_eq!(rust_inbox.0, 0, "{}", rust_inbox.1);
+            assert_eq!(python_inbox.0, 0, "{}", python_inbox.1);
             assert!(
-                rust_inbox
+                python_inbox
                     .1
                     .contains("Pending one-call permit: POST permit-local"),
                 "{}",
-                rust_inbox.1
+                python_inbox.1
             );
+            if rust_daemon {
+                let rust_inbox = inbox(&[kv_bin()], &scenario);
+                assert_eq!(rust_inbox, python_inbox, "inbox with a pending permit");
+            }
             let before = scenario.observed();
             let (code, text) = pty(
                 python_str,
@@ -423,30 +435,265 @@ fn approving_a_one_call_permit_matches_python() {
             );
             let replay = scenario.request(&python, "api", &retry);
             assert_eq!(replay["error_code"], "permit_invalid", "{replay}");
-            transcripts.push(masked(&text));
+            let transcript = masked(&text);
+            if rust_cli {
+                rust_cli_transcript = Some(transcript);
+            } else {
+                python_cli_transcripts.push(transcript);
+            }
         }
-        let rust_inbox = inbox(&[kv_bin()], &scenario);
         let python_inbox = inbox(&[python_str, "-m", "kv"], &scenario);
-        assert_eq!(rust_inbox, python_inbox, "empty inbox");
         assert!(
-            rust_inbox.1.contains("no pending approval requests"),
+            python_inbox.1.contains("no pending approval requests"),
             "{}",
-            rust_inbox.1
+            python_inbox.1
         );
+        if rust_daemon {
+            let rust_inbox = inbox(&[kv_bin()], &scenario);
+            assert_eq!(rust_inbox, python_inbox, "empty inbox on the Rust daemon");
+        }
         scenario.stop(&python, daemon);
     }
-    // Rust CLI vs Python CLI on each daemon, and each CLI across the two daemons.
+    // The Python CLI proves both services answer the same permit review; the framed
+    // Rust CLI is compared against it on the Rust service it supports.
     assert_eq!(
-        transcripts[0], transcripts[1],
-        "CLIs differ on the Python daemon"
+        python_cli_transcripts[0], python_cli_transcripts[1],
+        "daemons differ for the Python CLI"
     );
     assert_eq!(
-        transcripts[2], transcripts[3],
+        python_cli_transcripts[1],
+        rust_cli_transcript.expect("the Rust CLI ran on the Rust daemon"),
         "CLIs differ on the Rust daemon"
     );
-    assert_eq!(
-        transcripts[0], transcripts[2],
-        "daemons differ for the Rust CLI"
-    );
     println!("KV_PARITY_COMPARISONS 1");
+}
+
+fn cli_in(root: &Path, home: &Path, args: &[&str]) -> (i32, String) {
+    let output = Command::new(kv_bin())
+        .args(args)
+        .current_dir(root)
+        .env("HOME", home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    (output.status.code().unwrap_or(-1), text)
+}
+
+fn cli(scenario: &Scenario, args: &[&str]) -> (i32, String) {
+    cli_in(&scenario.root, &scenario.home, args)
+}
+
+fn request_run_command(
+    scenario: &Scenario,
+    project: &Path,
+    ttl: Option<&str>,
+    argv: &[&str],
+) -> String {
+    let project_text = project.to_string_lossy().into_owned();
+    let mut args = vec![
+        "approvals",
+        "request",
+        "--capability",
+        "api:permit-local",
+        "--cwd",
+        &project_text,
+    ];
+    if let Some(ttl) = ttl {
+        args.extend(["--ttl", ttl]);
+    }
+    args.push("--");
+    args.extend(argv.iter().copied());
+    let (code, text) = cli(scenario, &args);
+    assert_eq!(code, 0, "request creation failed: {text}");
+    text.split_whitespace()
+        .find(|word| word.starts_with("req_"))
+        .unwrap_or_else(|| panic!("no request id in {text}"))
+        .to_owned()
+}
+
+fn request_one_run(scenario: &Scenario, project: &Path) -> String {
+    request_run_command(scenario, project, None, &["/bin/echo", "grant-ok"])
+}
+
+fn run_command_parts(root: &Path, home: &Path, project: &Path, argv: &[&str]) -> (i32, String) {
+    let project_text = project.to_string_lossy().into_owned();
+    let mut args = vec![
+        "run",
+        "--capability",
+        "api:permit-local",
+        "--cwd",
+        &project_text,
+    ];
+    args.extend(argv.iter().copied());
+    cli_in(root, home, &args)
+}
+
+fn run_once_parts(root: &Path, home: &Path, project: &Path) -> (i32, String) {
+    run_command_parts(root, home, project, &["/bin/echo", "grant-ok"])
+}
+
+fn run_command(scenario: &Scenario, project: &Path, argv: &[&str]) -> (i32, String) {
+    run_command_parts(&scenario.root, &scenario.home, project, argv)
+}
+
+fn run_once(scenario: &Scenario, project: &Path) -> (i32, String) {
+    run_command(scenario, project, &["/bin/echo", "grant-ok"])
+}
+
+fn bwrap_installed() -> bool {
+    kv_sandbox::bwrap::bwrap_path().is_some()
+}
+
+/// The v1 owner path end to end: the Rust CLI files a daemon-recorded exact-run
+/// request, the owner signs it on a terminal, the daemon admits that run once,
+/// and concurrent retries cannot both use the one-shot grant.
+#[test]
+fn approving_a_one_run_grant_end_to_end() {
+    let Some(python) = kv_test_support::python_reference() else {
+        eprintln!("SKIP one-run approval test: set KV_PY_REF");
+        return;
+    };
+    if !bwrap_installed() {
+        eprintln!("SKIP one-run approval test: bubblewrap is not installed");
+        return;
+    }
+    let scenario = Scenario::new(&python);
+    let daemon = scenario.start(&python, true);
+    let project = scenario.root.join("project");
+    fs::create_dir(&project).unwrap();
+    let request_id = request_one_run(&scenario, &project);
+    let passphrase_rule = format!("Passphrase: =>{}", FIXTURE_KEY.1);
+    let cmd = [kv_bin()];
+    let (code, approval) = pty(
+        python.to_str().unwrap(),
+        &cmd,
+        &scenario.home,
+        &scenario.root,
+        &["approvals", "approve", &request_id],
+        &[&passphrase_rule, YES],
+    );
+    assert_eq!(code, 0, "approval failed: {approval}");
+    assert!(
+        approval.contains("One-run grant approved and registered."),
+        "{approval}"
+    );
+
+    let root_a = scenario.root.clone();
+    let home_a = scenario.home.clone();
+    let project_a = project.clone();
+    let first = thread::spawn(move || run_once_parts(&root_a, &home_a, &project_a));
+    let root_b = scenario.root.clone();
+    let home_b = scenario.home.clone();
+    let project_b = project.clone();
+    let second = thread::spawn(move || run_once_parts(&root_b, &home_b, &project_b));
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    let results = [first, second];
+    let successes = results
+        .iter()
+        .filter(|(code, text)| *code == 0 && text.contains("grant-ok"))
+        .count();
+    assert_eq!(
+        successes, 1,
+        "exactly one concurrent retry may use a one-shot grant: {results:?}"
+    );
+
+    // A denied request never creates authority, so the same immutable run is refused.
+    let denied_id = request_one_run(&scenario, &project);
+    let (code, denial) = pty(
+        python.to_str().unwrap(),
+        &cmd,
+        &scenario.home,
+        &scenario.root,
+        &["approvals", "approve", &denied_id],
+        &[&passphrase_rule, "\\[y/N\\] =>n"],
+    );
+    assert_eq!(code, 0, "denial failed: {denial}");
+    assert!(denial.contains("Request denied."), "{denial}");
+    let (code, refused) = run_once(&scenario, &project);
+    assert_ne!(code, 0, "a denied grant ran: {refused}");
+    assert!(
+        refused.contains("approval") || refused.contains("grant"),
+        "{refused}"
+    );
+
+    // The grant binds the exact script bytes. Changing them before the run is
+    // not a new approval and must not execute; restoring them admits the same
+    // owner-reviewed operation once.
+    let script = project.join("payload.py");
+    let original = "print('payload-v1')\n";
+    fs::write(&script, original).unwrap();
+    let script_text = script.to_string_lossy().into_owned();
+    let payload_argv = ["/usr/bin/python3", script_text.as_str()];
+    let payload_id = request_run_command(&scenario, &project, None, &payload_argv);
+    let (code, approval) = pty(
+        python.to_str().unwrap(),
+        &cmd,
+        &scenario.home,
+        &scenario.root,
+        &["approvals", "approve", &payload_id],
+        &[&passphrase_rule, YES],
+    );
+    assert_eq!(code, 0, "payload approval failed: {approval}");
+    fs::write(&script, "print('payload-v2')\n").unwrap();
+    let (code, changed) = run_command(&scenario, &project, &payload_argv);
+    assert_ne!(code, 0, "a changed payload ran: {changed}");
+    assert!(
+        !changed.contains("payload-v2"),
+        "changed payload executed: {changed}"
+    );
+    fs::write(&script, original).unwrap();
+    let (code, restored) = run_command(&scenario, &project, &payload_argv);
+    assert_eq!(
+        code, 0,
+        "the immutable approved payload did not run: {restored}"
+    );
+    assert!(restored.contains("payload-v1"), "{restored}");
+
+    // Expiry is fail-closed before the owner signs anything.
+    let expired_id = request_run_command(
+        &scenario,
+        &project,
+        Some("1"),
+        &["/bin/echo", "expired-should-not-run"],
+    );
+    thread::sleep(Duration::from_millis(2100));
+    let (code, expired) = pty(
+        python.to_str().unwrap(),
+        &cmd,
+        &scenario.home,
+        &scenario.root,
+        &["approvals", "approve", &expired_id],
+        &[&passphrase_rule, YES],
+    );
+    assert_ne!(code, 0, "expired request approved: {expired}");
+    assert!(
+        expired.contains("approval request is not pending"),
+        "{expired}"
+    );
+
+    // Approval state is bound to one daemon session. After a restart the same
+    // pending file no longer has a daemon request record, so it cannot be signed.
+    let stale_id = request_one_run(&scenario, &project);
+    scenario.stop(&python, daemon);
+    let daemon = scenario.start(&python, true);
+    let (code, stale) = pty(
+        python.to_str().unwrap(),
+        &cmd,
+        &scenario.home,
+        &scenario.root,
+        &["approvals", "approve", &stale_id],
+        &[&passphrase_rule, YES],
+    );
+    assert_ne!(
+        code, 0,
+        "a request from an older daemon session approved: {stale}"
+    );
+    assert!(
+        stale.contains("fresh request") || stale.contains("daemon"),
+        "{stale}"
+    );
+    scenario.stop(&python, daemon);
 }

@@ -1197,6 +1197,132 @@ fn python_int(text: &str) -> Option<i64> {
     Some(if negative { -magnitude } else { magnitude })
 }
 
+fn parse_approval_request(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    use crate::approvalscmd::ApprovalsAction;
+    let usage = "usage: kv approvals request [-h] [--secret NAME] [--capability api:PROVIDER]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N] [--ttl TTL]\n                            [--suggest-minutes SUGGEST_MINUTES] [--cwd CWD]\n                            [--source SOURCE] [--client CLIENT]\n                            [--session-id SESSION_ID] [--reason REASON]\n                            [--env ENV]\n                            ...\n";
+    let mut secret_names = Vec::new();
+    let mut capability_names = Vec::new();
+    let mut max_calls = None;
+    let mut calls_per_service = Vec::new();
+    let mut ttl = None;
+    let mut suggest_minutes = None;
+    let mut cwd = None;
+    let mut source = None;
+    let mut client = None;
+    let mut session_id = None;
+    let mut reason = None;
+    let mut env = None;
+    let mut cmd = Vec::new();
+    let mut index = 0;
+    let take_value = |rest: &[String],
+                      index: &mut usize,
+                      option: &str,
+                      inline: Option<String>|
+     -> Result<String, ParseError> {
+        if let Some(value) = inline {
+            return Ok(value);
+        }
+        *index += 1;
+        rest.get(*index).cloned().ok_or_else(|| {
+            ParseError::Usage(format!(
+                "{usage}kv approvals request: error: argument {option}: expected one argument\n"
+            ))
+        })
+    };
+    while index < rest.len() {
+        let value = &rest[index];
+        if value == "--" {
+            cmd.extend(rest[index + 1..].iter().cloned());
+            break;
+        }
+        if !value.starts_with('-') {
+            cmd.extend(rest[index..].iter().cloned());
+            break;
+        }
+        let (option, inline) = match value.split_once('=') {
+            Some((option, value)) => (option, Some(value.to_owned())),
+            None => (value.as_str(), None),
+        };
+        match option {
+            "--secret" => secret_names.push(take_value(rest, &mut index, option, inline)?),
+            "--capability" => capability_names.push(take_value(rest, &mut index, option, inline)?),
+            "--max-calls" => {
+                let raw = take_value(rest, &mut index, option, inline)?;
+                max_calls = python_int(&raw);
+                if max_calls.is_none() {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}kv approvals request: error: argument --max-calls: invalid int value: '{raw}'\n"
+                    )));
+                }
+            }
+            "--max-calls-for" => {
+                let raw = take_value(rest, &mut index, option, inline)?;
+                let Some((service, count)) = raw.split_once('=') else {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}kv approvals request: error: argument --max-calls-for: expected SERVICE=N\n"
+                    )));
+                };
+                let Some(count) = python_int(count) else {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}kv approvals request: error: argument --max-calls-for: invalid int value: '{count}'\n"
+                    )));
+                };
+                calls_per_service.push((service.to_owned(), count));
+            }
+            "--ttl" => {
+                let raw = take_value(rest, &mut index, option, inline)?;
+                ttl = python_int(&raw);
+                if ttl.is_none() {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}kv approvals request: error: argument --ttl: invalid int value: '{raw}'\n"
+                    )));
+                }
+            }
+            "--suggest-minutes" => {
+                let raw = take_value(rest, &mut index, option, inline)?;
+                suggest_minutes = python_int(&raw);
+                if suggest_minutes.is_none() {
+                    return Err(ParseError::Usage(format!(
+                        "{usage}kv approvals request: error: argument --suggest-minutes: invalid int value: '{raw}'\n"
+                    )));
+                }
+            }
+            "--cwd" => cwd = Some(take_value(rest, &mut index, option, inline)?),
+            "--source" => source = Some(take_value(rest, &mut index, option, inline)?),
+            "--client" => client = Some(take_value(rest, &mut index, option, inline)?),
+            "--session-id" => session_id = Some(take_value(rest, &mut index, option, inline)?),
+            "--reason" => reason = Some(take_value(rest, &mut index, option, inline)?),
+            "--env" | "-e" => env = Some(take_value(rest, &mut index, option, inline)?),
+            _ => {
+                return Err(ParseError::Usage(format!(
+                    "{usage}kv approvals request: error: unrecognized arguments: {value}\n"
+                )));
+            }
+        }
+        index += 1;
+    }
+    if cmd.is_empty() {
+        return Err(ParseError::Usage(format!(
+            "{usage}kv approvals request: error: the following arguments are required: cmd\n"
+        )));
+    }
+    Ok(Some(Command::Approvals(ApprovalsAction::Request {
+        cmd,
+        secret_names,
+        capability_names,
+        max_calls,
+        calls_per_service,
+        ttl,
+        suggest_minutes,
+        cwd,
+        source,
+        client,
+        session_id,
+        reason,
+        env,
+    })))
+}
+
 fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::approvalscmd::ApprovalsAction;
     let Some(action) = rest.first() else {
@@ -1271,6 +1397,9 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
             follow,
             interval,
         })));
+    }
+    if *choice == "request" {
+        return parse_approval_request(rest);
     }
     if *choice != "approve" {
         return Ok(Some(Command::Approvals(ApprovalsAction::Unavailable(

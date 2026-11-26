@@ -59,7 +59,7 @@ fn nonce() -> Result<Vec<u8>, SigningError> {
 impl PermitSigningContext {
     /// `begin`: the unwrapped identity opens the owner channel; an unprotected session refuses.
     pub fn begin(root: &Path, identity: kv_crypto::Identity) -> Result<Self, SigningError> {
-        let channel = match open_channel(root, &identity, false) {
+        let channel = match open_channel(root, &identity, true) {
             Ok(channel) => channel,
             Err(ChannelError::Message(m)) => return Err(refused(m)),
             Err(ChannelError::DaemonRefused(r)) => return Err(refused(r.to_string())),
@@ -81,7 +81,7 @@ impl PermitSigningContext {
     ) -> Result<(Value, Vec<u8>), SigningError> {
         let challenge = nonce()?;
         fields.insert("challenge".into(), json!(hex::encode(&challenge)));
-        let answer = kv_proto::agent_request(&self.root, cmd, &fields)
+        let answer = kv_proto::agent_request_framed(&self.root, cmd, &fields)
             .map_err(|e| refused(e.to_string()))?;
         Ok((answer, challenge))
     }
@@ -192,6 +192,160 @@ impl PermitSigningContext {
                 }
                 Err(error) => reason = error.to_string(),
             }
+        }
+        Err(SigningError::Unconfirmed(reason))
+    }
+
+    /// The daemon's authenticated record of a frozen run request.
+    pub fn request_record(&self, frozen: &Value) -> Result<Map<String, Value>, SigningError> {
+        let unverified = || refused("the request record could not be verified");
+        let request_id = frozen
+            .get("request_id")
+            .and_then(Value::as_str)
+            .ok_or_else(unverified)?;
+        let mut outgoing = Map::new();
+        outgoing.insert("request_id".into(), json!(request_id));
+        let (answer, challenge) = self.send("owner_request_record", outgoing)?;
+        let fields = check_answer(&answer, &challenge, &self.identity, "request-record-v1")
+            .map_err(|error| refused(error.to_string()))?;
+        let digest = kv_approvals::wire::request_content_digest(frozen)
+            .map_err(|error| refused(error.to_string()))?;
+        let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("");
+        if text("session_nonce") != hex::encode(&self.channel.session_nonce)
+            || text("request_id") != request_id
+            || text("content_digest") != digest
+        {
+            return Err(refused(
+                "the request file differs from the daemon's record of it (changed after it was recorded); ask for a fresh request",
+            ));
+        }
+        Ok(fields)
+    }
+
+    /// Provider definitions from the daemon snapshot for `api:` capabilities.
+    pub fn provider_definitions(
+        &self,
+        capability_names: &[String],
+    ) -> Result<Map<String, Value>, SigningError> {
+        let snapshot: std::collections::BTreeMap<&str, &str> = self
+            .channel
+            .providers
+            .iter()
+            .map(|(name, definition)| (name.as_str(), definition.as_str()))
+            .collect();
+        let mut out = Map::new();
+        for capability in capability_names {
+            let Some(name) = capability.strip_prefix("api:") else {
+                return Err(refused(format!("unsupported capability {capability}")));
+            };
+            let Some(definition) = snapshot.get(name) else {
+                return Err(refused(format!(
+                    "the daemon's snapshot has no usable definition for provider {name}; it is not approvable"
+                )));
+            };
+            let parsed: Value = serde_json::from_str(definition)
+                .map_err(|_| refused("the daemon's provider definition is invalid"))?;
+            out.insert(name.to_owned(), parsed);
+        }
+        Ok(out)
+    }
+
+    /// Sign the final grant fields as this vault's owner.
+    pub fn sign_grant(
+        &self,
+        grant: &Value,
+        request: &Value,
+        record: &Map<String, Value>,
+        max_runs: Value,
+        calls_per_run: Value,
+        providers: &Map<String, Value>,
+    ) -> Result<Value, SigningError> {
+        let mut digests = Map::new();
+        for (name, definition) in providers {
+            let digest = kv_approvals::wire::provider_digest(definition)
+                .map_err(|error| refused(error.to_string()))?;
+            digests.insert(name.clone(), json!(digest));
+        }
+        let digest_value = Value::Object(digests);
+        let seed = OwnerSeed::new(*self.identity.owner_seed);
+        let fields = kv_approvals::owner::OwnerGrantFields {
+            request_id: record
+                .get("request_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| refused("the request record is incomplete"))?,
+            request_digest: record
+                .get("content_digest")
+                .and_then(Value::as_str)
+                .ok_or_else(|| refused("the request record is incomplete"))?,
+            request_expires_at_epoch: request
+                .get("expires_at_epoch")
+                .cloned()
+                .unwrap_or(Value::Null),
+            local_approval_id: &self.identity.local_approval_id,
+            location: &self.identity.location,
+            owner_key_id: &self.channel.owner_key_id,
+            environment: record
+                .get("environment")
+                .and_then(Value::as_str)
+                .ok_or_else(|| refused("the request record is incomplete"))?,
+            network: record.get("network").cloned().unwrap_or(Value::Bool(false)),
+            network_reason: record.get("network_reason").cloned().unwrap_or(Value::Null),
+            max_runs,
+            calls_per_run,
+            provider_digests: &digest_value,
+            session_nonce: &self.channel.session_nonce,
+        };
+        kv_approvals::owner::attach_owner_approval(grant, &seed, &fields)
+            .map_err(|error| refused(error.to_string()))
+    }
+
+    /// Register a written grant; only an ack naming this exact signed payload counts.
+    pub fn register_grant(&self, grant: &Value) -> Result<String, SigningError> {
+        let payload = &grant["owner_approval"]["payload"];
+        let expected = (
+            grant["grant_id"].as_str().unwrap_or(""),
+            payload["request_id"].as_str().unwrap_or(""),
+            payload_digest(payload).unwrap_or_default(),
+        );
+        let mut reason = String::from("the daemon did not answer");
+        for _ in 0..2 {
+            let mut outgoing = Map::new();
+            outgoing.insert("grant".into(), grant.clone());
+            let Ok((answer, challenge)) = self.send("owner_grant_register", outgoing) else {
+                continue;
+            };
+            let fields =
+                match check_answer(&answer, &challenge, &self.identity, "grant-register-ack-v1") {
+                    Ok(fields) => fields,
+                    Err(ChannelError::DaemonRefused(refusal)) => {
+                        return Err(refused(format!(
+                            "the daemon refused to register this grant: {}",
+                            refusal.code
+                        )));
+                    }
+                    Err(error) => {
+                        reason = error.to_string();
+                        continue;
+                    }
+                };
+            let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("");
+            if text("session_nonce") != hex::encode(&self.channel.session_nonce) {
+                reason = "the answer comes from another daemon session".into();
+                continue;
+            }
+            if (
+                text("grant_id"),
+                text("request_id"),
+                text("payload_digest").to_owned(),
+            ) != expected
+            {
+                reason = "the answer names another grant".into();
+                continue;
+            }
+            if text("status") == "job-ended" {
+                return Err(refused("the owner ended the job this approval continues"));
+            }
+            return Ok(text("status").to_owned());
         }
         Err(SigningError::Unconfirmed(reason))
     }
