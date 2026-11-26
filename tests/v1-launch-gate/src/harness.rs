@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const PASSPHRASE: &str = "correct horse battery staple";
 pub const SECRET_NAME: &str = "ANTHROPIC_API_KEY";
 pub const PROVIDER: &str = "anthropic";
 pub const PROVIDER_PATH: &str = "/v1/messages";
@@ -36,21 +36,34 @@ pub fn kv_bin() -> String {
     candidate.to_string_lossy().into_owned()
 }
 
+fn unique_fixture(kind: &str) -> String {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_nanos();
+    format!("kv-v1-{kind}-fixture-{}-{n}-{nanos:x}", std::process::id())
+}
+
 pub struct Scratch {
     pub root: PathBuf,
+    passphrase: String,
 }
 
 impl Scratch {
     pub fn new(tag: &str) -> Self {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "kv-v1-release-gate-{}-{tag}-{n}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("{}-{tag}", unique_fixture("scratch")));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("home")).expect("create isolated HOME");
         fs::create_dir_all(root.join("proj")).expect("create isolated project");
-        Self { root }
+        Self {
+            root,
+            passphrase: unique_fixture("passphrase"),
+        }
+    }
+
+    pub fn passphrase(&self) -> &str {
+        &self.passphrase
     }
 
     pub fn home(&self) -> PathBuf {
@@ -69,20 +82,16 @@ impl Drop for Scratch {
 }
 
 pub fn synthetic_secret() -> String {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!(
-        "kv-v1-synthetic-secret-{}-{n}-not-a-live-credential",
-        std::process::id()
-    )
+    format!("{}-not-a-live-credential", unique_fixture("secret"))
 }
 
 pub fn assert_success(output: &std::process::Output, what: &str) {
     assert!(
         output.status.success(),
-        "{what} failed with {}:\nstdout:\n{}\nstderr:\n{}",
+        "{what} failed with {}; stdout ({} bytes) and stderr ({} bytes) suppressed by the release-gate harness",
         output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        output.stdout.len(),
+        output.stderr.len()
     );
 }
 
@@ -120,13 +129,13 @@ pub fn assert_secret_absent(
     for (label, bytes) in transcripts {
         assert!(
             !bytes_contain(bytes, needle),
-            "synthetic provider secret appeared in {label}"
+            "sensitive fixture value appeared in {label}"
         );
     }
     for (label, args) in argv {
         assert!(
             !args.iter().any(|arg| arg.contains(secret)),
-            "synthetic provider secret appeared in {label} argv: {args:?}"
+            "sensitive fixture value appeared in {label} argv"
         );
     }
     for root in roots {
@@ -138,9 +147,29 @@ pub fn assert_secret_absent(
             };
             assert!(
                 !bytes_contain(&bytes, needle),
-                "synthetic provider secret appeared in file {}",
+                "sensitive fixture value appeared in file {}",
                 path.display()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scratch_vaults_and_passphrases_are_fresh_per_fixture() {
+        let one = Scratch::new("fresh-one");
+        let two = Scratch::new("fresh-two");
+        assert_ne!(one.root, two.root);
+        assert!(one.passphrase() != two.passphrase());
+        assert!(one.home().is_dir());
+        assert!(two.proj().is_dir());
+    }
+
+    #[test]
+    fn synthetic_secrets_are_fresh_per_fixture() {
+        assert!(synthetic_secret() != synthetic_secret());
     }
 }

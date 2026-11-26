@@ -34,6 +34,28 @@ impl PtySession {
         cwd: &Path,
         envs: &[(String, String)],
     ) -> Result<Self, String> {
+        Self::spawn_inner(program, args, cwd, envs, false)
+    }
+
+    /// Spawn with standard output outside the terminal. Owner prompts still use the
+    /// controlling terminal, while product behavior gated on `stdout_is_tty` cannot
+    /// print one-time recovery material into the captured transcript.
+    pub fn spawn_stdout_to_null(
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        envs: &[(String, String)],
+    ) -> Result<Self, String> {
+        Self::spawn_inner(program, args, cwd, envs, true)
+    }
+
+    fn spawn_inner(
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        envs: &[(String, String)],
+        stdout_to_null: bool,
+    ) -> Result<Self, String> {
         let (pty, pts) = open().map_err(|error| format!("open test pty: {error}"))?;
         pty.resize(pty_process::Size::new(32, 120))
             .map_err(|error| format!("size test pty: {error}"))?;
@@ -66,6 +88,9 @@ impl PtySession {
             .env("TERM", "dumb");
         for (name, value) in envs {
             command = command.env(name, value);
+        }
+        if stdout_to_null {
+            command = command.stdout(std::process::Stdio::null());
         }
         let child = command
             .spawn(pts)
@@ -102,8 +127,8 @@ impl PtySession {
             }
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "timed out waiting for {needle:?}; transcript:\n{}",
-                    self.text()
+                    "timed out waiting for {needle:?}; captured terminal output suppressed ({} bytes)",
+                    self.text().len()
                 ));
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -157,8 +182,8 @@ impl PtySession {
                 let _ = self.child.kill();
                 let _ = self.child.wait();
                 return Err(format!(
-                    "pty child did not exit before its deadline; transcript:\n{}",
-                    self.text()
+                    "pty child did not exit before its deadline; captured terminal output suppressed ({} bytes)",
+                    self.text().len()
                 ));
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -188,7 +213,37 @@ pub fn run(
     interactions: &[Interaction<'_>],
     timeout: Duration,
 ) -> Result<PtyOutput, String> {
-    let mut session = PtySession::spawn(program, args, cwd, envs)?;
+    run_inner(program, args, cwd, envs, interactions, timeout, false)
+}
+
+/// Run with child stdout redirected away from the terminal. Use this for setup flows
+/// whose terminal output can contain one-time recovery material; the capture never
+/// contains that output because the product does not print it on a non-terminal stdout.
+pub fn run_stdout_to_null(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    envs: &[(String, String)],
+    interactions: &[Interaction<'_>],
+    timeout: Duration,
+) -> Result<PtyOutput, String> {
+    run_inner(program, args, cwd, envs, interactions, timeout, true)
+}
+
+fn run_inner(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    envs: &[(String, String)],
+    interactions: &[Interaction<'_>],
+    timeout: Duration,
+    stdout_to_null: bool,
+) -> Result<PtyOutput, String> {
+    let mut session = if stdout_to_null {
+        PtySession::spawn_stdout_to_null(program, args, cwd, envs)?
+    } else {
+        PtySession::spawn(program, args, cwd, envs)?
+    };
     for interaction in interactions {
         session.answer(interaction.prompt, interaction.answer, timeout)?;
     }

@@ -7,7 +7,7 @@
 
 use kv_v1_launch_gate::audit;
 use kv_v1_launch_gate::harness::{
-    ENDPOINT_OVERRIDE_ENV, PASSPHRASE, PROVIDER, PROVIDER_PATH, RELEASE_GATE_ENV, Scratch,
+    ENDPOINT_OVERRIDE_ENV, PROVIDER, PROVIDER_PATH, RELEASE_GATE_ENV, Scratch,
     assert_secret_absent, assert_success, kv_bin, synthetic_secret,
 };
 use kv_v1_launch_gate::mock_provider::MockProvider;
@@ -106,7 +106,7 @@ fn init_vault(scratch: &Scratch, provider: &MockProvider) -> pty::PtyOutput {
         "--location".to_owned(),
         "project".to_owned(),
     ];
-    let output = pty::run(
+    let output = pty::run_stdout_to_null(
         &kv_bin(),
         &args,
         &scratch.proj(),
@@ -114,15 +114,11 @@ fn init_vault(scratch: &Scratch, provider: &MockProvider) -> pty::PtyOutput {
         &[
             Interaction {
                 prompt: "Passphrase: ",
-                answer: PASSPHRASE,
+                answer: scratch.passphrase(),
             },
             Interaction {
                 prompt: "Confirm: ",
-                answer: PASSPHRASE,
-            },
-            Interaction {
-                prompt: "stored the key: ",
-                answer: "saved",
+                answer: scratch.passphrase(),
             },
         ],
         TIMEOUT,
@@ -130,8 +126,9 @@ fn init_vault(scratch: &Scratch, provider: &MockProvider) -> pty::PtyOutput {
     .expect("drive kv init on the Rust PTY harness");
     assert!(
         output.status.success(),
-        "kv init failed:\n{}",
-        output.text()
+        "kv init failed with {}; captured terminal output suppressed ({} bytes)",
+        output.status,
+        output.transcript.len()
     );
     output
 }
@@ -151,7 +148,7 @@ fn set_secret(scratch: &Scratch, provider: &MockProvider, secret: &str) -> pty::
         &[
             Interaction {
                 prompt: "Passphrase: ",
-                answer: PASSPHRASE,
+                answer: scratch.passphrase(),
             },
             Interaction {
                 prompt: "Value: ",
@@ -161,7 +158,12 @@ fn set_secret(scratch: &Scratch, provider: &MockProvider, secret: &str) -> pty::
         TIMEOUT,
     )
     .expect("drive kv set on the Rust PTY harness");
-    assert!(output.status.success(), "kv set failed:\n{}", output.text());
+    assert!(
+        output.status.success(),
+        "kv set failed with {}; captured terminal output suppressed ({} bytes)",
+        output.status,
+        output.transcript.len()
+    );
     output
 }
 
@@ -184,7 +186,7 @@ fn approve_permit(
         &[
             Interaction {
                 prompt: "Passphrase: ",
-                answer: PASSPHRASE,
+                answer: scratch.passphrase(),
             },
             Interaction {
                 prompt: "Sign this one-call permit? [y/N] ",
@@ -212,16 +214,28 @@ fn assert_loopback_secret_call(provider: &MockProvider, secret: &str, body: &str
         1,
         "approved one-shot call must reach the loopback provider exactly once"
     );
-    assert_eq!(requests.len(), 1);
     let request = &requests[0];
     assert_eq!(request.method, "POST");
     assert_eq!(request.target, PROVIDER_PATH);
-    assert_eq!(
-        request.header("x-api-key"),
-        Some(secret),
+    assert!(
+        request.header("x-api-key") == Some(secret),
         "built-in anthropic auth must be injected by the broker, not the caller"
     );
     assert_eq!(request.body, body.as_bytes());
+}
+
+fn assert_recovery_output_excluded(label: &str, bytes: &[u8]) {
+    let text = String::from_utf8_lossy(bytes);
+    for marker in [
+        "kvrecovery_",
+        "Recovery key generated.",
+        "Type saved when you have stored the key:",
+    ] {
+        assert!(
+            !text.contains(marker),
+            "recovery output marker {marker:?} appeared in {label}"
+        );
+    }
 }
 
 fn audit_log_path(scratch: &Scratch) -> std::path::PathBuf {
@@ -240,6 +254,7 @@ fn rust_harness_can_init_and_set_without_echoing_the_secret() {
     let audit_records = audit::verify_file(&audit_log_path(&scratch))
         .expect("current kv audit output must pass the independent Rust verifier");
     assert!(audit_records > 0);
+    assert_recovery_output_excluded("kv init pty transcript", &init.transcript);
     assert_secret_absent(
         &secret,
         &[
@@ -253,6 +268,15 @@ fn rust_harness_can_init_and_set_without_echoing_the_secret() {
                 kv_v1_launch_gate::harness::SECRET_NAME.to_owned(),
             ],
         )],
+        &[&scratch.home(), &scratch.proj()],
+    );
+    assert_secret_absent(
+        scratch.passphrase(),
+        &[
+            ("kv init pty transcript", &init.transcript),
+            ("kv set pty transcript", &set.transcript),
+        ],
+        &[],
         &[&scratch.home(), &scratch.proj()],
     );
 }
@@ -301,9 +325,9 @@ fn v1_one_shot_approval_sends_exactly_one_authenticated_loopback_call() {
     let request = plain(&scratch, &provider, &request_args);
     let request_id = extract_request_id(&request).unwrap_or_else(|| {
         panic!(
-            "provider call did not request a one-shot permit:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&request.stdout),
-            String::from_utf8_lossy(&request.stderr)
+            "provider call did not request a one-shot permit; stdout ({} bytes) and stderr ({} bytes) suppressed",
+            request.stdout.len(),
+            request.stderr.len()
         )
     });
     transcripts.push(("provider-call request stdout".to_owned(), request.stdout));
@@ -313,8 +337,9 @@ fn v1_one_shot_approval_sends_exactly_one_authenticated_loopback_call() {
     let approved = approve_permit(&scratch, &provider, &request_id, None, true);
     assert!(
         approved.status.success(),
-        "owner approval failed:\n{}",
-        approved.text()
+        "owner approval failed with {}; captured terminal output suppressed ({} bytes)",
+        approved.status,
+        approved.transcript.len()
     );
     transcripts.push((
         "permit approval pty transcript".to_owned(),
@@ -374,12 +399,7 @@ fn zero_call_case(case: &str, prepare: impl FnOnce(&Scratch, &MockProvider, &str
     let _set = set_secret(&scratch, &provider, &secret);
     prepare(&scratch, &provider, &secret, &body);
     std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(
-        provider.count(),
-        0,
-        "{case} reached the loopback provider: {:?}",
-        provider.requests()
-    );
+    assert_eq!(provider.count(), 0, "{case} reached the loopback provider");
 }
 
 #[test]
@@ -392,8 +412,9 @@ fn v1_denial_expiry_payload_change_and_lock_send_zero_provider_calls() {
         let denied = approve_permit(scratch, provider, &request_id, None, false);
         assert!(
             denied.status.success(),
-            "denial command failed:\n{}",
-            denied.text()
+            "denial command failed with {}; captured terminal output suppressed ({} bytes)",
+            denied.status,
+            denied.transcript.len()
         );
         let retry = plain(
             scratch,
