@@ -2,18 +2,16 @@
 //!
 //! The product-flow tests are ignored until the Rust vertical slice lands: running a
 //! missing command as if it passed would be false evidence. The harness self-tests,
-//! and PTY init/set no-echo/audit interoperability tests run in normal CI.
+//! plus PTY init/set no-echo/audit interoperability tests run in normal CI.
 #![cfg(target_os = "linux")]
 
-mod release_gate;
-
-use release_gate::audit;
-use release_gate::harness::{
+use kv_v1_launch_gate::audit;
+use kv_v1_launch_gate::harness::{
     ENDPOINT_OVERRIDE_ENV, PASSPHRASE, PROVIDER, PROVIDER_PATH, RELEASE_GATE_ENV, Scratch,
     assert_secret_absent, assert_success, kv_bin, synthetic_secret,
 };
-use release_gate::mock_provider::MockProvider;
-use release_gate::pty::{self, Interaction};
+use kv_v1_launch_gate::mock_provider::MockProvider;
+use kv_v1_launch_gate::pty::{self, Interaction};
 use std::process::{Command, Output};
 use std::time::Duration;
 
@@ -109,7 +107,7 @@ fn init_vault(scratch: &Scratch, provider: &MockProvider) -> pty::PtyOutput {
         "project".to_owned(),
     ];
     let output = pty::run(
-        kv_bin(),
+        &kv_bin(),
         &args,
         &scratch.proj(),
         &gate_envs(scratch, provider),
@@ -143,10 +141,10 @@ fn set_secret(scratch: &Scratch, provider: &MockProvider, secret: &str) -> pty::
     // hidden terminal prompt so it never appears in argv or shell history.
     let args = vec![
         "set".to_owned(),
-        release_gate::harness::SECRET_NAME.to_owned(),
+        kv_v1_launch_gate::harness::SECRET_NAME.to_owned(),
     ];
     let output = pty::run(
-        kv_bin(),
+        &kv_bin(),
         &args,
         &scratch.proj(),
         &gate_envs(scratch, provider),
@@ -179,7 +177,7 @@ fn approve_permit(
     approve: bool,
 ) -> pty::PtyOutput {
     pty::run(
-        kv_bin(),
+        &kv_bin(),
         &approve_args(request_id, ttl_seconds),
         &scratch.proj(),
         &gate_envs(scratch, provider),
@@ -252,7 +250,7 @@ fn rust_harness_can_init_and_set_without_echoing_the_secret() {
             "kv set",
             &[
                 "set".to_owned(),
-                release_gate::harness::SECRET_NAME.to_owned(),
+                kv_v1_launch_gate::harness::SECRET_NAME.to_owned(),
             ],
         )],
         &[&scratch.home(), &scratch.proj()],
@@ -295,7 +293,7 @@ fn v1_one_shot_approval_sends_exactly_one_authenticated_loopback_call() {
         "kv set".to_owned(),
         vec![
             "set".to_owned(),
-            release_gate::harness::SECRET_NAME.to_owned(),
+            kv_v1_launch_gate::harness::SECRET_NAME.to_owned(),
         ],
     ));
 

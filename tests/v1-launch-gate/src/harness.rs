@@ -16,8 +16,24 @@ pub const RELEASE_GATE_ENV: &str = "KV_RELEASE_GATE";
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-pub fn kv_bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kv")
+/// Binary under test. `KV_BIN` is the explicit release-gate input; the default is
+/// the repository's already-built `target/debug/kv` for local development.
+pub fn kv_bin() -> String {
+    if let Some(path) = std::env::var_os("KV_BIN").filter(|path| !path.is_empty()) {
+        return path.to_string_lossy().into_owned();
+    }
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let candidate = manifest
+        .ancestors()
+        .nth(2)
+        .expect("release-gate crate has a repository root")
+        .join("target/debug/kv");
+    assert!(
+        candidate.is_file(),
+        "kv binary under test not found at {}; build the workspace or set KV_BIN",
+        candidate.display()
+    );
+    candidate.to_string_lossy().into_owned()
 }
 
 pub struct Scratch {

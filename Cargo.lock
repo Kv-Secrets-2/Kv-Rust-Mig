@@ -925,7 +925,6 @@ dependencies = [
  "kv-sandbox",
  "kv-store",
  "kv-test-support",
- "pty-process",
  "rcgen",
  "rustix",
  "serde_json",
@@ -1385,15 +1384,6 @@ checksum = "4dcd034599e63b970727f70d79e02d62390a4a84f7c6b827c27c46d5ac3fa622"
 dependencies = [
  "ar_archive_writer",
  "cc",
-]
-
-[[package]]
-name = "pty-process"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0cff49b5194f464ce14bfaef7d6dba180889934e9bfa37ca5f2528ea515c0b"
-dependencies = [
- "rustix",
 ]
 
 [[package]]
