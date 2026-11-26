@@ -81,7 +81,7 @@ fn create_vault(root: &Path) -> Key32 {
         "environments":["dev"],
         "cipher":"chacha20-poly1305",
         "storage":{"format":"drawers"},
-        "security":{"passphrase":true,"totp":false,"approval_mode":"local-convenience"},
+        "security":{"passphrase":true,"totp":false,"approval_mode":std::env::var("KV_V1_APPROVAL_MODE").unwrap_or_else(|_| "local-convenience".into())},
         "providers":{"anthropic":{"base_url":"https://api.anthropic.com:18443","secret_name":"ANTHROPIC_API_KEY","auth_type":"x-api-key","default_headers":{"Content-Type":"application/json","anthropic-version":"2023-06-01"}}},
         "broker_policy":{"http":{"anthropic":{"origin":"https://api.anthropic.com:18443","secret_name":"ANTHROPIC_API_KEY","rules":[]}}}
     });
@@ -182,13 +182,20 @@ impl Drop for TempDir {
 }
 
 fn run_setup(root: &Path, home: &Path) {
-    let setup = Command::new(std::env::current_exe().unwrap())
+    run_setup_with_mode(root, home, None)
+}
+
+fn run_setup_with_mode(root: &Path, home: &Path, approval_mode: Option<&str>) {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
         .args(["--exact", "v1_fixture_child", "--nocapture"])
         .env("KV_V1_MODE", "setup")
         .env("KV_V1_ROOT", root)
-        .env("HOME", home)
-        .output()
-        .unwrap();
+        .env("HOME", home);
+    if let Some(mode) = approval_mode {
+        command.env("KV_V1_APPROVAL_MODE", mode);
+    }
+    let setup = command.output().unwrap();
     assert!(
         setup.status.success(),
         "setup: {}",
@@ -210,6 +217,10 @@ fn reset_vault_contents(fixture: &Fixture) {
 
 impl Fixture {
     fn new() -> Self {
+        Self::new_with_mode(None)
+    }
+
+    fn new_with_mode(approval_mode: Option<&str>) -> Self {
         let serial = TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp =
             TempDir(std::env::temp_dir().join(format!("kvv1{}-{serial}", std::process::id())));
@@ -221,7 +232,7 @@ impl Fixture {
         fs::create_dir(&home).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let home = fs::canonicalize(home).unwrap();
-        run_setup(&root, &home);
+        run_setup_with_mode(&root, &home, approval_mode);
         let hash = kv_proto::project_hash(Some(&root)).unwrap();
         let socket = home.join(".kv").join(format!("agent-{hash}.sock"));
         Self {
@@ -608,7 +619,7 @@ fn fixed_builtin_operation_is_owner_reviewed_once_and_fail_closed() {
 fn denied_fixed_operation_never_reaches_provider() {
     let _serial = TEST_LOCK.lock().unwrap();
     let provider = start_provider();
-    let fixture = Fixture::new();
+    let fixture = Fixture::new_with_mode(Some("protected-approval"));
     fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
     let _daemon = fixture.start_daemon();
     let args = operation_args(None, INPUT);

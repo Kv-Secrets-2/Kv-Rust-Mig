@@ -343,7 +343,6 @@ fn deny(p: &Palette, request_id: &str) -> CmdResult {
             "denying run grants and paused jobs is not available in this build; a one-call permit (permit_request_...) is",
         ));
     }
-    owner::block_local_approval_if_protected(p, &root, "permit denial")?;
     let passphrase =
         project::read_owner_secret(p, &format!("  {}Passphrase{}: ", p.yellow, p.reset))?;
     let identity =
