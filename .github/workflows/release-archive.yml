@@ -1,0 +1,59 @@
+name: Release archive
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-archive-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  KV_RELEASE_DIST: /tmp/kv-release-artifacts
+
+jobs:
+  linux-static-smoke:
+    name: Linux static archive smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install the musl cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Install the Rust musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Build the locked static archive
+        run: scripts/release/build-linux-archive.sh
+
+      - name: Smoke the archive in a clean runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archives=("$KV_RELEASE_DIST"/kv-*.tar.gz)
+          if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
+            echo "expected exactly one release archive, found ${#archives[@]}" >&2
+            exit 1
+          fi
+          scripts/release/smoke-linux-archive.sh "${archives[0]}"
+
+      - name: Upload the tested archive and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kv-linux-static-archive
+          path: |
+            /tmp/kv-release-artifacts/kv-*.tar.gz
+            /tmp/kv-release-artifacts/kv-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
