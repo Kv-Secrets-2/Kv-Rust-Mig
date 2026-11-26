@@ -7,8 +7,9 @@ Unix audit storage for two explicit chain modes:
   It remains for migration interoperability and uses the reference's truncated,
   unkeyed hash spelling.
 - `Audit::with_authenticated_chain` writes the versioned v1 authenticated chain
-  described below. The broker integration that selects this mode is outside
-  this crate and is not yet wired.
+  described below, and `AdmissionJournal` adds its fail-closed privileged
+  admission/outcome lifecycle. The broker integration that selects either mode
+  is outside this crate and is not yet wired.
 
 ## Authenticated v1 chain
 
@@ -73,9 +74,89 @@ durable broker-owned trust state is deliberately an integration responsibility
 outside `crates/kv-audit/`.
 
 Tail comparison is a continuity gate, not a full-history scan: an in-place edit
-to an older record does not change the untouched tail. Use the verifier API or
-command when complete corruption detection is required; the admission/outcome
-integration must decide when that scan is mandatory.
+to an older record does not change the untouched tail. `AdmissionJournal`
+therefore performs the complete scan below before every lifecycle write. The
+lower-level authenticated writer remains available for non-lifecycle use and
+still relies on the verifier API or command when complete corruption detection
+is required.
+
+## Privileged admission/outcome lifecycle
+
+`AdmissionJournal::new(directory, key, identity, checkpoint)` is the concrete
+broker-facing lifecycle API. `checkpoint` is a broker-owned implementation of:
+
+```rust
+pub trait TrustedCheckpoint {
+    fn load_durable(&mut self) -> Result<ChainPosition, CheckpointFailure>;
+    fn publish_durable(&mut self, position: ChainPosition) -> Result<(), CheckpointFailure>;
+}
+```
+
+The checkpoint is not optional and is not derived from the journal. Its backing
+store must live outside the audit directory, `load_durable` must return the
+latest committed position rather than a cached or stale value, and
+`publish_durable` must atomically replace and synchronize that position before
+returning success. Once a journal uses a checkpoint, no other writer may publish
+that checkpoint outside this lifecycle.
+
+`admit(action, metadata)` performs these operations in order:
+
+1. validate the action and caller metadata;
+2. serialize on the audit-directory log lock (with the same bounded two-second
+   wait used by writers);
+3. load the independent trusted checkpoint;
+4. verify every journal record from the start against that checkpoint,
+   including canonical bytes, sequence, links, vault identity, and HMACs;
+5. append exactly one authenticated admission record, synchronize the file,
+   close it, and synchronize the directory;
+6. re-check lock identity and durably publish the advanced checkpoint; and
+7. only then return an `Admission` token.
+
+Any failure returns a closed `LifecycleError` and no usable token exists. The
+token is intentionally not `Clone`: `Admission::run(effect)` consumes it and is
+the only effect-callback path. `run` returns `Execution`; calling
+`Execution::finish(outcome, metadata)` appends a separate terminal outcome
+through the same full-verification, durable-append, checkpoint-publication
+critical section. If the outcome cannot be committed, `OutcomeError` retains
+the effect output so the caller cannot mistake the already-run effect for an
+unexecuted one.
+
+A dropped `Admission`, a panic or process exit before `finish`, or a failed
+outcome commit leaves no outcome record. `admission_states()` and the read-only
+`scan_admissions(directory, trust)` report that admission as
+`AdmissionOutcomeState::Unknown`; unknown means the effect may or may not have
+happened and is never authorization to repeat it automatically. Multiple
+outcomes for one admission are reported as `Conflicted`; outcomes without an
+admission and malformed lifecycle-shaped records are counted separately in
+`AdmissionReport` instead of being silently paired.
+
+Lifecycle actions are non-empty ASCII strings of at most 128 bytes using
+alphanumerics or `._-:/+`. `privileged_admission` and `privileged_outcome` are
+lifecycle-owned event names. Caller metadata must not use the lifecycle-owned
+`action`, `admission_seq`, or `outcome` fields, in addition to the chain-owned
+fields described above. Metadata remains subject to the canonical JSON, 1 MiB
+record, and nesting limits and must exclude secrets and request/response
+bodies.
+
+Crash behavior is deliberately conservative. If append or synchronization
+fails, bytes may or may not have reached the journal; because the checkpoint is
+not advanced in that case, a partially or completely landed record makes the
+next verification fail closed (`beyond_checkpoint`, truncation, or corruption)
+instead of being hidden or replayed. If checkpoint publication fails, the same
+rule applies: no token is returned and later lifecycle writes fail closed until
+broker-owned recovery reconciles the independent checkpoint. This crate does
+not repair, rewrite, or compact journals.
+
+The lifecycle module contains no hard-lock latch and no hard-lock callback.
+Hard-lock state and key purging belong outside the audit journal and must not
+wait on journal verification, append, synchronization, checkpoint publication,
+or even the existence of the audit directory.
+
+The correctness-first lifecycle scan is linear in the complete journal for
+every admission and outcome, so a sequence of lifecycle writes is quadratic in
+total history length. That is the concrete v1 scalability limit; snapshotting,
+compaction, or a verified index is outside this crate's current integration.
+The report itself is linear in the number of admission records.
 
 ## Verifier outcomes
 
@@ -176,13 +257,13 @@ an unknown count.
 
 ## Current limits and required integration
 
-The authenticated chain does not create the missing trust state, choose the
-broker's canonical vault identity, derive or purge the broker chain key, make
-admission/outcome writes fail closed around privileged effects, or expose a
-`kv audit` subcommand. Those require changes outside `crates/kv-audit/` and are
-intentionally not made here. Until that integration selects
-`Audit::with_authenticated_chain`, existing daemon writes remain in the legacy
-compatibility format.
+The authenticated chain does not create the missing trust state or its durable
+checkpoint backing store, choose the broker's canonical vault identity, derive
+or purge the broker chain key, wire `AdmissionJournal` into the brokered
+provider path, or expose a `kv audit` subcommand. Those require changes outside
+`crates/kv-audit/` and are intentionally not made here. Until that integration
+selects `Audit::with_authenticated_chain` or `AdmissionJournal`, existing
+daemon writes remain in the legacy compatibility format.
 
 The verifier is linear in the log and bounded per record, not total runtime. It
 cannot distinguish all physical causes of a final-position mismatch; they are

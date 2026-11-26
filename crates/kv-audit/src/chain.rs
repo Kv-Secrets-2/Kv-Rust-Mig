@@ -679,7 +679,18 @@ fn finish(position: ChainPosition, trust: &ChainTrust) -> ChainVerification {
 /// Verify newline-delimited chain bytes from any reader. This API performs no
 /// filesystem mutation and is suitable for in-memory fixtures. Passing `None`
 /// is an explicit missing-trust result, never a valid-history result.
-pub fn verify_reader(mut reader: impl Read, trust: Option<&ChainTrust>) -> ChainVerification {
+pub fn verify_reader(reader: impl Read, trust: Option<&ChainTrust>) -> ChainVerification {
+    verify_reader_observed(reader, trust, |_, _| {})
+}
+
+/// Verified-line observer for crate-local lifecycle consumers. The observer
+/// runs only after a line's canonical shape, sequence, link and HMAC check
+/// pass, so it can rely on the authenticated bytes it is given.
+pub(crate) fn verify_reader_observed(
+    mut reader: impl Read,
+    trust: Option<&ChainTrust>,
+    mut observe: impl FnMut(&[u8], ChainPosition),
+) -> ChainVerification {
     let Some(trust) = trust else {
         return ChainVerification::MissingTrustState;
     };
@@ -702,6 +713,7 @@ pub fn verify_reader(mut reader: impl Read, trust: Option<&ChainTrust>) -> Chain
             line_number = line_number.saturating_add(1);
             match verify_line(&line, trust, valid_entries.saturating_add(1), current.head) {
                 Ok(position) => {
+                    observe(&line, position);
                     current = position;
                     valid_entries = valid_entries.saturating_add(1);
                 }
@@ -739,6 +751,36 @@ pub fn verify_bytes(bytes: &[u8], trust: Option<&ChainTrust>) -> ChainVerificati
     verify_reader(bytes, trust)
 }
 
+/// Verify the log reached through an already open directory descriptor. Using
+/// the same descriptor as a subsequent append keeps verification and extension
+/// on one directory instance while its audit lock is held.
+pub(crate) fn verify_open_directory(
+    directory: &Directory,
+    trust: &ChainTrust,
+) -> ChainVerification {
+    verify_open_directory_observed(directory, Some(trust), |_, _| {})
+}
+
+pub(crate) fn verify_open_directory_observed(
+    directory: &Directory,
+    trust: Option<&ChainTrust>,
+    mut observe: impl FnMut(&[u8], ChainPosition),
+) -> ChainVerification {
+    let Some(trust) = trust else {
+        return ChainVerification::MissingTrustState;
+    };
+    let empty: &[u8] = b"";
+    match directory.open_single_read(LOG) {
+        Ok(file) => verify_reader_observed(file, Some(trust), &mut observe),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            verify_reader_observed(empty, Some(trust), &mut observe)
+        }
+        Err(_) => ChainVerification::Unreadable {
+            reason: ChainReadFailure::FileRefused,
+        },
+    }
+}
+
 /// Verify `audit.jsonl` in an audit directory without creating, chmodding, or
 /// otherwise mutating it. A missing directory or log is the empty chain: valid
 /// only against a trusted genesis position and a continuity loss otherwise.
@@ -761,15 +803,7 @@ pub fn verify_directory(
             };
         }
     };
-    match directory.open_single_read(LOG) {
-        Ok(file) => verify_reader(file, Some(trust)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            verify_reader(empty, Some(trust))
-        }
-        Err(_) => ChainVerification::Unreadable {
-            reason: ChainReadFailure::FileRefused,
-        },
-    }
+    verify_open_directory(&directory, trust)
 }
 
 #[derive(Debug)]
