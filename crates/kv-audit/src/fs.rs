@@ -70,6 +70,65 @@ fn sync_directory_once(
     Ok(())
 }
 
+fn sync_directory_path_chain(
+    path: &Path,
+    synced: &mut Vec<(u64, u64)>,
+    sync_parent: &mut impl FnMut(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    for ancestor in path.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        let directory = File::from(unix::open(
+            ancestor,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?);
+        sync_directory_once(&directory, synced, sync_parent)?;
+        close_file(directory)?;
+    }
+    Ok(())
+}
+
+fn sync_symlink_entries(
+    path: &Path,
+    synced: &mut Vec<(u64, u64)>,
+    sync_parent: &mut impl FnMut(&File) -> io::Result<()>,
+    depth: usize,
+) -> io::Result<()> {
+    if depth >= 40 {
+        return Err(invalid("audit path exceeds symlink resolution bound"));
+    }
+    let mut prefixes: Vec<_> = path.ancestors().skip(1).collect();
+    prefixes.reverse();
+    for prefix in prefixes {
+        if prefix.as_os_str().is_empty() {
+            continue;
+        }
+        if !fs::symlink_metadata(prefix)?.file_type().is_symlink() {
+            continue;
+        }
+        let parent = prefix
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let canonical_parent = fs::canonicalize(parent)?;
+        sync_directory_path_chain(&canonical_parent, synced, sync_parent)?;
+        let target = fs::read_link(prefix)?;
+        let mut resolved = if target.is_absolute() {
+            target
+        } else {
+            parent.join(target)
+        };
+        let suffix = path
+            .strip_prefix(prefix)
+            .map_err(|_| invalid("audit path symlink prefix mismatch"))?;
+        resolved.push(suffix);
+        return sync_symlink_entries(&resolved, synced, sync_parent, depth + 1);
+    }
+    Ok(())
+}
+
 #[allow(unsafe_code)]
 fn close_file(file: File) -> io::Result<()> {
     let descriptor = file.into_raw_fd();
@@ -157,10 +216,10 @@ impl Directory {
         Ok(file)
     }
 
-    /// Synchronize the physical ancestors of this directory and the lexical
-    /// ancestors of `path`, so symlink entries and symlink-target hierarchy
-    /// entries are both committed. Privileged admission uses this strict
-    /// barrier at genesis even when the journal path already exists.
+    /// Synchronize the physical ancestors of this directory. For every symlink
+    /// in `path`, also synchronize the canonical parent chain containing that
+    /// symlink entry. Privileged admission uses this strict barrier at genesis
+    /// even when the journal path already exists.
     pub(crate) fn sync_parent_chain(&self, path: &Path) -> io::Result<()> {
         self.sync_parent_chain_with(path, |parent| parent.sync_all())
     }
@@ -195,24 +254,7 @@ impl Directory {
             return Err(invalid("directory ancestry exceeds durability scan bound"));
         }
 
-        let absolute = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            std::env::current_dir()?.join(path)
-        };
-        for ancestor in absolute.ancestors().skip(1) {
-            if ancestor.as_os_str().is_empty() {
-                continue;
-            }
-            let parent = File::from(unix::open(
-                ancestor,
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-                Mode::empty(),
-            )?);
-            sync_directory_once(&parent, &mut synced, &mut sync_parent)?;
-            close_file(parent)?;
-        }
-        Ok(())
+        sync_symlink_entries(path, &mut synced, &mut sync_parent, 0)
     }
 
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {
@@ -756,6 +798,34 @@ mod tests {
     }
 
     #[test]
+    fn parent_chain_sync_ignores_dotdot_artifacts_without_symlinks() {
+        use std::cell::RefCell;
+        use std::collections::HashSet;
+
+        let temp = Temp::new();
+        let decoy = temp.0.join("decoy");
+        let audit = temp.0.join("audit");
+        fs::create_dir(&decoy).unwrap();
+        fs::create_dir(&audit).unwrap();
+        let audit_through_dotdot = decoy.join("..").join("audit");
+        let directory = Directory::open(&audit_through_dotdot, false).unwrap();
+        let synced = RefCell::new(Vec::new());
+        directory
+            .sync_parent_chain_with(&audit_through_dotdot, |parent| {
+                let metadata = parent.metadata()?;
+                synced.borrow_mut().push((metadata.dev(), metadata.ino()));
+                parent.sync_all()
+            })
+            .unwrap();
+
+        let synced: HashSet<_> = synced.borrow().iter().copied().collect();
+        let decoy_metadata = fs::metadata(&decoy).unwrap();
+        assert!(!synced.contains(&(decoy_metadata.dev(), decoy_metadata.ino())));
+        let temp_metadata = fs::metadata(&temp.0).unwrap();
+        assert!(synced.contains(&(temp_metadata.dev(), temp_metadata.ino())));
+    }
+
+    #[test]
     fn parent_chain_sync_includes_symlink_entries_and_target_ancestors() {
         use std::cell::RefCell;
         use std::collections::HashSet;
@@ -767,8 +837,14 @@ mod tests {
         fs::create_dir(&target).unwrap();
         let audit = target.join("audit");
         fs::create_dir(&audit).unwrap();
-        let link = temp.0.join("linked-target");
-        symlink(&target, &link).unwrap();
+        let inner_link_parent = temp.0.join("inner-link-parent");
+        let outer_link_parent = temp.0.join("outer-link-parent");
+        fs::create_dir(&inner_link_parent).unwrap();
+        fs::create_dir(&outer_link_parent).unwrap();
+        let inner_link = inner_link_parent.join("inner-link");
+        symlink(&target, &inner_link).unwrap();
+        let link = outer_link_parent.join("linked-target");
+        symlink(&inner_link, &link).unwrap();
         let audit_through_link = link.join("audit");
         let directory = Directory::open(&audit_through_link, false).unwrap();
         let synced = RefCell::new(Vec::new());
@@ -781,7 +857,13 @@ mod tests {
             .unwrap();
 
         let synced: HashSet<_> = synced.borrow().iter().copied().collect();
-        for path in [target, target_parent, temp.0.clone()] {
+        for path in [
+            target,
+            target_parent,
+            inner_link_parent,
+            outer_link_parent,
+            temp.0.clone(),
+        ] {
             let metadata = fs::metadata(path).unwrap();
             assert!(synced.contains(&(metadata.dev(), metadata.ino())));
         }
