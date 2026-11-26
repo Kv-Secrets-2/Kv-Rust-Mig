@@ -4,7 +4,7 @@
 mod harness;
 
 use std::fs::{self, OpenOptions};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -151,4 +151,10 @@ fn verifier_command_reports_corruption_and_refuses_exposed_trust_files() {
     assert_eq!(refused.status.code(), Some(64));
     assert!(refused.stdout.is_empty());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("no group/other access"));
+
+    let linked = temp.0.join("linked-trust.json");
+    symlink(&trust, &linked).unwrap();
+    let symlinked = verifier(&directory, Some(&linked));
+    assert_eq!(symlinked.status.code(), Some(64));
+    assert!(symlinked.stdout.is_empty());
 }

@@ -87,6 +87,11 @@ fn create_directory(path: &Path) -> io::Result<()> {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub fn darwin_file_has_acl(file: &File) -> io::Result<bool> {
+    darwin::has_acl(file)
+}
+
 impl Directory {
     /// With `create == false`, opening is a read-only probe: no mkdir/chmod/ACL repair.
     pub(crate) fn open(path: &Path, create: bool) -> io::Result<Self> {

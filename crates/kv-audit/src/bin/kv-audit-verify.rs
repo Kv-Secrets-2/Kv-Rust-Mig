@@ -9,6 +9,7 @@ mod implementation {
         ChainHead, ChainKey, ChainPosition, ChainTrust, ChainVerification, VaultIdentity,
         verify_directory,
     };
+    use rustix::fs::{Mode, OFlags};
     use serde_json::{Value, json};
 
     const MAX_TRUST_FILE_BYTES: u64 = 16 * 1024;
@@ -45,6 +46,16 @@ mod implementation {
         Ok(output)
     }
 
+    #[cfg(target_os = "macos")]
+    fn trust_file_has_acl(file: &fs::File) -> Result<bool, String> {
+        kv_audit::darwin_file_has_acl(file).map_err(|_| "trust file ACL is unreadable".to_owned())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn trust_file_has_acl(_file: &fs::File) -> Result<bool, String> {
+        Ok(false)
+    }
+
     fn read_trust_bytes(path: &str) -> Result<Vec<u8>, String> {
         if path == "-" {
             let mut bytes = Vec::new();
@@ -57,21 +68,38 @@ mod implementation {
             }
             return Ok(bytes);
         }
-        let path = Path::new(path);
-        let metadata =
-            fs::symlink_metadata(path).map_err(|_| "trust file is unreadable".to_owned())?;
+        let descriptor = rustix::fs::open(
+            Path::new(path),
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| "trust file is unreadable".to_owned())?;
+        let file = fs::File::from(descriptor);
+        let metadata = file
+            .metadata()
+            .map_err(|_| "trust file is unreadable".to_owned())?;
         if !metadata.file_type().is_file() {
             return Err("trust file must be a regular file".into());
         }
         if metadata.len() > MAX_TRUST_FILE_BYTES {
             return Err("trust JSON exceeds its bound".into());
         }
-        if metadata.uid() != rustix::process::getuid().as_raw() || metadata.mode() & 0o077 != 0 {
+        if metadata.uid() != rustix::process::getuid().as_raw()
+            || metadata.mode() & 0o077 != 0
+            || trust_file_has_acl(&file)?
+        {
             return Err(
                 "trust file must be owned by this account and have no group/other access".into(),
             );
         }
-        fs::read(path).map_err(|_| "trust file is unreadable".to_owned())
+        let mut bytes = Vec::new();
+        file.take(MAX_TRUST_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "trust file is unreadable".to_owned())?;
+        if bytes.len() as u64 > MAX_TRUST_FILE_BYTES {
+            return Err("trust JSON exceeds its bound".into());
+        }
+        Ok(bytes)
     }
 
     fn trust_from_file(path: &str) -> Result<ChainTrust, String> {

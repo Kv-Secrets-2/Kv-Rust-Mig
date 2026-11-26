@@ -33,6 +33,9 @@ pub use chain::{
 };
 #[cfg(unix)]
 pub use codec::{label_text, requester_fields};
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use fs::darwin_file_has_acl;
 #[cfg(unix)]
 pub use runtime::{Audit, WarningLease};
 
