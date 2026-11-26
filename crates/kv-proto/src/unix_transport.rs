@@ -537,7 +537,11 @@ impl std::fmt::Display for BrokerRequestReadError {
     }
 }
 
-impl std::error::Error for BrokerRequestReadError {}
+impl std::error::Error for BrokerRequestReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
 
 impl std::fmt::Debug for BrokerRequest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
