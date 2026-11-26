@@ -23,7 +23,7 @@ pub const MAX_VAULT_IDENTITY_BYTES: usize = 4096;
 
 const DOMAIN: &[u8] = b"kv-audit-chain-v1\0";
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
-const TAIL_READ_EXTRA_BYTES: u64 = 2;
+const TAIL_READ_CHUNK_BYTES: usize = 8192;
 const MAX_CHAIN_JSON_DEPTH: usize = 127;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -842,9 +842,23 @@ pub(crate) enum TailFailure {
     Unauthenticated,
 }
 
-fn read_tail_line(directory: &Directory) -> Result<Option<Vec<u8>>, TailFailure> {
+fn read_exact_at(file: &std::fs::File, buffer: &mut [u8], start: u64) -> Result<(), TailFailure> {
     use std::os::unix::fs::FileExt;
 
+    let mut read = 0_usize;
+    while read < buffer.len() {
+        let got = file
+            .read_at(&mut buffer[read..], start + read as u64)
+            .map_err(|_| TailFailure::Refused)?;
+        if got == 0 {
+            return Err(TailFailure::Unauthenticated);
+        }
+        read += got;
+    }
+    Ok(())
+}
+
+fn read_tail_line(directory: &Directory) -> Result<Option<Vec<u8>>, TailFailure> {
     let file = match directory.open_single_read(LOG) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -854,35 +868,50 @@ fn read_tail_line(directory: &Directory) -> Result<Option<Vec<u8>>, TailFailure>
     if length == 0 {
         return Ok(None);
     }
-    let read_length = length.min(MAX_CHAIN_ENTRY_BYTES as u64 + TAIL_READ_EXTRA_BYTES) as usize;
-    let start = length - read_length as u64;
-    let mut buffer = vec![0_u8; read_length];
-    let mut read = 0_usize;
-    while read < read_length {
-        let got = file
-            .read_at(&mut buffer[read..], start + read as u64)
-            .map_err(|_| TailFailure::Refused)?;
-        if got == 0 {
-            return Err(TailFailure::Unauthenticated);
-        }
-        read += got;
-    }
-    if buffer.last() != Some(&b'\n') {
+    let mut final_byte = [0_u8; 1];
+    read_exact_at(&file, &mut final_byte, length - 1)?;
+    if final_byte[0] != b'\n' {
         return Err(TailFailure::Unauthenticated);
     }
-    let body = &buffer[..buffer.len() - 1];
-    let line = if let Some(newline) = body.iter().rposition(|byte| *byte == b'\n') {
-        &body[newline + 1..]
-    } else {
-        if start != 0 {
+
+    let mut position = length - 1;
+    let mut line_len = 0_usize;
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    while position > 0 {
+        let capacity = MAX_CHAIN_ENTRY_BYTES + 1 - line_len;
+        let read_len = (position as usize).min(TAIL_READ_CHUNK_BYTES).min(capacity);
+        let start = position - read_len as u64;
+        let mut chunk = vec![0_u8; read_len];
+        read_exact_at(&file, &mut chunk, start)?;
+        if let Some(newline) = chunk.iter().rposition(|byte| *byte == b'\n') {
+            let suffix = &chunk[newline + 1..];
+            let total = line_len + suffix.len();
+            if total == 0 || total > MAX_CHAIN_ENTRY_BYTES {
+                return Err(TailFailure::Unauthenticated);
+            }
+            let mut line = Vec::with_capacity(total);
+            line.extend_from_slice(suffix);
+            for part in chunks.iter().rev() {
+                line.extend_from_slice(part);
+            }
+            return Ok(Some(line));
+        }
+        line_len += read_len;
+        chunks.push(chunk);
+        if line_len > MAX_CHAIN_ENTRY_BYTES {
             return Err(TailFailure::Unauthenticated);
         }
-        body
-    };
-    if line.is_empty() || line.len() > MAX_CHAIN_ENTRY_BYTES {
+        position = start;
+    }
+
+    if line_len == 0 {
         return Err(TailFailure::Unauthenticated);
     }
-    Ok(Some(line.to_vec()))
+    let mut line = Vec::with_capacity(line_len);
+    for part in chunks.iter().rev() {
+        line.extend_from_slice(part);
+    }
+    Ok(Some(line))
 }
 
 /// Authenticate only the durable tail and return its claimed position. This is

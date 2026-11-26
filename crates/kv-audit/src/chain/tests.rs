@@ -628,6 +628,30 @@ fn authenticated_writer_preserves_the_vault_label_metadata_rule() {
 }
 
 #[test]
+fn writer_scans_a_tail_record_across_read_chunks_before_appending() {
+    let temp = Temp::new();
+    let directory = temp.audit_dir();
+    let audit = Audit::with_authenticated_chain(&directory, trust(ChainPosition::genesis()));
+    let mut large = Map::new();
+    large.insert("padding".into(), Value::String("x".repeat(20_000)));
+    audit
+        .emit_at("large-tail", large, "2026-01-02T03:04:05Z")
+        .unwrap();
+    audit
+        .emit_at("after-large-tail", Map::new(), "2026-01-02T03:04:06Z")
+        .unwrap();
+    let position = audit.authenticated_chain_position().unwrap();
+    assert_eq!(position.count, 2);
+    assert_eq!(
+        verify_bytes(
+            &fs::read(directory.join("audit.jsonl")).unwrap(),
+            Some(&trust(position))
+        ),
+        ChainVerification::Valid { position }
+    );
+}
+
+#[test]
 fn writer_refuses_corrupt_and_partial_tails_before_appending() {
     for partial in [true, false] {
         let temp = Temp::new();

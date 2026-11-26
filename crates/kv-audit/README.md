@@ -34,12 +34,22 @@ full-width SHA-256 digest of the broker-supplied opaque vault identity bytes.
 Only that digest appears in the log. The identity must be stable and unique to
 the vault, but it is not a secret and must not reuse key material.
 
-`hash` is a full-width HMAC-SHA256 tag, not a truncated digest. Its input is
-domain-separated for `kv-audit-chain-v1` and length-frames the broker's raw
-vault identity, the sequence number, the previous head, and the canonical JSON
-of the complete record content excluding `chain`. Changing record content,
-metadata, order, vault identity, sequence, or predecessor changes the tag. The
-chain key must be 32 bytes and is zeroized by `ChainKey` on drop.
+`hash` is a full-width HMAC-SHA256 tag, not a truncated digest. With `u64be(x)`
+meaning the eight-byte big-endian unsigned encoding of `x`, its preimage is:
+
+```text
+"kv-audit-chain-v1\0"
+|| u64be(len(identity)) || identity
+|| u64be(sequence)
+|| u64be(len(previous_head)) || previous_head
+|| u64be(len(content_json)) || content_json
+```
+
+`sequence` has no length frame because it is already fixed-width; every variable
+field does. `content_json` is the canonical JSON of the complete record content
+excluding `chain`. Changing record content, metadata, order, vault identity,
+sequence, or predecessor changes the tag. The chain key must be 32 bytes and is
+zeroized by `ChainKey` on drop.
 
 ## Required trust state
 
