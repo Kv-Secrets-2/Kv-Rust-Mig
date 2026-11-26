@@ -464,6 +464,24 @@ impl SessionPermits {
             artifact,
         )
         .ok_or_else(|| PermitError::refused("invalid owner permit denial"))?;
+        let Some(object) = facts.as_object() else {
+            return Err(PermitError::refused("invalid owner permit denial"));
+        };
+        let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+        keys.sort_unstable();
+        if keys
+            != [
+                "local_approval_id",
+                "location",
+                "owner_key_id",
+                "permit_id",
+                "request_id",
+                "session_nonce",
+                "signer",
+            ]
+        {
+            return Err(PermitError::refused("invalid owner permit denial"));
+        }
         let text = |key: &str| facts.get(key).and_then(Value::as_str).unwrap_or("");
         let request_id = text("request_id");
         let permit_id = text("permit_id");
@@ -488,19 +506,19 @@ impl SessionPermits {
                 entry.facts["request_id"] == request_id && entry.facts["permit_id"] == permit_id
             })
             .ok_or_else(|| PermitError::new("unknown_request", "permit request is missing"))?;
-        if self.over(
-            &request.facts,
-            request.mono_end,
-            self.0.clock.wall_seconds(),
-        ) {
-            return Err(PermitError::new("expired", "permit request expired"));
-        }
         if state.denied_permits.contains(permit_id) {
             return Ok(Denial {
                 status: DenialStatus::AlreadyDenied,
                 permit_id: permit_id.into(),
                 request_id: request_id.into(),
             });
+        }
+        if self.over(
+            &request.facts,
+            request.mono_end,
+            self.0.clock.wall_seconds(),
+        ) {
+            return Err(PermitError::new("expired", "permit request expired"));
         }
         if let Some(existing) = state.permits.get(permit_id) {
             if existing.spent {
