@@ -639,6 +639,9 @@ fn writer_scans_a_tail_record_across_read_chunks_before_appending() {
     let temp = Temp::new();
     let directory = temp.audit_dir();
     let audit = Audit::with_authenticated_chain(&directory, trust(ChainPosition::genesis()));
+    audit
+        .emit_at("before-large-tail", Map::new(), "2026-01-02T03:04:04Z")
+        .unwrap();
     let mut large = Map::new();
     large.insert("padding".into(), Value::String("x".repeat(20_000)));
     audit
@@ -648,7 +651,7 @@ fn writer_scans_a_tail_record_across_read_chunks_before_appending() {
         .emit_at("after-large-tail", Map::new(), "2026-01-02T03:04:06Z")
         .unwrap();
     let position = audit.authenticated_chain_position().unwrap();
-    assert_eq!(position.count, 2);
+    assert_eq!(position.count, 3);
     assert_eq!(
         verify_bytes(
             &fs::read(directory.join("audit.jsonl")).unwrap(),
