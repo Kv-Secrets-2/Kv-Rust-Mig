@@ -479,7 +479,9 @@ fn fixed_builtin_operation_is_owner_reviewed_once_and_fail_closed() {
     assert!(replay.contains("permit"), "{replay}");
     assert_eq!(count(), 1, "replay sends nothing");
 
-    let changed_args = operation_args(Some(&permit_id), "changed payload");
+    let (change_request, fresh_change_permit) = request(&fixture);
+    approve_permit(&fixture, &change_request);
+    let changed_args = operation_args(Some(&fresh_change_permit), "changed payload");
     let (code, changed) = fixture.kv(&changed_args);
     assert_ne!(code, 0);
     assert_eq!(count(), 1, "changed payload sends nothing: {changed}");
@@ -526,12 +528,15 @@ fn fixed_builtin_operation_is_owner_reviewed_once_and_fail_closed() {
     );
     assert_eq!(count(), 1, "legacy operations send nothing");
 
+    let (lock_request, fresh_lock_permit) = request(&fixture);
+    approve_permit(&fixture, &lock_request);
+    let fresh_lock_args = operation_args(Some(&fresh_lock_permit), INPUT);
     let (_code, lock) = fixture.kv(&["lock"]);
     assert!(
         lock.contains("vault locked") || lock.contains("told to stop"),
         "lock: {lock}"
     );
-    let (code, locked) = fixture.kv(&args);
+    let (code, locked) = fixture.kv(&fresh_lock_args);
     assert_ne!(code, 0);
     assert_eq!(count(), 1, "lock sends nothing: {locked}");
     drop(_daemon);
@@ -601,10 +606,10 @@ fn expired_fixed_operation_permit_never_reaches_provider() {
     let provider = start_provider();
     let fixture = Fixture::new();
     fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
-    let _daemon = fixture.start_daemon_with_clock_scale(Some("100"));
+    let _daemon = fixture.start_daemon_with_clock_scale(Some("150"));
     let (request_id, permit_id) = request(&fixture);
     approve_permit(&fixture, &request_id);
-    thread::sleep(Duration::from_secs(5));
+    thread::sleep(Duration::from_secs(4));
     let args = operation_args(Some(&permit_id), INPUT);
     let (code, expired) = fixture.kv(&args);
     assert_ne!(code, 0);

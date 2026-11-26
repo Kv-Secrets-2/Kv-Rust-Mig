@@ -25,15 +25,20 @@ pub fn cmd_api_operation(p: &Palette, args: ApiOperationArgs) -> CmdResult {
     if let Some(permit_id) = args.permit_id {
         fields.insert("permit_id".into(), json!(permit_id));
     }
-    if let Some(env) = args.env {
+    if let Some(env) = &args.env {
         fields.insert("env".into(), json!(env));
     }
     fields.insert(
         "audit_ctx".into(),
         json!({"source":"cli","client_name":"kv"}),
     );
-    let answer = kv_proto::agent_request_framed(&root, "v1_anthropic_count_tokens", &fields)
-        .map_err(|error| project::fail(p, &error.to_string()))?;
+    let answer = kv_proto::agent_request_framed_with_deadline(
+        &root,
+        "v1_anthropic_count_tokens",
+        &fields,
+        std::time::Duration::from_secs(130),
+    )
+    .map_err(|error| project::fail(p, &error.to_string()))?;
     if answer.get("error_code").and_then(serde_json::Value::as_str) == Some("permit_required") {
         let request_id = answer["request_id"].as_str().unwrap_or("");
         let permit_id = answer["permit_id"].as_str().unwrap_or("");
@@ -42,7 +47,11 @@ pub fn cmd_api_operation(p: &Palette, args: ApiOperationArgs) -> CmdResult {
         ui::info(&format!("Approve it: kv approvals approve {request_id}"));
         ui::info(&format!("Deny it: kv approvals deny {request_id}"));
         ui::info(&format!(
-            "After approval, execute exactly: kv api anthropic-count-tokens --permit-id {permit_id} -- {}",
+            "After approval, execute exactly: kv api anthropic-count-tokens --permit-id {permit_id}{} -- {}",
+            args.env
+                .as_deref()
+                .map(|env| format!(" --env {}", shell_quote(env)))
+                .unwrap_or_default(),
             shell_quote(&args.input)
         ));
         return Err(project::Exit(1));

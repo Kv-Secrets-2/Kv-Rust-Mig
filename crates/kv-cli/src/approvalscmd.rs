@@ -313,7 +313,7 @@ fn list(p: &Palette, all: bool) -> CmdResult {
     if requests.is_empty() && pending_calls.is_empty() && paused_jobs.is_empty() {
         ui::info(&format!("{}no pending approval requests{}", p.dim, p.reset));
         ui::info(&format!(
-            "{}create one: kv preflight --request -- python3 app.py{}",
+            "{}create one: kv api anthropic-count-tokens INPUT{}",
             p.dim, p.reset
         ));
         ui::blank();

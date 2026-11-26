@@ -526,7 +526,11 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
 
 fn parse_api_operation(rest: &[String]) -> Result<Option<Command>, ParseError> {
     let usage = crate::apiopcmd::USAGE;
-    if rest.iter().any(|value| value == "-h" || value == "--help") {
+    let before_separator = rest
+        .iter()
+        .take_while(|value| value.as_str() != "--")
+        .any(|value| value == "-h" || value == "--help");
+    if before_separator {
         return Err(ParseError::Help(format!(
             "{usage}
 
