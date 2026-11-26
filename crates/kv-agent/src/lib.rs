@@ -1170,13 +1170,17 @@ fn handle_connection(
         wire: kv_proto::RequestWire::FramedV1,
         deadline,
     };
-    let request = match kv_proto::read_broker_request_until(stream, deadline) {
+    let request = match kv_proto::read_broker_request_until_preserving_wire(stream, deadline) {
         Ok(Some(request)) => {
             replies.wire = request.wire;
             ZeroizedRequest(request.value)
         }
         Ok(None) => return Ok(()),
         Err(error) => {
+            if let Some(wire) = error.wire() {
+                replies.wire = wire;
+            }
+            let error = error.into_error();
             let _ = replies.write(stream, &request_error_response(&error));
             return Ok(());
         }
@@ -2804,6 +2808,78 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
+    fn spawn_test_handler(
+        mut server: std::os::unix::net::UnixStream,
+        lifecycle: Arc<Lifecycle>,
+        timeout: Duration,
+    ) -> thread::JoinHandle<Result<(), AgentError>> {
+        thread::spawn(move || {
+            let store = DrawerStore::open(".", Key32::new([0; 32]));
+            let cache = Mutex::new(SecretCache::default());
+            let master_key = Key32::new([0; 32]);
+            let trust = TrustContext {
+                session_nonce: Zeroizing::new([0; 32]),
+                daemon_auth_key: Key32::new([0; 32]),
+                grant_state_key: Key32::new([0; 32]),
+                token_key: Key32::new([0; 32]),
+                protected: false,
+                owner_public_key: None,
+                owner_key_id: String::new(),
+                local_approval_id: Vec::new(),
+                location: Vec::new(),
+                version: "0.4.0".into(),
+                approval_signing_key: None,
+                pin: Arc::new(TrustPin {
+                    state: std::sync::Mutex::new(PinState {
+                        root: std::path::PathBuf::from("."),
+                        folder_id: (0, 0),
+                        folder: Some(File::open(".").unwrap()),
+                        key_id: None,
+                        key_digest: None,
+                        approval_key_id: None,
+                        approval_key_digest: None,
+                        latched: None,
+                        closed: false,
+                    }),
+                }),
+            };
+            let approved = json!({});
+            let token = Zeroizing::new(String::new());
+            let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+            let permits = permits::for_session(&trust, Arc::clone(&providers));
+            let http_policy = kv_broker::load_http_policy_snapshot(&approved);
+            let api_caller = kv_broker::ApiCaller::new();
+            let audit = kv_audit::Audit::new(".");
+            let shared = Shared::new();
+            let mut workers = WorkerTracker::new();
+            let connection = workers.register_connection(&server).unwrap();
+            let memory_hardening = json!({});
+            handle_connection(
+                &mut server,
+                Path::new("."),
+                "",
+                &store,
+                &cache,
+                &master_key,
+                &trust,
+                &approved,
+                &token,
+                &providers,
+                &permits,
+                &http_policy,
+                &api_caller,
+                &audit,
+                None,
+                &lifecycle,
+                &shared,
+                &connection,
+                &memory_hardening,
+                timeout,
+            )
+        })
+    }
+
+    #[cfg(unix)]
     #[test]
     fn secret_cache_reloads_after_another_writer_changes_the_environment() {
         let mut random = [0u8; 16];
@@ -3039,77 +3115,13 @@ mod tests {
         use std::io::Read;
         use std::os::unix::net::UnixStream;
 
-        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let (mut client, server) = UnixStream::pair().unwrap();
         client
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
-        let store = DrawerStore::open(".", Key32::new([0; 32]));
-        let cache = Mutex::new(SecretCache::default());
-        let master_key = Key32::new([0; 32]);
-        let trust = TrustContext {
-            session_nonce: Zeroizing::new([0; 32]),
-            daemon_auth_key: Key32::new([0; 32]),
-            grant_state_key: Key32::new([0; 32]),
-            token_key: Key32::new([0; 32]),
-            protected: false,
-            owner_public_key: None,
-            owner_key_id: String::new(),
-            local_approval_id: Vec::new(),
-            location: Vec::new(),
-            version: "0.4.0".into(),
-            approval_signing_key: None,
-            pin: Arc::new(TrustPin {
-                state: std::sync::Mutex::new(PinState {
-                    root: std::path::PathBuf::from("."),
-                    folder_id: (0, 0),
-                    folder: Some(File::open(".").unwrap()),
-                    key_id: None,
-                    key_digest: None,
-                    approval_key_id: None,
-                    approval_key_digest: None,
-                    latched: None,
-                    closed: false,
-                }),
-            }),
-        };
-        let approved = json!({});
-        let token = Zeroizing::new(String::new());
-        let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
-        let permits = permits::for_session(&trust, Arc::clone(&providers));
-        let http_policy = kv_broker::load_http_policy_snapshot(&approved);
-        let api_caller = kv_broker::ApiCaller::new();
-        let audit = kv_audit::Audit::new(".");
-        let lifecycle = Lifecycle::new();
-        let shared = Shared::new();
-        let mut workers = WorkerTracker::new();
-        let connection = workers.register_connection(&server).unwrap();
-        let memory_hardening = json!({});
         let timeout = Duration::from_millis(100);
         let started = Instant::now();
-        let worker = thread::spawn(move || {
-            handle_connection(
-                &mut server,
-                Path::new("."),
-                "",
-                &store,
-                &cache,
-                &master_key,
-                &trust,
-                &approved,
-                &token,
-                &providers,
-                &permits,
-                &http_policy,
-                &api_caller,
-                &audit,
-                None,
-                &lifecycle,
-                &shared,
-                &connection,
-                &memory_hardening,
-                timeout,
-            )
-        });
+        let worker = spawn_test_handler(server, Lifecycle::new(), timeout);
         let mut reply = Vec::new();
         client.read_to_end(&mut reply).unwrap();
         worker.join().unwrap().unwrap();
@@ -3123,81 +3135,46 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn malformed_request_errors_match_the_detected_wire() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let worker = spawn_test_handler(server, Lifecycle::new(), Duration::from_secs(2));
+        client.write_all(b"{").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut reply = Vec::new();
+        client.read_to_end(&mut reply).unwrap();
+        assert_eq!(reply, br#"{"error": "invalid JSON"}"#);
+        worker.join().unwrap().unwrap();
+
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let worker = spawn_test_handler(server, Lifecycle::new(), Duration::from_secs(2));
+        let malformed = kv_proto::encode_frame(kv_proto::FrameKind::Request, b"{").unwrap();
+        client.write_all(&malformed).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let reply = kv_proto::read_frame_response_until(
+            &mut client,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(reply, json!({"error":"invalid JSON"}));
+        worker.join().unwrap().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn stop_wait_outcome_survives_the_initial_request_deadline() {
         use std::os::unix::net::UnixStream;
 
-        let (mut client, mut server) = UnixStream::pair().unwrap();
-        let store = DrawerStore::open(".", Key32::new([0; 32]));
-        let cache = Mutex::new(SecretCache::default());
-        let master_key = Key32::new([0; 32]);
-        let trust = TrustContext {
-            session_nonce: Zeroizing::new([0; 32]),
-            daemon_auth_key: Key32::new([0; 32]),
-            grant_state_key: Key32::new([0; 32]),
-            token_key: Key32::new([0; 32]),
-            protected: false,
-            owner_public_key: None,
-            owner_key_id: String::new(),
-            local_approval_id: Vec::new(),
-            location: Vec::new(),
-            version: "0.4.0".into(),
-            approval_signing_key: None,
-            pin: Arc::new(TrustPin {
-                state: std::sync::Mutex::new(PinState {
-                    root: std::path::PathBuf::from("."),
-                    folder_id: (0, 0),
-                    folder: Some(File::open(".").unwrap()),
-                    key_id: None,
-                    key_digest: None,
-                    approval_key_id: None,
-                    approval_key_digest: None,
-                    latched: None,
-                    closed: false,
-                }),
-            }),
-        };
-        let approved = json!({});
-        let token = Zeroizing::new(String::new());
-        let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
-        let permits = permits::for_session(&trust, Arc::clone(&providers));
-        let http_policy = kv_broker::load_http_policy_snapshot(&approved);
-        let api_caller = kv_broker::ApiCaller::new();
-        let audit = kv_audit::Audit::new(".");
+        let (mut client, server) = UnixStream::pair().unwrap();
         let lifecycle = Lifecycle::with_test_waits(
             Duration::from_millis(10),
             Duration::from_millis(150),
             Duration::from_millis(10),
         );
         let work = lifecycle.try_commit().unwrap();
-        let shared = Shared::new();
-        let mut workers = WorkerTracker::new();
-        let connection = workers.register_connection(&server).unwrap();
-        let memory_hardening = json!({});
-        let timeout = Duration::from_millis(30);
-        let worker = thread::spawn(move || {
-            handle_connection(
-                &mut server,
-                Path::new("."),
-                "",
-                &store,
-                &cache,
-                &master_key,
-                &trust,
-                &approved,
-                &token,
-                &providers,
-                &permits,
-                &http_policy,
-                &api_caller,
-                &audit,
-                None,
-                &lifecycle,
-                &shared,
-                &connection,
-                &memory_hardening,
-                timeout,
-            )
-        });
+        let worker = spawn_test_handler(server, Arc::clone(&lifecycle), Duration::from_millis(30));
         let write_deadline = Instant::now() + Duration::from_secs(1);
         kv_proto::write_frame_request_until(
             &mut client,
