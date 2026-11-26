@@ -4,6 +4,8 @@
 //! broker-owned checkpoint is read, the complete journal is authenticated to
 //! that checkpoint, a genesis journal path is committed through its parent
 //! chain even when that path already exists, the admission record is appended
+//! only for a canonical absolute namespace path without symlink or `..`
+//! components,
 //! with file and directory synchronization, and the advanced checkpoint is
 //! published durably. Only then does [`AdmissionJournal::admit`] return a
 //! usable [`Admission`]. Dropping an
@@ -30,7 +32,7 @@ use crate::chain::{
     ChainVerification, VaultIdentity, encode_authenticated_entry, verify_open_directory,
     verify_open_directory_observed, verify_reader_observed,
 };
-use crate::fs::{Directory, DurableAppendFailure, LOG_LOCK};
+use crate::fs::{Directory, DurableAppendFailure, LOG_LOCK, uses_canonical_namespace};
 use crate::runtime::utc_timestamp;
 
 const LOCK_WAIT: Duration = Duration::from_secs(2);
@@ -358,6 +360,9 @@ impl AdmissionJournal {
     }
 
     fn append_record(&self, record: LifecycleRecord) -> Result<ChainPosition, LifecycleError> {
+        if !uses_canonical_namespace(&self.0.directory) {
+            return Err(LifecycleError::FolderRefused);
+        }
         let directory =
             Directory::open(&self.0.directory, true).map_err(|_| LifecycleError::FolderRefused)?;
         let log_lock = directory.lock(LOG_LOCK, LOCK_WAIT).map_err(lock_error)?;
