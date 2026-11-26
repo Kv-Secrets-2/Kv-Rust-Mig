@@ -384,6 +384,28 @@ pub(crate) struct WorkGuard {
     connection: Option<Arc<TrackedConnection>>,
 }
 
+impl WorkGuard {
+    /// Re-check retirement and connection state, then debit the final authority
+    /// for this already-published window without counting the operation twice.
+    /// The charge must remain non-blocking and must not perform network I/O.
+    pub(crate) fn charge_committed<E>(
+        &self,
+        charge: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), CommitError<E>> {
+        let state = lock(&self.lifecycle.state);
+        if state.phase != Phase::Running {
+            return Err(CommitError::Stopping);
+        }
+        if let Some(connection) = &self.connection {
+            let connection_state = lock(&connection.state);
+            if connection_state.finished || connection_state.closed {
+                return Err(CommitError::Stopping);
+            }
+        }
+        charge().map_err(CommitError::Charge)
+    }
+}
+
 impl Drop for WorkGuard {
     fn drop(&mut self) {
         let mut state = lock(&self.lifecycle.state);
@@ -823,6 +845,32 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[test]
+    fn committed_window_recharges_without_counting_twice() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let charges = AtomicUsize::new(0);
+        let lifecycle = Lifecycle::new();
+        let mut tracker = WorkerTracker::new();
+        let (_client, server) = UnixStream::pair().unwrap();
+        let connection = tracker.register_connection(&server).unwrap();
+        let work = lifecycle
+            .try_commit_for_with_charge(&connection, || Ok::<(), std::convert::Infallible>(()))
+            .unwrap();
+        assert_eq!(lifecycle.committed_count(), 1);
+        assert_eq!(lock(&connection.connection.state).active, 1);
+        work.charge_committed(|| {
+            charges.fetch_add(1, Ordering::SeqCst);
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+        assert_eq!(charges.load(Ordering::SeqCst), 1);
+        assert_eq!(lifecycle.committed_count(), 1);
+        assert_eq!(lock(&connection.connection.state).active, 1);
+        drop(work);
+        assert_eq!(lifecycle.committed_count(), 0);
+        assert_eq!(lock(&connection.connection.state).active, 0);
     }
 
     #[test]

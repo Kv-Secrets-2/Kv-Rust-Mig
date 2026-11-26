@@ -15,6 +15,16 @@ use super::{AgentError, TrustContext};
 const CHECKPOINT_VERSION: &str = "kv-audit-checkpoint-v1";
 const MAX_CHECKPOINT_BYTES: usize = 256;
 
+fn hex_encode(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        output.push(char::from(DIGITS[usize::from(byte & 15)]));
+    }
+    output
+}
+
 struct FileCheckpoint {
     path: PathBuf,
     directory: PathBuf,
@@ -120,11 +130,20 @@ pub(crate) fn admission_journal(
 ) -> Result<kv_audit::AdmissionJournal, AgentError> {
     let runtime = kv_proto::runtime_dir()?;
     let project = kv_proto::project_hash(Some(root))?;
-    let journal_directory = runtime.join(format!("admissions-{project}"));
-    let checkpoint_path = runtime.join(format!("admission-checkpoint-{project}"));
-    let chain_key = derive_labeled_key(master_key, b"kv-audit:chain-v1", &[&trust.location]);
+    // The namespace is stable for one initialized or restored vault generation
+    // and independent of its path. A same-path restore receives a fresh master
+    // key and approval identity, so it cannot inherit the lost vault's chain.
+    let generation = derive_labeled_key(
+        master_key,
+        b"kv-audit:vault-generation-v1",
+        &[trust.local_approval_id.as_slice()],
+    );
+    let generation_text = hex_encode(generation.as_bytes());
+    let journal_directory = runtime.join(format!("admissions-{project}-{generation_text}"));
+    let checkpoint_path = runtime.join(format!("admission-checkpoint-{project}-{generation_text}"));
+    let chain_key = derive_labeled_key(master_key, b"kv-audit:chain-v1", &[generation.as_bytes()]);
     let key = ChainKey::new(*chain_key.as_bytes());
-    let identity = VaultIdentity::new(&trust.location)
+    let identity = VaultIdentity::new(generation.as_bytes())
         .map_err(|error| AgentError(format!("audit vault identity is invalid: {error}")))?;
     let checkpoint = FileCheckpoint::new(checkpoint_path, runtime);
     Ok(kv_audit::AdmissionJournal::new(

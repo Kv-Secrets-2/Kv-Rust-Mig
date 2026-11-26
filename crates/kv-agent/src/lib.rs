@@ -2368,20 +2368,16 @@ fn api_call_response(
     // Publish the dispatch window before bounded audit I/O so retirement cannot
     // pass it. The final pin, denial, expiry and one-call spend are rechecked in
     // the inner transport gate below.
-    let _operation_window = if per_call {
-        match lifecycle
-            .try_commit_for_with_charge(connection, || Ok::<(), std::convert::Infallible>(()))
-        {
-            Ok(window) => Some(window),
-            Err(_) => {
-                return json!({
-                    "error":"the agent is stopping; new requests are refused",
-                    "error_code":"agent_stopping",
-                });
-            }
+    let operation_window = match lifecycle
+        .try_commit_for_with_charge(connection, || Ok::<(), std::convert::Infallible>(()))
+    {
+        Ok(window) => window,
+        Err(_) => {
+            return json!({
+                "error":"the agent is stopping; new requests are refused",
+                "error_code":"agent_stopping",
+            });
         }
-    } else {
-        None
     };
     let admission = if per_call {
         let Some(admissions) = admissions else {
@@ -2415,6 +2411,7 @@ fn api_call_response(
     let empty_headers = serde_json::Map::new();
     let caller_headers = headers.as_object().unwrap_or(&empty_headers);
     let callback_refused = std::cell::Cell::new(false);
+    let transport_started = std::cell::Cell::new(false);
     let perform_call = || {
         caller.call_with_checks(
             api_request,
@@ -2440,16 +2437,16 @@ fn api_call_response(
                 checked
             },
             |matched| {
-                let committed = lifecycle
-                    .try_commit_for_with_charge(connection, || {
-                        let pin = trust.observe_held().map_err(permits::hard_lock_error)?;
+                let committed = operation_window
+                    .charge_committed(|| {
+                        let _pin = trust.observe_held().map_err(permits::hard_lock_error)?;
                         if matched.is_some() && permit_is_denied(shared, request.get("permit_id")) {
                             return Err(permit_denied_response());
                         }
                         if let Some(matched) = matched {
                             permits.spend(&matched).map_err(permits::invalid_error)?;
                         }
-                        Ok(pin)
+                        Ok(())
                     })
                     .map_err(|error| match error {
                         CommitError::Stopping => json!({
@@ -2459,17 +2456,20 @@ fn api_call_response(
                         CommitError::Charge(refusal) => refusal,
                     });
                 callback_refused.set(committed.is_err());
+                transport_started.set(committed.is_ok());
                 committed
             },
         )
     };
     let mut result = if let Some(admission) = admission {
         let execution = admission.run(|_| perform_call());
-        let output = execution.output();
-        let outcome = if output.get("error").is_some() {
-            kv_audit::TerminalOutcome::Failed
+        let output = execution.output().clone();
+        let outcome = if output.get("status").is_some() {
+            Some(kv_audit::TerminalOutcome::Completed)
+        } else if !transport_started.get() {
+            Some(kv_audit::TerminalOutcome::Failed)
         } else {
-            kv_audit::TerminalOutcome::Completed
+            None
         };
         let mut outcome_metadata = serde_json::Map::new();
         outcome_metadata.insert("provider".into(), json!(provider_name));
@@ -2481,12 +2481,21 @@ fn api_call_response(
                 outcome_metadata.insert(key.into(), value.clone());
             }
         }
-        match execution.finish(outcome, outcome_metadata) {
-            Ok(output) => output,
-            Err(error) => {
-                let outcome_error = error.error;
-                let mut output = error.into_output();
-                output["audit_outcome_error"] = json!(outcome_error.as_str());
+        match outcome {
+            Some(outcome) => match execution.finish(outcome, outcome_metadata) {
+                Ok(output) => output,
+                Err(error) => {
+                    let outcome_error = error.error;
+                    let mut output = error.into_output();
+                    output["audit_outcome_error"] = json!(outcome_error.as_str());
+                    output
+                }
+            },
+            None => {
+                // A transport or response-read failure can mean the provider already
+                // applied the request. Leave the admitted effect unknown rather than
+                // recording a definite failure.
+                drop(execution);
                 output
             }
         }

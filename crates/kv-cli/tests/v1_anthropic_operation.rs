@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use kv_agent::{TrustContext, run_agent_with_api_caller};
 use kv_broker::{ApiCaller, UrlSafety};
-use kv_crypto::{Identity, Key32, Zeroizing, keyfile};
+use kv_crypto::{Identity, Key32, Zeroizing, derive_labeled_key, keyfile};
 use kv_store::{DrawerStore, config_authority, vault_origin};
 use owner::{kv_bin, pty};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
@@ -226,7 +226,7 @@ impl Fixture {
         command
             .args(["--exact", "v1_fixture_child", "--nocapture"])
             .env("KV_V1_MODE", "daemon")
-            .env("KV_V1_ROOT", &root_for_child(&self.root))
+            .env("KV_V1_ROOT", root_for_child(&self.root))
             .env("KV_V1_CA", self.root.join("ca.der"))
             .env("HOME", &self.home)
             .stdin(Stdio::null())
@@ -382,6 +382,9 @@ fn serve_one(
         "version":version,
         "body":String::from_utf8_lossy(&body),
     }));
+    if String::from_utf8_lossy(&body).contains("drop after reading") {
+        return;
+    }
     let response_body = br#"{"input_tokens":7}"#;
     write!(
         io,
@@ -420,6 +423,36 @@ fn permit_token(text: &str) -> String {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect()
+}
+
+fn admission_journal_dir(fixture: &Fixture) -> PathBuf {
+    let hash = kv_proto::project_hash(Some(&fixture.root)).unwrap();
+    let key_blob = fs::read(fixture.root.join(".secrets").join("key")).unwrap();
+    let identity = keyfile::unwrap_v4(&key_blob, PASSPHRASE.as_bytes()).unwrap();
+    let generation = derive_labeled_key(
+        &identity.master_key,
+        b"kv-audit:vault-generation-v1",
+        &[identity.local_approval_id.as_slice()],
+    );
+    fixture.home.join(".kv").join(format!(
+        "admissions-{hash}-{}",
+        hex::encode(generation.as_bytes())
+    ))
+}
+
+fn admission_checkpoint_path(fixture: &Fixture) -> PathBuf {
+    let hash = kv_proto::project_hash(Some(&fixture.root)).unwrap();
+    let key_blob = fs::read(fixture.root.join(".secrets").join("key")).unwrap();
+    let identity = keyfile::unwrap_v4(&key_blob, PASSPHRASE.as_bytes()).unwrap();
+    let generation = derive_labeled_key(
+        &identity.master_key,
+        b"kv-audit:vault-generation-v1",
+        &[identity.local_approval_id.as_slice()],
+    );
+    fixture.home.join(".kv").join(format!(
+        "admission-checkpoint-{hash}-{}",
+        hex::encode(generation.as_bytes())
+    ))
 }
 
 #[test]
@@ -473,6 +506,16 @@ fn fixed_builtin_operation_is_owner_reviewed_once_and_fail_closed() {
         assert_eq!(event["version"], "2023-06-01");
         assert!(event["body"].as_str().unwrap().contains(INPUT));
     }
+
+    let journal = fs::read_to_string(admission_journal_dir(&fixture).join("audit.jsonl")).unwrap();
+    let records = journal
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2, "admission and outcome: {records:?}");
+    assert_eq!(records[0]["event"], "privileged_admission");
+    assert_eq!(records[1]["event"], "privileged_outcome");
+    assert_eq!(records[1]["outcome"], "completed");
 
     let (code, replay) = fixture.kv(&args);
     assert_ne!(code, 0);
@@ -633,10 +676,7 @@ fn audit_write_failure_allows_no_additional_provider_request() {
     let _daemon = fixture.start_daemon();
     let (request_id, permit_id) = request(&fixture);
     approve_permit(&fixture, &request_id);
-    let hash = kv_proto::project_hash(Some(&fixture.root)).unwrap();
-    let admission_dir = fixture.home.join(".kv").join(format!("admissions-{hash}"));
-    fs::create_dir_all(&admission_dir).unwrap();
-    fs::create_dir(admission_dir.join("audit.jsonl")).unwrap();
+    fs::create_dir(admission_checkpoint_path(&fixture)).unwrap();
     let args = operation_args(Some(&permit_id), INPUT);
     let (code, first) = fixture.kv(&args);
     assert_ne!(code, 0);
@@ -656,4 +696,41 @@ fn audit_write_failure_allows_no_additional_provider_request() {
         0,
         "audit failure leads to no additional send: {retry}"
     );
+}
+
+#[test]
+fn uncertain_transport_result_leaves_admission_unknown() {
+    let _serial = TEST_LOCK.lock().unwrap();
+    let provider = start_provider();
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
+    let _daemon = fixture.start_daemon();
+    let input = "drop after reading";
+    let args = operation_args(None, input);
+    let (code, text) = fixture.kv(&args);
+    assert_eq!(code, 1, "request output: {text}");
+    let request_id = token(&text, "permit_request_");
+    let permit_id = permit_token(&text);
+    approve_permit(&fixture, &request_id);
+
+    let args = operation_args(Some(&permit_id), input);
+    let (code, executed) = fixture.kv(&args);
+    assert_ne!(code, 0, "dropped response should fail: {executed}");
+    assert_eq!(
+        provider.events.lock().unwrap().len(),
+        1,
+        "provider received the uncertain request"
+    );
+
+    let journal = fs::read_to_string(admission_journal_dir(&fixture).join("audit.jsonl")).unwrap();
+    let events = journal
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events.len(),
+        1,
+        "only the admission may be durable: {events:?}"
+    );
+    assert_eq!(events[0]["event"], "privileged_admission");
 }
