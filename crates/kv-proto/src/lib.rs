@@ -7,6 +7,7 @@ use std::time::Instant;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use zeroize::Zeroize;
 
 mod frame;
 pub use frame::{
@@ -408,11 +409,12 @@ fn python_utf8_error(bytes: &[u8], error: std::str::Utf8Error) -> String {
 }
 
 pub fn reply_bytes(response: &Value) -> Result<Vec<u8>, ProtocolError> {
-    let bytes = kv_store::pyjson::to_vec_python(response, false)
+    let mut bytes = kv_store::pyjson::to_vec_python(response, false)
         .map_err(|error| ProtocolError::Message(error.to_string()))?;
     if bytes.len() <= MAX_AGENT_RESPONSE_BYTES {
         return Ok(bytes);
     }
+    bytes.zeroize();
     let mut replacement = Map::new();
     replacement.insert("error".into(), Value::String("response too large".into()));
     replacement.insert("response_truncated".into(), Value::Bool(true));

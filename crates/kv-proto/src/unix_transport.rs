@@ -578,7 +578,7 @@ pub fn write_broker_response_until(
         RequestWire::FramedV1 => write_frame_response_until(socket, response, deadline),
         RequestWire::LegacyJson => {
             socket.set_nonblocking(true)?;
-            let payload = crate::reply_bytes(response)?;
+            let payload = Zeroizing::new(crate::reply_bytes(response)?);
             write_all_until(socket, &payload, Some(deadline))?;
             socket.flush()?;
             Ok(())
