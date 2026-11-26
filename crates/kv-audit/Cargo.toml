@@ -9,7 +9,9 @@ rust-version.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order", "float_roundtrip"] }
 sha2 = "0.10"
+hmac = "0.12"
 time = { version = "0.3", features = ["formatting"] }
+zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process", "try_close"] }

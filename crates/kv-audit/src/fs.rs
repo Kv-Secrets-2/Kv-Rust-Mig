@@ -15,7 +15,7 @@ use serde_json::Value;
 #[path = "darwin.rs"]
 mod darwin;
 
-const LOG: &str = "audit.jsonl";
+pub(crate) const LOG: &str = "audit.jsonl";
 const HEALTH: &str = "audit-health.json";
 const UNKEPT: &str = "audit-health.unkept";
 const UNCERTAIN: &str = "audit.uncertain";
@@ -119,6 +119,12 @@ impl Directory {
             flags,
             Mode::from_bits_truncate(0o600),
         )?))
+    }
+
+    pub(crate) fn open_single_read(&self, name: &str) -> io::Result<File> {
+        let file = self.open_child(name, OFlags::RDONLY)?;
+        single_file(&file)?;
+        Ok(file)
     }
 
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {

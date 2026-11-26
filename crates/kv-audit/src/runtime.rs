@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Number, Value};
 
+use crate::chain::{ChainKey, ChainPosition, ChainTrust, VaultIdentity};
 use crate::fs::{AppendFailure, Directory};
 use crate::{
     AuditHealth, Coverage, FolderState, HealthState, LossReason, Order, Warning, WarningChannel,
@@ -29,17 +30,29 @@ struct State {
     pending_mark: usize,
     printed_mark: bool,
     vault_label: Option<String>,
+    chain_position: Option<ChainPosition>,
+}
+
+struct AuthenticatedChain {
+    key: ChainKey,
+    identity: VaultIdentity,
 }
 
 struct Inner {
     directory: PathBuf,
     channel: WarningChannel,
+    authenticated: Option<AuthenticatedChain>,
     state: Mutex<State>,
 }
 
 /// Shared audit writer and pending-warning state. Clones share the same mutex.
 #[derive(Clone)]
 pub struct Audit(Arc<Inner>);
+
+enum EncodeInput {
+    Legacy(Value),
+    Authenticated(ChainPosition),
+}
 
 impl Audit {
     /// Create a writer whose warnings are delivered by opted-in daemon replies.
@@ -52,8 +65,40 @@ impl Audit {
         Self(Arc::new(Inner {
             directory: directory.into(),
             channel,
+            authenticated: None,
             state: Mutex::new(State::default()),
         }))
+    }
+
+    /// Create a writer for the versioned authenticated chain format. The
+    /// supplied trust must come from broker-owned state. After every successful
+    /// append the in-memory position advances; durable independent publication
+    /// of that position remains the integrating broker's responsibility.
+    pub fn with_authenticated_chain(directory: impl Into<PathBuf>, trust: ChainTrust) -> Self {
+        Self::with_authenticated_chain_and_channel(directory, trust, WarningChannel::Reply)
+    }
+
+    pub fn with_authenticated_chain_and_channel(
+        directory: impl Into<PathBuf>,
+        trust: ChainTrust,
+        channel: WarningChannel,
+    ) -> Self {
+        let (key, identity, position) = trust.into_key_identity_position();
+        Self(Arc::new(Inner {
+            directory: directory.into(),
+            channel,
+            authenticated: Some(AuthenticatedChain { key, identity }),
+            state: Mutex::new(State {
+                chain_position: Some(position),
+                ..State::default()
+            }),
+        }))
+    }
+
+    /// The authenticated position this process has verified and extended.
+    /// This is `None` for the legacy Python-compatible writer.
+    pub fn authenticated_chain_position(&self) -> Option<ChainPosition> {
+        self.state().chain_position
     }
 
     pub fn directory(&self) -> &Path {
@@ -65,7 +110,8 @@ impl Audit {
         self.state().vault_label = label.filter(|label| !label.is_empty()).map(str::to_owned);
     }
 
-    /// Append one event. Keep field insertion order: it is part of the hash.
+    /// Append one event. In the legacy format, field insertion order is part
+    /// of the hash; authenticated records use canonical ordering instead.
     /// Values must already be safe event metadata, never request/response bodies
     /// or secret values. The reference's attribution withholding is applied here.
     pub fn emit(&self, event: &str, fields: Map<String, Value>) -> Result<(), LossReason> {
@@ -73,7 +119,7 @@ impl Audit {
     }
 
     #[cfg(test)]
-    fn emit_at(
+    pub(crate) fn emit_at(
         &self,
         event: &str,
         fields: Map<String, Value>,
@@ -115,21 +161,64 @@ impl Audit {
                 return Err(reason);
             }
         };
-        let previous = directory.tail_hash();
-        let outcome = crate::codec::encode_entry(
-            &timestamp(),
-            event,
-            fields,
-            state.vault_label.as_deref(),
-            previous,
-        )
-        .map_err(|_| LossReason::WriteFailed)
-        .and_then(|bytes| {
-            directory.append(&bytes).map_err(|failure| match failure {
-                AppendFailure::FileRefused => LossReason::FileRefused,
-                AppendFailure::WriteFailed => LossReason::WriteFailed,
-            })
-        });
+        let input = if let Some(chain) = &self.0.authenticated {
+            let trusted = state
+                .chain_position
+                .expect("authenticated writer always starts with a chain position");
+            match crate::chain::authenticated_tail_position(&directory, &chain.key, &chain.identity)
+            {
+                Ok(actual) if actual == trusted => EncodeInput::Authenticated(actual),
+                Err(crate::chain::TailFailure::Refused) => {
+                    return Err(self.refuse_emit(&directory, &mut state, LossReason::FileRefused));
+                }
+                _ => {
+                    return Err(self.refuse_emit(
+                        &directory,
+                        &mut state,
+                        LossReason::ChainUnauthenticated,
+                    ));
+                }
+            }
+        } else {
+            EncodeInput::Legacy(directory.tail_hash())
+        };
+        let encoded = match input {
+            EncodeInput::Legacy(previous) => crate::codec::encode_entry(
+                &timestamp(),
+                event,
+                fields,
+                state.vault_label.as_deref(),
+                previous,
+            )
+            .map(|bytes| (bytes, None)),
+            EncodeInput::Authenticated(position) => {
+                let chain = self
+                    .0
+                    .authenticated
+                    .as_ref()
+                    .expect("input kind selects the configured chain");
+                crate::chain::encode_authenticated_entry(
+                    &timestamp(),
+                    event,
+                    fields,
+                    &chain.key,
+                    &chain.identity,
+                    position,
+                )
+                .map(|encoded| (encoded.bytes, Some(encoded.position)))
+            }
+        };
+        let outcome =
+            encoded
+                .map_err(|_| LossReason::WriteFailed)
+                .and_then(|(bytes, next_position)| {
+                    directory.append(&bytes).map(|()| next_position).map_err(
+                        |failure| match failure {
+                            AppendFailure::FileRefused => LossReason::FileRefused,
+                            AppendFailure::WriteFailed => LossReason::WriteFailed,
+                        },
+                    )
+                });
         after_append();
         if !directory.lock_matches(&log_lock, LOG_LOCK).unwrap_or(false) {
             state.uncertain = true;
@@ -144,7 +233,10 @@ impl Audit {
                 self.warn_once(&mut state);
                 Err(reason)
             }
-            Ok(()) => {
+            Ok(next_position) => {
+                if next_position.is_some() {
+                    state.chain_position = next_position;
+                }
                 let recovered = state.refused.take().is_some();
                 if recovered {
                     self.write_health(&directory, &mut state, None);
@@ -284,6 +376,18 @@ impl Audit {
         }
         state.refused = Some(reason);
         state.lost_any = true;
+    }
+
+    fn refuse_emit(
+        &self,
+        directory: &Directory,
+        state: &mut State,
+        reason: LossReason,
+    ) -> LossReason {
+        self.record_loss(state, reason);
+        self.write_health(directory, state, Some(reason));
+        self.warn_once(state);
+        reason
     }
 
     fn warn_once(&self, state: &mut State) {
