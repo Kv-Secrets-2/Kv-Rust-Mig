@@ -80,6 +80,14 @@ distinctions are:
 | `continuity_loss` | Present complete records authenticate in order, but their final position differs from trusted state: complete suffix deletion, rollback, replacement, extra records, or a missing log can all produce this. |
 | `unreadable` | The directory/file could not be safely read, including unsafe links or non-single-name log files. |
 
+Every continuity-loss report carries machine-readable `position_mismatch`:
+`absent_or_empty_history` when no complete records are observed against a
+nonzero expected count, `short_nonempty_history` when a nonempty verified
+history ends below that count, `conflicting_checkpoint` when observed and
+trusted counts match but heads differ, or `beyond_checkpoint` when the observed
+count is higher. These labels describe only the two positions; they do not
+claim deletion, rollback, replacement, cause, or ancestry.
+
 A fabricated chain whose every record was made with the correct key is
 internally valid but still reports `continuity_loss` unless it reaches the
 independently trusted head/count. An attacker who can update that trusted

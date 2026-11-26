@@ -26,9 +26,10 @@ mod runtime;
 
 #[cfg(unix)]
 pub use chain::{
-    CHAIN_FORMAT_VERSION, ChainCorruption, ChainHead, ChainKey, ChainPosition, ChainReadFailure,
-    ChainStatus, ChainTrust, ChainVerification, HexError, IdentityError, MAX_CHAIN_ENTRY_BYTES,
-    MAX_VAULT_IDENTITY_BYTES, VaultIdentity, verify_bytes, verify_directory, verify_reader,
+    CHAIN_FORMAT_VERSION, ChainCorruption, ChainHead, ChainKey, ChainPosition,
+    ChainPositionMismatch, ChainReadFailure, ChainStatus, ChainTrust, ChainVerification, HexError,
+    IdentityError, MAX_CHAIN_ENTRY_BYTES, MAX_VAULT_IDENTITY_BYTES, VaultIdentity, verify_bytes,
+    verify_directory, verify_reader,
 };
 #[cfg(unix)]
 pub use codec::{label_text, requester_fields};

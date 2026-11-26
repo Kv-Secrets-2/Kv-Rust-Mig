@@ -327,6 +327,52 @@ impl ChainReadFailure {
     }
 }
 
+/// Observational relationship between a verified final position and the
+/// independently trusted checkpoint. These labels never claim a cause, deletion,
+/// rollback, or whether one history is an ancestor of another.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChainPositionMismatch {
+    /// No complete records were observed while the checkpoint expected at least one.
+    AbsentOrEmptyHistory,
+    /// A nonempty verified history ended before the checkpoint count.
+    ShortNonemptyHistory,
+    /// The verified history has the checkpoint count but a different head.
+    ConflictingCheckpoint,
+    /// The verified history ended after the checkpoint count.
+    BeyondCheckpoint,
+}
+
+impl ChainPositionMismatch {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AbsentOrEmptyHistory => "absent_or_empty_history",
+            Self::ShortNonemptyHistory => "short_nonempty_history",
+            Self::ConflictingCheckpoint => "conflicting_checkpoint",
+            Self::BeyondCheckpoint => "beyond_checkpoint",
+        }
+    }
+}
+
+impl fmt::Display for ChainPositionMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::error::Error for ChainPositionMismatch {}
+
+fn position_mismatch(expected: ChainPosition, actual: ChainPosition) -> ChainPositionMismatch {
+    if actual.count == 0 && expected.count != 0 {
+        ChainPositionMismatch::AbsentOrEmptyHistory
+    } else if actual.count < expected.count {
+        ChainPositionMismatch::ShortNonemptyHistory
+    } else if actual.count == expected.count {
+        ChainPositionMismatch::ConflictingCheckpoint
+    } else {
+        ChainPositionMismatch::BeyondCheckpoint
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChainStatus {
     MissingTrustState,
@@ -353,7 +399,8 @@ impl ChainStatus {
 /// Verification result. `Truncated` is reserved for an incomplete final
 /// record. A syntactically complete but internally valid chain that does not
 /// reach the independently trusted position is `ContinuityLoss`; this includes
-/// deleted, replaced, extra, or rolled-back complete records.
+/// deleted, replaced, extra, or rolled-back complete records. Its `mismatch`
+/// label is observational only and never claims cause or ancestry.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChainVerification {
     MissingTrustState,
@@ -373,6 +420,7 @@ pub enum ChainVerification {
         expected: ChainPosition,
         actual: ChainPosition,
         valid_entries: u64,
+        mismatch: ChainPositionMismatch,
     },
     Unreadable {
         reason: ChainReadFailure,
@@ -599,6 +647,7 @@ fn finish(position: ChainPosition, trust: &ChainTrust) -> ChainVerification {
             expected: trust.position(),
             actual: position,
             valid_entries: position.count,
+            mismatch: position_mismatch(trust.position(), position),
         }
     }
 }

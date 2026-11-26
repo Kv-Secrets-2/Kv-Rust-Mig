@@ -148,10 +148,12 @@ mod implementation {
                 expected,
                 actual,
                 valid_entries,
+                mismatch,
             } => {
                 output["expected"] = position_json(expected);
                 output["actual"] = position_json(actual);
                 output["valid_entries"] = json!(valid_entries);
+                output["position_mismatch"] = json!(mismatch.as_str());
             }
             ChainVerification::Unreadable { reason } => {
                 output["reason"] = json!(reason.as_str());

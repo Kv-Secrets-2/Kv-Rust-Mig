@@ -105,6 +105,10 @@ fn verifier_command_distinguishes_valid_missing_truncated_and_lost_history() {
     let lost = verifier(&directory, Some(&trust));
     assert_eq!(lost.status.code(), Some(12));
     assert_eq!(report(&lost)["status"], "continuity_loss");
+    assert_eq!(
+        report(&lost)["position_mismatch"],
+        "absent_or_empty_history"
+    );
 }
 
 #[test]

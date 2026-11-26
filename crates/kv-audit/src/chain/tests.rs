@@ -291,7 +291,8 @@ fn truncation_is_distinct_from_complete_record_loss() {
         ChainVerification::ContinuityLoss {
             expected: final_position,
             actual: first_position,
-            valid_entries: 1
+            valid_entries: 1,
+            mismatch: ChainPositionMismatch::ShortNonemptyHistory
         }
     );
 }
@@ -407,7 +408,8 @@ fn continuity_loss_covers_missing_extra_and_fabricated_complete_histories() {
         ChainVerification::ContinuityLoss {
             expected: final_position,
             actual: first_position,
-            valid_entries: 1
+            valid_entries: 1,
+            mismatch: ChainPositionMismatch::ShortNonemptyHistory
         }
     );
 
@@ -417,7 +419,8 @@ fn continuity_loss_covers_missing_extra_and_fabricated_complete_histories() {
         ChainVerification::ContinuityLoss {
             expected: final_position,
             actual: third_position,
-            valid_entries: 3
+            valid_entries: 3,
+            mismatch: ChainPositionMismatch::BeyondCheckpoint
         }
     );
 
@@ -427,7 +430,8 @@ fn continuity_loss_covers_missing_extra_and_fabricated_complete_histories() {
         ChainVerification::ContinuityLoss {
             expected: first_position,
             actual: fabricated.position,
-            valid_entries: 1
+            valid_entries: 1,
+            mismatch: ChainPositionMismatch::ConflictingCheckpoint
         }
     );
 
@@ -436,7 +440,8 @@ fn continuity_loss_covers_missing_extra_and_fabricated_complete_histories() {
         ChainVerification::ContinuityLoss {
             expected: first_position,
             actual: ChainPosition::genesis(),
-            valid_entries: 0
+            valid_entries: 0,
+            mismatch: ChainPositionMismatch::AbsentOrEmptyHistory
         }
     );
 }
