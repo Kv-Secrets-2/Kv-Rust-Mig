@@ -9,7 +9,7 @@ Unix audit storage for two explicit chain modes:
 - `Audit::with_authenticated_chain` writes the versioned v1 authenticated chain
   described below, and `AdmissionJournal` adds its fail-closed privileged
   admission/outcome lifecycle. The broker integration that selects either mode
-  is outside this crate and is not yet wired.
+  is outside this crate.
 
 ## Authenticated v1 chain
 
@@ -272,11 +272,11 @@ an unknown count.
 
 The authenticated chain does not create the missing trust state or its durable
 checkpoint backing store, choose the broker's canonical vault identity, derive
-or purge the broker chain key, wire `AdmissionJournal` into the brokered
-provider path, or expose a `kv audit` subcommand. Those require changes outside
-`crates/kv-audit/` and are intentionally not made here. Until that integration
-selects `Audit::with_authenticated_chain` or `AdmissionJournal`, existing
-daemon writes remain in the legacy compatibility format.
+or purge the broker chain key, or expose a `kv audit` subcommand. Those remain
+integration responsibilities outside `crates/kv-audit/` even though the v1
+broker wires `AdmissionJournal` around its fixed privileged provider operation.
+Ordinary daemon writes remain in the legacy compatibility format unless that
+integration explicitly selects `Audit::with_authenticated_chain`.
 
 The verifier is linear in the log and bounded per record, not total runtime. It
 cannot distinguish all physical causes of a final-position mismatch; they are
