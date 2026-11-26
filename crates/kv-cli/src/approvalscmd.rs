@@ -326,10 +326,16 @@ fn list(p: &Palette, all: bool) -> CmdResult {
     Ok(())
 }
 
-/// Refuse a pending one-call permit in the daemon session. No signature is
-/// needed: denial can only remove authority, never create it.
+/// Deny a pending one-call permit with the owner key over the authenticated
+/// owner channel. Denial is terminal in the daemon's permit state machine.
 fn deny(p: &Palette, request_id: &str) -> CmdResult {
     let root = project::require_project(p)?;
+    if !owner::vault_has_passphrase(&root) {
+        return Err(project::fail(
+            p,
+            kv_approvals::permit_session::NO_PASSPHRASE_REFUSAL,
+        ));
+    }
     terminal::check_owner_terminal().map_err(|e| project::fail(p, &e.to_string()))?;
     if !request_id.starts_with("permit_request_") {
         return Err(project::fail(
@@ -337,19 +343,26 @@ fn deny(p: &Palette, request_id: &str) -> CmdResult {
             "denying run grants and paused jobs is not available in this build; a one-call permit (permit_request_...) is",
         ));
     }
-    let mut fields = Map::new();
-    fields.insert("request_id".into(), json!(request_id));
-    let answer = kv_proto::agent_request_framed(&root, "refuse_permit", &fields)
-        .map_err(|error| project::fail(p, &error.to_string()))?;
-    if let Some(error) = answer.get("error").and_then(Value::as_str) {
-        return Err(project::fail(p, error));
-    }
-    if answer.get("refused") != Some(&Value::Bool(true)) {
-        return Err(project::fail(p, "the daemon did not confirm the denial"));
-    }
+    owner::block_local_approval_if_protected(p, &root, "permit denial")?;
+    let passphrase =
+        project::read_owner_secret(p, &format!("  {}Passphrase{}: ", p.yellow, p.reset))?;
+    let identity =
+        project::unlock_identity(&root, passphrase.as_bytes()).map_err(|e| project::fail(p, &e))?;
+    let ctx = PermitSigningContext::begin(&root, identity).map_err(|e| signing_failure(p, e))?;
+    let record = ctx
+        .permit_record(request_id)
+        .map_err(|e| signing_failure(p, e))?;
+    let denial = ctx
+        .sign_denial(&record)
+        .map_err(|e| signing_failure(p, e))?;
+    ctx.register_denial(&denial, &record)
+        .map_err(|e| signing_failure(p, e))?;
     project::audit_event(
         "call_permit_denied",
-        Map::from_iter([("request_id".into(), json!(request_id))]),
+        Map::from_iter([
+            ("request_id".into(), json!(request_id)),
+            ("permit_id".into(), record.facts["permit_id"].clone()),
+        ]),
     );
     ui::success(p, "One-call permit denied.");
     Ok(())

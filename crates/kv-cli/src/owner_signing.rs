@@ -164,6 +164,57 @@ impl PermitSigningContext {
             .map_err(|e| refused(e.to_string()))
     }
 
+    /// `sign_denial`: the owner's signature over this service session's exact
+    /// request identity. Denial creates no authority; it only ends it.
+    pub fn sign_denial(&self, record: &PermitRecord) -> Result<Value, SigningError> {
+        let seed = OwnerSeed::new(*self.identity.owner_seed);
+        let facts = &record.facts;
+        let payload = json!({
+            "signer": kv_approvals::permit::SIGNER,
+            "request_id": facts["request_id"],
+            "permit_id": facts["permit_id"],
+            "session_nonce": facts["session_nonce"],
+            "location": facts["location"],
+            "local_approval_id": facts["local_approval_id"],
+            "owner_key_id": facts["owner_key_id"],
+        });
+        kv_approvals::permit_denial::attach_permit_denial(&payload, &seed)
+            .map_err(|e| refused(e.to_string()))
+    }
+
+    /// `register_denial`: two attempts; only an ack naming this exact denied
+    /// permit counts. Retrying is safe because denial is idempotent.
+    pub fn register_denial(
+        &self,
+        denial: &Value,
+        record: &PermitRecord,
+    ) -> Result<String, SigningError> {
+        let expected = (
+            record.facts["permit_id"].as_str().unwrap_or(""),
+            record.facts["request_id"].as_str().unwrap_or(""),
+        );
+        let mut reason = String::from("the service did not confirm this exact denial");
+        for _ in 0..2 {
+            let mut fields = Map::new();
+            fields.insert("denial".into(), denial.clone());
+            let Ok((answer, challenge)) = self.send("owner_permit_deny", fields) else {
+                continue;
+            };
+            match check_answer(&answer, &challenge, &self.identity, "permit-deny-ack-v1") {
+                Ok(fields) => {
+                    let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("");
+                    if text("session_nonce") == hex::encode(&self.channel.session_nonce)
+                        && (text("permit_id"), text("request_id")) == expected
+                    {
+                        return Ok(text("status").to_owned());
+                    }
+                }
+                Err(error) => reason = error.to_string(),
+            }
+        }
+        Err(SigningError::Unconfirmed(reason))
+    }
+
     /// `register_permit`: two attempts; only an ack naming this exact permit counts.
     /// Returns the service's status (`registered` or `already-registered`).
     pub fn register_permit(&self, permit: &Value) -> Result<String, SigningError> {

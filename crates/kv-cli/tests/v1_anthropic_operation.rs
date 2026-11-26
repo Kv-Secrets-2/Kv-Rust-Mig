@@ -597,18 +597,7 @@ fn denied_fixed_operation_never_reaches_provider() {
     assert_eq!(code, 1, "request output: {text}");
     let request_id = token(&text, "permit_request_");
     let permit_id = permit_token(&text);
-    let python = owner::python3().expect("python3 is needed only to allocate a test pty");
-    let cmd = [kv_bin()];
-    let (code, denial) = pty(
-        &python,
-        &cmd,
-        &fixture.home,
-        &fixture.root,
-        &["approvals", "deny", &request_id],
-        &[],
-    );
-    assert_eq!(code, 0, "denial: {denial}");
-    assert!(denial.contains("denied"), "{denial}");
+    deny_permit(&fixture, &request_id);
     assert_eq!(provider.events.lock().unwrap().len(), 0);
     let execute = operation_args(Some(&permit_id), INPUT);
     let (code, refused) = fixture.kv(&execute);
@@ -619,6 +608,21 @@ fn denied_fixed_operation_never_reaches_provider() {
         0,
         "denial sends nothing"
     );
+}
+
+fn deny_permit(fixture: &Fixture, request_id: &str) {
+    let python = owner::python3().expect("python3 is needed only to allocate a test pty");
+    let passphrase_rule = format!("Passphrase: =>{PASSPHRASE}");
+    let cmd = [kv_bin()];
+    let (code, denial) = pty(
+        &python,
+        &cmd,
+        &fixture.home,
+        &fixture.root,
+        &["approvals", "deny", request_id],
+        &[&passphrase_rule],
+    );
+    assert_eq!(code, 0, "denial: {denial}");
 }
 
 fn approve_permit(fixture: &Fixture, request_id: &str) {

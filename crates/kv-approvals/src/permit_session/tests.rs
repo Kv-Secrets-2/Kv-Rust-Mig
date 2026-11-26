@@ -76,6 +76,19 @@ impl Fixture {
     fn artifact(&self, request: &RequestCreated) -> Value {
         crate::permit::attach_permit_approval(request.facts(), &self.seed).unwrap()
     }
+    fn denial(&self, request: &RequestCreated) -> Value {
+        let facts = request.facts();
+        let payload = json!({
+            "signer": crate::permit::SIGNER,
+            "request_id": facts["request_id"],
+            "permit_id": facts["permit_id"],
+            "session_nonce": facts["session_nonce"],
+            "location": facts["location"],
+            "local_approval_id": facts["local_approval_id"],
+            "owner_key_id": facts["owner_key_id"],
+        });
+        crate::permit_denial::attach_permit_denial(&payload, &self.seed).unwrap()
+    }
     fn approve(&self, request: &RequestCreated) -> Value {
         let artifact = self.artifact(request);
         assert_eq!(
@@ -140,6 +153,44 @@ fn request_review_pending_and_spending_preserve_exact_owned_facts() {
         error(fixture.registry.spend(&matched)).message,
         "permit already spent"
     );
+}
+
+#[test]
+fn signed_denial_is_terminal_and_revokes_unspent_approval() {
+    let fixture = Fixture::new();
+    let request = fixture.request();
+    let artifact = fixture.artifact(&request);
+    let denial = fixture.denial(&request);
+    assert_eq!(
+        fixture.registry.deny(&denial).ok().unwrap().status,
+        DenialStatus::Denied
+    );
+    assert!(fixture.registry.pending().is_empty());
+    assert!(fixture.registry.review(request.request_id()).is_none());
+    assert_eq!(error(fixture.registry.register(&artifact)).code, "denied");
+    assert!(
+        error(
+            fixture
+                .registry
+                .match_call(request.permit_id(), fixture.call())
+        )
+        .message
+        .contains("denied")
+    );
+    assert_eq!(
+        fixture.registry.deny(&denial).ok().unwrap().status,
+        DenialStatus::AlreadyDenied
+    );
+
+    let request = fixture.request();
+    let artifact = fixture.approve(&request);
+    let denial = fixture.denial(&request);
+    assert_eq!(
+        fixture.registry.deny(&denial).ok().unwrap().status,
+        DenialStatus::Denied
+    );
+    assert_eq!(fixture.registry.status(request.permit_id()), None);
+    assert_eq!(error(fixture.registry.register(&artifact)).code, "denied");
 }
 
 #[test]

@@ -19,6 +19,7 @@ const BOOL: FieldType = FieldType::Bool;
 const PROTECTED_MODE: &[&str] = &["protected", "unprotected"];
 const REGISTERED_STATUS: &[&str] = &["registered", "already-registered", "job-ended"];
 const PERMIT_STATUS: &[&str] = &["registered", "already-registered"];
+const PERMIT_DENY_STATUS: &[&str] = &["denied", "already-denied"];
 const PAUSE_STATUS: &[&str] = &["extended", "refused"];
 const TARGET_KIND: &[&str] = &["request", "grant"];
 const REVOKE_RESULT: &[&str] = &["revoked"];
@@ -35,6 +36,7 @@ pub enum MessageKind {
     GrantRegisterAckV1,
     PermitRequestV1,
     PermitRegisterAckV1,
+    PermitDenyAckV1,
     PauseRequestV1,
     PauseAnswerAckV1,
     HttpRuleV1,
@@ -219,6 +221,28 @@ const PERMIT_REGISTER_ACK_FIELDS: &[FieldSchema] = &[
         field_type: FieldType::Enum(PERMIT_STATUS),
     },
 ];
+const PERMIT_DENY_ACK_FIELDS: &[FieldSchema] = &[
+    FieldSchema {
+        name: "challenge",
+        field_type: NONCE,
+    },
+    FieldSchema {
+        name: "session_nonce",
+        field_type: NONCE,
+    },
+    FieldSchema {
+        name: "permit_id",
+        field_type: TEXT,
+    },
+    FieldSchema {
+        name: "request_id",
+        field_type: TEXT,
+    },
+    FieldSchema {
+        name: "status",
+        field_type: FieldType::Enum(PERMIT_DENY_STATUS),
+    },
+];
 const PAUSE_REQUEST_FIELDS: &[FieldSchema] = &[
     FieldSchema {
         name: "challenge",
@@ -385,12 +409,13 @@ const END_JOB_ACK_FIELDS: &[FieldSchema] = &[
 ];
 
 impl MessageKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::ChannelV1,
         Self::RequestRecordV1,
         Self::GrantRegisterAckV1,
         Self::PermitRequestV1,
         Self::PermitRegisterAckV1,
+        Self::PermitDenyAckV1,
         Self::PauseRequestV1,
         Self::PauseAnswerAckV1,
         Self::HttpRuleV1,
@@ -408,6 +433,7 @@ impl MessageKind {
             Self::GrantRegisterAckV1 => "grant-register-ack-v1",
             Self::PermitRequestV1 => "permit-request-v1",
             Self::PermitRegisterAckV1 => "permit-register-ack-v1",
+            Self::PermitDenyAckV1 => "permit-deny-ack-v1",
             Self::PauseRequestV1 => "pause-request-v1",
             Self::PauseAnswerAckV1 => "pause-answer-ack-v1",
             Self::HttpRuleV1 => "http-rule-v1",
@@ -430,6 +456,7 @@ impl MessageKind {
             Self::GrantRegisterAckV1 => GRANT_REGISTER_ACK_FIELDS,
             Self::PermitRequestV1 => PERMIT_REQUEST_FIELDS,
             Self::PermitRegisterAckV1 => PERMIT_REGISTER_ACK_FIELDS,
+            Self::PermitDenyAckV1 => PERMIT_DENY_ACK_FIELDS,
             Self::PauseRequestV1 => PAUSE_REQUEST_FIELDS,
             Self::PauseAnswerAckV1 => PAUSE_ANSWER_ACK_FIELDS,
             Self::HttpRuleV1 => HTTP_RULE_FIELDS,

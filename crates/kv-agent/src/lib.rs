@@ -1,5 +1,5 @@
 #[cfg(unix)]
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 #[cfg(unix)]
 use std::fs::File;
@@ -965,9 +965,6 @@ pub(crate) struct Shared {
     pub(crate) host: kv_sandbox::bwrap::SandboxHost,
     /// Python `trust.request_records`: the approval requests this session filed.
     pub(crate) requests: kv_requests::request_records::RequestRecords,
-    /// Owner-refused one-call permits for this daemon session. Restart clears
-    /// both the refusals and the session permits they refuse.
-    pub(crate) denied_permits: Mutex<BTreeSet<String>>,
 }
 
 #[cfg(unix)]
@@ -979,7 +976,6 @@ impl Shared {
             ledger: kv_grants::ledger::Ledger::new(),
             host: kv_sandbox::bwrap::SandboxHost::detect(),
             requests: kv_requests::request_records::RequestRecords::new(None),
-            denied_permits: Mutex::new(BTreeSet::new()),
         }
     }
 }
@@ -1102,15 +1098,10 @@ fn v1_count_tokens_provider() -> (kv_broker::ProviderTable, kv_broker::HttpPolic
 }
 
 #[cfg(unix)]
-fn permit_is_denied(shared: &Shared, permit_id: Option<&Value>) -> bool {
-    let Some(permit_id) = permit_id.and_then(Value::as_str) else {
-        return false;
-    };
-    shared
-        .denied_permits
-        .lock()
-        .map(|denied| denied.contains(permit_id))
-        .unwrap_or(true)
+fn permit_is_denied(permits: &SessionPermits, permit_id: Option<&Value>) -> bool {
+    permit_id
+        .and_then(Value::as_str)
+        .is_some_and(|permit_id| permits.is_denied(permit_id))
 }
 
 #[cfg(unix)]
@@ -1119,27 +1110,6 @@ fn permit_denied_response() -> Value {
 }
 
 #[cfg(unix)]
-fn refuse_permit_response(
-    shared: &Shared,
-    permits: &SessionPermits,
-    request: &serde_json::Map<String, Value>,
-) -> Value {
-    let Some(request_id) = request.get("request_id").and_then(Value::as_str) else {
-        return json!({"error":"request_id is required","error_code":"bad_request"});
-    };
-    let Some(review) = permits.review(request_id) else {
-        return json!({"error":"permit request is missing or expired","error_code":"permit_invalid"});
-    };
-    let permit_id = review.permit_id();
-    match shared.denied_permits.lock() {
-        Ok(mut denied) => {
-            denied.insert(permit_id.to_owned());
-            json!({"refused":true,"request_id":request_id,"permit_id":permit_id})
-        }
-        Err(_) => json!({"error":"permit denial state is unavailable","error_code":"internal"}),
-    }
-}
-
 #[cfg(unix)]
 fn zeroize_json_value(value: &mut Value) {
     use kv_crypto::Zeroize as _;
@@ -1244,7 +1214,6 @@ fn handle_connection(
         return Ok(());
     }
     let broker_v1_command = cmd == V1_COUNT_TOKENS_CMD
-        || cmd == "refuse_permit"
         || cmd == "permit_requests"
         || kv_proto::OWNER_ENDPOINTS.contains(&cmd);
     if broker_v1_command && replies.wire != kv_proto::RequestWire::FramedV1 {
@@ -1384,7 +1353,6 @@ fn handle_connection(
         "owner_pause_right",
         "pause_job",
         "owner_pause_history",
-        "refuse_permit",
     ];
     if !known.contains(&cmd) {
         replies.write(stream, &json!({"error":"unknown command"}))?;
@@ -1503,7 +1471,6 @@ fn handle_connection(
             "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
             "pauses": [],
         }),
-        "refuse_permit" => refuse_permit_response(shared, permits, request),
         V1_COUNT_TOKENS_CMD => {
             let api_started = std::time::Instant::now();
             let env = request
@@ -1885,6 +1852,9 @@ fn serve_owner_endpoint(
                     approved,
                 );
             }
+            "owner_permit_deny" => {
+                return permits::owner_deny(trust, permits, challenge.clone(), request);
+            }
             "owner_channel" => {}
             _ => return owner_error(trust, challenge.clone(), "unsupported"),
         }
@@ -2252,7 +2222,7 @@ fn api_call_response(
     caller: &kv_broker::ApiCaller,
     trust: &TrustContext,
     permits: &SessionPermits,
-    shared: &Shared,
+    _shared: &Shared,
     audit: &kv_audit::Audit,
     admissions: Option<&kv_audit::AdmissionJournal>,
     lifecycle: &Arc<Lifecycle>,
@@ -2315,7 +2285,7 @@ fn api_call_response(
             "error_code":"permit_invalid"
         });
     }
-    if per_call && permit_is_denied(shared, request.get("permit_id")) {
+    if per_call && permit_is_denied(permits, request.get("permit_id")) {
         return permit_denied_response();
     }
     if per_call && let Err(error) = permits.precheck(request.get("permit_id")) {
@@ -2440,7 +2410,8 @@ fn api_call_response(
                 let committed = operation_window
                     .charge_committed(|| {
                         let _pin = trust.observe_held().map_err(permits::hard_lock_error)?;
-                        if matched.is_some() && permit_is_denied(shared, request.get("permit_id")) {
+                        if matched.is_some() && permit_is_denied(permits, request.get("permit_id"))
+                        {
                             return Err(permit_denied_response());
                         }
                         if let Some(matched) = matched {

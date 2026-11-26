@@ -164,6 +164,28 @@ pub(super) fn owner_register(
     signed_owner(trust, MessageKind::PermitRegisterAckV1, fields)
 }
 
+pub(super) fn owner_deny(
+    trust: &TrustContext,
+    permits: &SessionPermits,
+    challenge: Vec<u8>,
+    request: &Map<String, Value>,
+) -> Result<Value, AgentError> {
+    trust.observe()?;
+    let artifact = request.get("denial").unwrap_or(&Value::Null);
+    let denial = match permits.deny(artifact) {
+        Ok(denial) => denial,
+        Err(error) => return owner_error(trust, challenge, error.code),
+    };
+    let mut fields = fields(trust, challenge);
+    fields.insert("permit_id".into(), FieldValue::Text(denial.permit_id));
+    fields.insert("request_id".into(), FieldValue::Text(denial.request_id));
+    fields.insert(
+        "status".into(),
+        FieldValue::Enum(denial.status.as_str().into()),
+    );
+    signed_owner(trust, MessageKind::PermitDenyAckV1, fields)
+}
+
 /// A capability run's one-call permit is signed for its grant and run, and waits
 /// as long as the owner chose for that grant (`_prepare_api_permit`'s keyword
 /// arguments).

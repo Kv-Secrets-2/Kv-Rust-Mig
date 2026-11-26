@@ -4,7 +4,7 @@
 //! Spending belongs inside the daemon's commit locks: lifecycle -> trust pin -> registry.
 //! This module never calls the lifecycle or performs transport/filesystem I/O.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -179,6 +179,26 @@ impl RegistrationStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DenialStatus {
+    Denied,
+    AlreadyDenied,
+}
+impl DenialStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Denied => "denied",
+            Self::AlreadyDenied => "already-denied",
+        }
+    }
+}
+
+pub struct Denial {
+    pub status: DenialStatus,
+    pub permit_id: String,
+    pub request_id: String,
+}
+
 pub struct Registration {
     pub status: RegistrationStatus,
     pub permit_id: String,
@@ -234,6 +254,7 @@ struct Registered {
 struct Registry {
     requests: Vec<Pending>,
     permits: BTreeMap<String, Registered>,
+    denied_permits: BTreeSet<String>,
     gave_up: VecDeque<(String, bool)>,
 }
 struct Inner {
@@ -310,7 +331,10 @@ impl SessionPermits {
             .requests
             .iter()
             .find(|entry| entry.facts["request_id"] == request_id)?;
-        (!self.over(&entry.facts, entry.mono_end, self.0.clock.wall_seconds()))
+        let denied = state
+            .denied_permits
+            .contains(entry.facts["permit_id"].as_str().expect("issued id"));
+        (!denied && !self.over(&entry.facts, entry.mono_end, self.0.clock.wall_seconds()))
             .then(|| entry.review())
     }
     pub fn review_by_permit(&self, permit_id: &str) -> Option<PermitReview> {
@@ -319,7 +343,10 @@ impl SessionPermits {
             .requests
             .iter()
             .find(|entry| entry.facts["permit_id"] == permit_id)?;
-        (!self.over(&entry.facts, entry.mono_end, self.0.clock.wall_seconds()))
+        let denied = state
+            .denied_permits
+            .contains(entry.facts["permit_id"].as_str().expect("issued id"));
+        (!denied && !self.over(&entry.facts, entry.mono_end, self.0.clock.wall_seconds()))
             .then(|| entry.review())
     }
     pub fn pending(&self) -> Vec<PendingPermit> {
@@ -330,6 +357,9 @@ impl SessionPermits {
             .iter()
             .filter(|entry| {
                 !self.over(&entry.facts, entry.mono_end, now)
+                    && !state
+                        .denied_permits
+                        .contains(entry.facts["permit_id"].as_str().expect("issued id"))
                     && !state
                         .permits
                         .contains_key(entry.facts["permit_id"].as_str().expect("issued id"))
@@ -364,6 +394,9 @@ impl SessionPermits {
             .as_str()
             .filter(|id| id.starts_with("permit_"))
             .ok_or_else(|| PermitError::refused("invalid permit id"))?;
+        if self.is_denied(permit_id) {
+            return Err(PermitError::refused("the owner denied this permit"));
+        }
         if self.review_by_permit(permit_id).is_none() {
             return Err(PermitError::refused("permit request is missing or expired"));
         }
@@ -378,6 +411,9 @@ impl SessionPermits {
         call: CallFacts<'_>,
     ) -> Result<MatchedPermit, PermitError> {
         self.protected()?;
+        if self.is_denied(permit_id) {
+            return Err(PermitError::refused("the owner denied this permit"));
+        }
         if !permit_id.starts_with("permit_") {
             return Err(PermitError::refused("invalid permit id"));
         }
@@ -410,11 +446,90 @@ impl SessionPermits {
             canonical,
         })
     }
+    pub fn is_denied(&self, permit_id: &str) -> bool {
+        self.state().denied_permits.contains(permit_id)
+    }
+
+    /// Register the owner's signed denial as terminal authority. A denied
+    /// request is hidden from review/pending output, cannot be registered, and
+    /// any unspent registered permit is revoked.
+    pub fn deny(&self, artifact: &Value) -> Result<Denial, PermitError> {
+        self.protected()?;
+        let Some(public_key) = self.0.binding.owner_public_key else {
+            return Err(PermitError::refused("owner permit denial is unavailable"));
+        };
+        let facts = crate::permit_denial::verified_permit_denial(
+            self.0.binding.protected,
+            &public_key,
+            artifact,
+        )
+        .ok_or_else(|| PermitError::refused("invalid owner permit denial"))?;
+        let text = |key: &str| facts.get(key).and_then(Value::as_str).unwrap_or("");
+        let request_id = text("request_id");
+        let permit_id = text("permit_id");
+        if !request_id.starts_with("permit_request_") || !permit_id.starts_with("permit_") {
+            return Err(PermitError::refused("invalid owner permit denial"));
+        }
+        let hex_encode = |bytes: &[u8]| hex::encode(bytes);
+        if text("session_nonce") != hex_encode(&self.0.binding.session_nonce)
+            || text("location") != hex_encode(&self.0.binding.location)
+            || text("local_approval_id") != hex_encode(&self.0.binding.local_approval_id)
+            || text("owner_key_id") != self.0.binding.owner_key_id
+        {
+            return Err(PermitError::refused(
+                "the denial is not this session's request",
+            ));
+        }
+        let mut state = self.state();
+        let request = state
+            .requests
+            .iter()
+            .find(|entry| {
+                entry.facts["request_id"] == request_id && entry.facts["permit_id"] == permit_id
+            })
+            .ok_or_else(|| PermitError::new("unknown_request", "permit request is missing"))?;
+        if self.over(
+            &request.facts,
+            request.mono_end,
+            self.0.clock.wall_seconds(),
+        ) {
+            return Err(PermitError::new("expired", "permit request expired"));
+        }
+        if state.denied_permits.contains(permit_id) {
+            return Ok(Denial {
+                status: DenialStatus::AlreadyDenied,
+                permit_id: permit_id.into(),
+                request_id: request_id.into(),
+            });
+        }
+        if let Some(existing) = state.permits.get(permit_id) {
+            if existing.spent {
+                return Err(PermitError::refused("permit already spent"));
+            }
+            state.permits.remove(permit_id);
+        }
+        state.denied_permits.insert(permit_id.into());
+        Ok(Denial {
+            status: DenialStatus::Denied,
+            permit_id: permit_id.into(),
+            request_id: request_id.into(),
+        })
+    }
+
     pub fn register(&self, artifact: &Value) -> Result<Registration, PermitError> {
         self.protected()?;
         let facts = crate::permit_facts::verify_artifact(&self.0.binding, artifact)?;
         let canonical = canonical(&facts)?;
         let mut state = self.state();
+        if state
+            .denied_permits
+            .contains(facts["permit_id"].as_str().expect("issued id"))
+        {
+            return Err(PermitError::new(
+                "denied",
+                "the owner denied this permit; it cannot be approved",
+            ));
+        }
         let request = state
             .requests
             .iter()
@@ -482,6 +597,9 @@ impl SessionPermits {
     pub fn spend(&self, matched: &MatchedPermit) -> Result<(), PermitError> {
         self.protected()?;
         let mut state = self.state();
+        if state.denied_permits.contains(&matched.permit_id) {
+            return Err(PermitError::refused("the owner denied this permit"));
+        }
         let entry = state
             .permits
             .get_mut(&matched.permit_id)
@@ -516,6 +634,9 @@ impl SessionPermits {
     ) -> Result<(), PermitError> {
         self.protected()?;
         let mut state = self.state();
+        if state.denied_permits.contains(&matched.permit_id) {
+            return Err(PermitError::refused("the owner denied this permit"));
+        }
         let entry = state
             .permits
             .get_mut(&matched.permit_id)
