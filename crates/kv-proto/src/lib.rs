@@ -437,6 +437,19 @@ fn absolute_deadline(timeout: Duration) -> Result<Instant, ProtocolError> {
     })
 }
 
+fn request_document(cmd: &str, token: String, fields: &Map<String, Value>) -> Value {
+    let mut request = Map::new();
+    for (name, value) in fields {
+        if name != "cmd" && name != "token" {
+            request.insert(name.clone(), value.clone());
+        }
+    }
+    request.insert("cmd".into(), Value::String(cmd.into()));
+    request.insert("token".into(), Value::String(token));
+    request.entry("audit_warning").or_insert(Value::Bool(false));
+    Value::Object(request)
+}
+
 #[cfg(unix)]
 fn agent_request_document(
     root: &Path,
@@ -446,14 +459,7 @@ fn agent_request_document(
     let runtime = runtime_dir()?;
     let token_path = agent_token_path(Some(root))?;
     let token = private_token(&token_path, &runtime);
-    let mut request = Map::new();
-    request.insert("cmd".into(), Value::String(cmd.into()));
-    request.insert("token".into(), Value::String(token));
-    for (name, value) in fields {
-        request.insert(name.clone(), value.clone());
-    }
-    request.entry("audit_warning").or_insert(Value::Bool(false));
-    Ok(Value::Object(request))
+    Ok(request_document(cmd, token, fields))
 }
 
 pub fn agent_request(
@@ -542,19 +548,19 @@ pub fn agent_request_framed_with_deadline(
         let root = root.as_ref();
         let path = agent_socket_path(Some(root))?;
         let request = agent_request_document(root, cmd, fields)?;
-        framed_agent_exchange(&path, cmd, &request, timeout)
+        framed_agent_exchange(&path, &request, timeout)
     }
 }
 
 #[cfg(unix)]
 fn framed_agent_exchange(
     path: &Path,
-    cmd: &str,
     request: &Value,
     timeout: Duration,
 ) -> Result<Value, ProtocolError> {
     let overall = absolute_deadline(timeout)?;
-    if !matches!(cmd, "status" | "lock" | "stop") {
+    let serialized_cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
+    if !matches!(serialized_cmd, "status" | "lock" | "stop") {
         let probe_cap = std::cmp::min(overall, absolute_deadline(Duration::from_secs(5))?);
         let enforcement =
             unix_transport::exchange_frames_until(path, &json!({"cmd":"enforcement"}), probe_cap)?;
@@ -599,6 +605,18 @@ mod tests {
             error.to_string(),
             "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte"
         );
+    }
+
+    #[test]
+    fn request_fields_cannot_replace_trusted_cmd_or_token() {
+        let mut fields = Map::new();
+        fields.insert("cmd".into(), json!("forged"));
+        fields.insert("token".into(), json!("forged"));
+        fields.insert("dummy_secret".into(), json!("dummy"));
+        let request = request_document("status", "trusted-token".into(), &fields);
+        assert_eq!(request["cmd"], "status");
+        assert_eq!(request["token"], "trusted-token");
+        assert_eq!(request["dummy_secret"], "dummy");
     }
 
     #[test]

@@ -9,6 +9,7 @@ use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::io::Errno;
 use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::frame::parse_json_payload;
 use crate::{
@@ -367,7 +368,7 @@ fn read_frame_after_first(
     }
     // The header has already bounded this allocation. Read directly into the
     // final buffer rather than concatenating unbounded chunks.
-    let mut payload = vec![0_u8; payload_len];
+    let mut payload = Zeroizing::new(vec![0_u8; payload_len]);
     read_exact_required(socket, &mut payload, deadline)?;
     Ok(Frame { kind, payload })
 }
@@ -434,7 +435,7 @@ pub fn write_frame_response_until(
     response: &Value,
     deadline: Instant,
 ) -> Result<(), ProtocolError> {
-    let payload = crate::frame::json_payload(response)?;
+    let payload = Zeroizing::new(crate::reply_bytes(response)?);
     write_frame_until(socket, FrameKind::Response, &payload, deadline)
 }
 
@@ -491,10 +492,20 @@ pub enum RequestWire {
     FramedV1,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct BrokerRequest {
     pub value: Value,
     pub wire: RequestWire,
+}
+
+impl std::fmt::Debug for BrokerRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrokerRequest")
+            .field("value", &"<redacted>")
+            .field("wire", &self.wire)
+            .finish()
+    }
 }
 
 fn read_legacy_json_after_first(
@@ -1212,7 +1223,7 @@ finally:
 
     #[test]
     fn framed_write_uses_one_deadline_even_after_partial_progress() {
-        let (mut client, _server) = UnixStream::pair().unwrap();
+        let (mut client, mut server) = UnixStream::pair().unwrap();
         // Keep the peer open but unread, and fill the socket first so the
         // result does not depend on a platform's default buffer size.
         client.set_nonblocking(true).unwrap();
@@ -1230,6 +1241,10 @@ finally:
                 Err(error) => panic!("failed to fill test socket: {error}"),
             }
         }
+        // Make room for only part of the frame, so the timeout is reached only
+        // after successful forward progress.
+        let mut space = [0_u8; 8192];
+        server.read_exact(&mut space).unwrap();
         let payload = vec![b' '; MAX_AGENT_RESPONSE_BYTES];
         let start = Instant::now();
         let error = write_frame_until(
@@ -1241,6 +1256,27 @@ finally:
         .unwrap_err();
         timeout(error);
         assert!(start.elapsed() < Duration::from_secs(1));
+        server.set_nonblocking(true).unwrap();
+        let mut received = Vec::new();
+        let mut chunk = [0_u8; 8192];
+        while let Ok(read) = server.read(&mut chunk) {
+            if read == 0 {
+                break;
+            }
+            received.extend_from_slice(&chunk[..read]);
+        }
+        assert!(received.contains(&b'K'));
+    }
+
+    #[test]
+    fn framed_oversize_reply_uses_structured_truncation_fallback() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let response = serde_json::json!({"secret":"x".repeat(MAX_AGENT_RESPONSE_BYTES)});
+        let deadline = Instant::now() + Duration::from_secs(2);
+        write_frame_response_until(&mut server, &response, deadline).unwrap();
+        let answer = read_frame_response_until(&mut client, deadline).unwrap();
+        assert_eq!(answer["response_truncated"], true);
+        assert_eq!(answer["error"], "response too large");
     }
 
     #[test]
@@ -1367,7 +1403,6 @@ finally:
         });
         let answer = crate::framed_agent_exchange(
             &path.0,
-            "list",
             &serde_json::json!({"cmd":"list","token":"test"}),
             Duration::from_secs(2),
         )
@@ -1400,7 +1435,6 @@ finally:
         let start = Instant::now();
         let error = crate::framed_agent_exchange(
             &path.0,
-            "list",
             &serde_json::json!({"cmd":"list","token":"test"}),
             Duration::from_millis(200),
         )

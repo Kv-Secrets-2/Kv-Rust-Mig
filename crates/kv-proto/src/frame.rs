@@ -13,8 +13,11 @@
 //! The length is always validated against the direction's payload cap before a
 //! stream reader allocates or reads the payload.
 
+use std::fmt;
+
 use serde_json::Value;
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 use crate::{MAX_AGENT_RESPONSE_BYTES, MAX_MSG, ProtocolError, python_utf8_error};
 
@@ -55,10 +58,20 @@ impl FrameKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Frame {
     pub kind: FrameKind,
-    pub payload: Vec<u8>,
+    pub payload: Zeroizing<Vec<u8>>,
+}
+
+impl fmt::Debug for Frame {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Frame")
+            .field("kind", &self.kind)
+            .field("payload_len", &self.payload.len())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -158,12 +171,13 @@ pub fn decode_frame(bytes: &[u8]) -> Result<Frame, FrameError> {
     }
     Ok(Frame {
         kind,
-        payload: bytes[IPC_FRAME_HEADER_LEN..end].to_vec(),
+        payload: Zeroizing::new(bytes[IPC_FRAME_HEADER_LEN..end].to_vec()),
     })
 }
 
-pub(crate) fn json_payload(value: &Value) -> Result<Vec<u8>, ProtocolError> {
+pub(crate) fn json_payload(value: &Value) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
     kv_store::pyjson::to_vec_python(value, false)
+        .map(Zeroizing::new)
         .map_err(|error| ProtocolError::Message(error.to_string()))
 }
 
@@ -214,6 +228,17 @@ mod tests {
             decode_json_frame(&bytes).unwrap(),
             (FrameKind::Response, value)
         );
+    }
+
+    #[test]
+    fn frame_debug_redacts_payload_bytes() {
+        let frame = Frame {
+            kind: FrameKind::Request,
+            payload: Zeroizing::new(b"dummy-secret".to_vec()),
+        };
+        let rendered = format!("{frame:?}");
+        assert!(rendered.contains("payload_len"));
+        assert!(!rendered.contains("dummy-secret"));
     }
 
     #[test]
