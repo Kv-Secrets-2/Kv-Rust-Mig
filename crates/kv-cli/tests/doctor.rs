@@ -362,6 +362,32 @@ fn unwritable_home_is_unhealthy_before_init() {
 }
 
 #[test]
+fn read_only_state_dir_is_repairable_not_false_failure() {
+    let scratch = Scratch::new("doctor-repairable-state");
+    make_valid_vault_shape(&scratch);
+    let state = scratch.home().join(".kv");
+    std::fs::create_dir(&state).unwrap();
+    set_mode(&state, 0o500);
+    let before = snapshot_tree(&scratch.root);
+    let (code, text) = run(&scratch, &["doctor"]);
+    if cfg!(target_os = "linux") && sandbox_ready() {
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("0 errors"), "{text}");
+    }
+    assert!(text.contains("~/.kv exists and is private"), "{text}");
+    assert!(!text.contains("~/.kv cannot be opened"), "{text}");
+    assert!(
+        !text.contains("does not allow write and search access"),
+        "{text}"
+    );
+    assert_eq!(
+        snapshot_tree(&scratch.root),
+        before,
+        "doctor changed the filesystem"
+    );
+}
+
+#[test]
 fn key_mode_that_unlock_rejects_is_unhealthy() {
     let scratch = Scratch::new("doctor-key-mode");
     make_valid_vault_shape(&scratch);

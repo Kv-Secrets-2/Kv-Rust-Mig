@@ -85,9 +85,31 @@ fn allows_write_search(path: &Path) -> bool {
     .is_ok()
 }
 
+#[cfg(unix)]
+fn allows_read(path: &Path) -> bool {
+    rustix::fs::access(path, rustix::fs::Access::READ_OK).is_ok()
+}
+
+#[cfg(unix)]
+fn filesystem_is_read_only(path: &Path) -> Result<bool, rustix::io::Errno> {
+    Ok(rustix::fs::statvfs(path)?
+        .f_flag
+        .contains(rustix::fs::StatVfsMountFlags::RDONLY))
+}
+
 #[cfg(not(unix))]
 fn allows_write_search(_path: &Path) -> bool {
     true
+}
+
+#[cfg(not(unix))]
+fn allows_read(_path: &Path) -> bool {
+    true
+}
+
+#[cfg(not(unix))]
+fn filesystem_is_read_only(_path: &Path) -> Result<bool, std::io::Error> {
+    Ok(false)
 }
 
 fn privacy_problem(metadata: &std::fs::Metadata) -> Option<&'static str> {
@@ -303,15 +325,30 @@ fn home_checks(home: Option<&Path>) -> Vec<Check> {
     if owner_matches(&metadata) == Some(false) {
         return vec![Check::fail("~/.kv is owned by another account")];
     }
+    if !allows_read(&kv) {
+        return vec![Check::fail(
+            "~/.kv cannot be opened; kv needs read access to repair and maintain local vault state",
+        )];
+    }
+    if !allows_write_search(&kv) {
+        match filesystem_is_read_only(&kv) {
+            Ok(true) => {
+                return vec![Check::fail(
+                    "~/.kv is on a read-only filesystem; kv cannot maintain local vault state",
+                )];
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return vec![Check::fail(format!(
+                    "~/.kv filesystem cannot be inspected: {error}"
+                ))];
+            }
+        }
+    }
     if let Some(problem) = privacy_problem(&metadata) {
         return vec![Check::warn(format!(
             "~/.kv privacy needs review: {problem}"
         ))];
-    }
-    if !allows_write_search(&kv) {
-        return vec![Check::fail(
-            "~/.kv does not allow write and search access; kv cannot maintain local vault state",
-        )];
     }
     vec![Check::pass("~/.kv exists and is private")]
 }
@@ -463,6 +500,55 @@ mod tests {
                 .any(|check| check.message == "fresh state: no vault found before kv init"),
             "{checks:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_state_dir_is_repairable_and_not_a_failure() {
+        let scratch = TestRoot::new("repairable-state");
+        let state = scratch.home().join(".kv");
+        std::fs::create_dir(&state).unwrap();
+        set_mode(&state, 0o500);
+        let checks = collect_checks_for(
+            vec![Check::pass("Linux platform")],
+            Some(&scratch.home()),
+            &scratch.proj(),
+        );
+        assert!(
+            checks.iter().all(|check| check.severity != Severity::Fail),
+            "{checks:?}"
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.message == "~/.kv exists and is private"),
+            "{checks:?}"
+        );
+        set_mode(&state, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_state_dir_is_a_failure() {
+        if rustix::process::getuid().as_raw() == 0 {
+            return;
+        }
+        let scratch = TestRoot::new("unreadable-state");
+        let state = scratch.home().join(".kv");
+        std::fs::create_dir(&state).unwrap();
+        set_mode(&state, 0o000);
+        let checks = collect_checks_for(
+            vec![Check::pass("Linux platform")],
+            Some(&scratch.home()),
+            &scratch.proj(),
+        );
+        assert!(
+            checks.iter().any(|check| {
+                check.severity == Severity::Fail && check.message.contains("~/.kv cannot be opened")
+            }),
+            "{checks:?}"
+        );
+        set_mode(&state, 0o700);
     }
 
     #[cfg(unix)]
