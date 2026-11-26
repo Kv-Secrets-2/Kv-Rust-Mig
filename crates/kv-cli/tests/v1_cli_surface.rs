@@ -11,7 +11,7 @@ mod owner;
 use owner::{Scratch, kv_bin, pty, python3};
 use std::process::Command;
 
-fn run(scratch: &Scratch, args: &[&str]) -> (i32, String) {
+fn run_streams(scratch: &Scratch, args: &[&str]) -> (i32, String, String) {
     let output = Command::new(kv_bin())
         .args(args)
         .current_dir(scratch.proj())
@@ -19,9 +19,17 @@ fn run(scratch: &Scratch, args: &[&str]) -> (i32, String) {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    (output.status.code().unwrap_or(-1), text)
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+fn run(scratch: &Scratch, args: &[&str]) -> (i32, String) {
+    let (code, mut text, stderr) = run_streams(scratch, args);
+    text.push_str(&stderr);
+    (code, text)
 }
 
 fn assert_absent(text: &str, needles: &[&str]) {
@@ -64,10 +72,11 @@ fn mcp_server_invocation_is_refused_without_starting_mcp() {
         vec!["mcp-server", "--help"],
         vec!["mcp-server", "--allow-execute"],
     ] {
-        let (code, text) = run(&scratch, &args);
-        assert_eq!(code, 1, "{args:?}: {text}");
+        let (code, stdout, stderr) = run_streams(&scratch, &args);
+        assert_eq!(code, 1, "{args:?}: {stderr}");
+        assert_eq!(stdout, "", "{args:?}");
         assert_eq!(
-            text, "kv mcp-server is not part of the Linux v1 surface.\n",
+            stderr, "kv mcp-server is not part of the Linux v1 surface.\n",
             "{args:?}"
         );
     }
