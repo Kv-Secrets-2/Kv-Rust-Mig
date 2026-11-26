@@ -1,15 +1,31 @@
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use zeroize::Zeroize;
+
+mod frame;
+pub use frame::{
+    Frame, FrameError, FrameKind, IPC_FRAME_HEADER_LEN, IPC_FRAME_MAGIC, IPC_FRAME_VERSION,
+    decode_frame, decode_frame_header, decode_json_frame, encode_frame, encode_json_frame,
+    frame_header,
+};
 
 #[cfg(unix)]
 mod unix_transport;
 #[cfg(unix)]
-pub use unix_transport::{connect_unix, read_complete_reply, write_all_until};
+pub use unix_transport::{
+    BrokerRequest, BrokerRequestReadError, RequestWire, connect_unix, exchange_frames,
+    exchange_frames_until, read_broker_request_until, read_broker_request_until_preserving_wire,
+    read_complete_reply, read_frame_request_until, read_frame_response_until, read_frame_until,
+    write_all_until, write_broker_response_until, write_frame_request_until,
+    write_frame_response_until, write_frame_until,
+};
 
 pub const MAX_MSG: usize = 1024 * 1024;
 pub const MAX_AGENT_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
@@ -217,6 +233,8 @@ pub enum ProtocolError {
     #[error("{0}")]
     InvalidUtf8(String),
     #[error(transparent)]
+    Frame(#[from] FrameError),
+    #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -392,11 +410,12 @@ fn python_utf8_error(bytes: &[u8], error: std::str::Utf8Error) -> String {
 }
 
 pub fn reply_bytes(response: &Value) -> Result<Vec<u8>, ProtocolError> {
-    let bytes = kv_store::pyjson::to_vec_python(response, false)
+    let mut bytes = kv_store::pyjson::to_vec_python(response, false)
         .map_err(|error| ProtocolError::Message(error.to_string()))?;
     if bytes.len() <= MAX_AGENT_RESPONSE_BYTES {
         return Ok(bytes);
     }
+    bytes.zeroize();
     let mut replacement = Map::new();
     replacement.insert("error".into(), Value::String("response too large".into()));
     replacement.insert("response_truncated".into(), Value::Bool(true));
@@ -412,6 +431,52 @@ pub fn write_reply<W: Write>(writer: &mut W, response: &Value) -> Result<(), Pro
     writer.write_all(&reply_bytes(response)?)?;
     writer.flush()?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn absolute_deadline(timeout: Duration) -> Result<Instant, ProtocolError> {
+    Instant::now().checked_add(timeout).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "IPC timeout is too large").into()
+    })
+}
+
+fn request_document(
+    cmd: &str,
+    token: String,
+    fields: &Map<String, Value>,
+    protect_trusted_fields: bool,
+) -> Value {
+    let mut request = Map::new();
+    if protect_trusted_fields {
+        for (name, value) in fields {
+            if name != "cmd" && name != "token" {
+                request.insert(name.clone(), value.clone());
+            }
+        }
+        request.insert("cmd".into(), Value::String(cmd.into()));
+        request.insert("token".into(), Value::String(token));
+    } else {
+        request.insert("cmd".into(), Value::String(cmd.into()));
+        request.insert("token".into(), Value::String(token));
+        for (name, value) in fields {
+            request.insert(name.clone(), value.clone());
+        }
+    }
+    request.entry("audit_warning").or_insert(Value::Bool(false));
+    Value::Object(request)
+}
+
+#[cfg(unix)]
+fn agent_request_document(
+    root: &Path,
+    cmd: &str,
+    fields: &Map<String, Value>,
+    protect_trusted_fields: bool,
+) -> Result<Value, ProtocolError> {
+    let runtime = runtime_dir()?;
+    let token_path = agent_token_path(Some(root))?;
+    let token = private_token(&token_path, &runtime);
+    Ok(request_document(cmd, token, fields, protect_trusted_fields))
 }
 
 pub fn agent_request(
@@ -457,18 +522,74 @@ pub fn agent_request_with_timeout(
                 return Err(ProtocolError::Message(OUTDATED_SERVICE_REFUSAL.into()));
             }
         }
-        let runtime = runtime_dir()?;
-        let token_path = agent_token_path(Some(root))?;
-        let token = private_token(&token_path, &runtime);
-        let mut request = Map::new();
-        request.insert("cmd".into(), Value::String(cmd.into()));
-        request.insert("token".into(), Value::String(token));
-        for (name, value) in fields {
-            request.insert(name.clone(), value.clone());
-        }
-        request.entry("audit_warning").or_insert(Value::Bool(false));
-        unix_transport::exchange(&path, &Value::Object(request), timeout, false)
+        let request = agent_request_document(root, cmd, fields, false)?;
+        unix_transport::exchange(&path, &request, timeout, false)
     }
+}
+
+/// Framed broker request with the default 30-second overall deadline.
+///
+/// This is the versioned IPC counterpart of [`agent_request`]. The legacy API
+/// is unchanged for existing callers and services; callers migrate explicitly
+/// so a service can choose when to require or accept framed transport.
+pub fn agent_request_framed(
+    root: impl AsRef<Path>,
+    cmd: &str,
+    fields: &Map<String, Value>,
+) -> Result<Value, ProtocolError> {
+    agent_request_framed_with_deadline(root, cmd, fields, Duration::from_secs(30))
+}
+
+/// Framed broker request under one overall deadline.
+///
+/// Connect, the enforcement preflight, request write and response read all
+/// share `timeout`; partial progress never extends it. The preflight is capped
+/// at five seconds inside that overall budget. Unlike
+/// [`agent_request_with_timeout`], there is no unbounded mode: long-running
+/// broker operations must choose an explicit finite bound.
+pub fn agent_request_framed_with_deadline(
+    root: impl AsRef<Path>,
+    cmd: &str,
+    fields: &Map<String, Value>,
+    timeout: Duration,
+) -> Result<Value, ProtocolError> {
+    #[cfg(windows)]
+    {
+        let _ = (root, cmd, fields, timeout);
+        return Err(ProtocolError::Message(
+            "agent TCP transport is not yet supported on Windows".into(),
+        ));
+    }
+    #[cfg(unix)]
+    {
+        let root = root.as_ref();
+        let path = agent_socket_path(Some(root))?;
+        let request = agent_request_document(root, cmd, fields, true)?;
+        framed_agent_exchange(&path, &request, timeout)
+    }
+}
+
+#[cfg(unix)]
+fn framed_agent_exchange(
+    path: &Path,
+    request: &Value,
+    timeout: Duration,
+) -> Result<Value, ProtocolError> {
+    let overall = absolute_deadline(timeout)?;
+    let serialized_cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
+    if !matches!(serialized_cmd, "status" | "lock" | "stop") {
+        let probe_cap = std::cmp::min(overall, absolute_deadline(Duration::from_secs(5))?);
+        let enforcement =
+            unix_transport::exchange_frames_until(path, &json!({"cmd":"enforcement"}), probe_cap)?;
+        if enforcement
+            .get("enforcement")
+            .and_then(Value::as_u64)
+            .is_none_or(|generation| generation < ENFORCEMENT_GENERATION)
+        {
+            return Err(ProtocolError::Message(OUTDATED_SERVICE_REFUSAL.into()));
+        }
+    }
+    unix_transport::exchange_frames_until(path, request, overall)
 }
 
 #[cfg(test)]
@@ -501,6 +622,28 @@ mod tests {
             error.to_string(),
             "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte"
         );
+    }
+
+    #[test]
+    fn request_fields_cannot_replace_trusted_cmd_or_token() {
+        let mut fields = Map::new();
+        fields.insert("cmd".into(), json!("forged"));
+        fields.insert("token".into(), json!("forged"));
+        fields.insert("dummy_secret".into(), json!("dummy"));
+        let request = request_document("status", "trusted-token".into(), &fields, true);
+        assert_eq!(request["cmd"], "status");
+        assert_eq!(request["token"], "trusted-token");
+        assert_eq!(request["dummy_secret"], "dummy");
+    }
+
+    #[test]
+    fn legacy_request_fields_keep_legacy_override_behavior() {
+        let mut fields = Map::new();
+        fields.insert("cmd".into(), json!("caller-cmd"));
+        fields.insert("token".into(), json!("caller-token"));
+        let request = request_document("status", "trusted-token".into(), &fields, false);
+        assert_eq!(request["cmd"], "caller-cmd");
+        assert_eq!(request["token"], "caller-token");
     }
 
     #[test]

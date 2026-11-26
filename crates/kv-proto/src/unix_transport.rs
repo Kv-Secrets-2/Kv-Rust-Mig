@@ -9,8 +9,13 @@ use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::io::Errno;
 use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
 use serde_json::Value;
+use zeroize::Zeroizing;
 
-use crate::{MAX_AGENT_RESPONSE_BYTES, MAX_MSG, ProtocolError, python_utf8_error};
+use crate::frame::parse_json_payload;
+use crate::{
+    Frame, FrameKind, IPC_FRAME_HEADER_LEN, IPC_FRAME_MAGIC, MAX_AGENT_RESPONSE_BYTES, MAX_MSG,
+    ProtocolError, decode_frame_header, frame_header, python_utf8_error,
+};
 
 fn timed_out() -> io::Error {
     io::Error::new(io::ErrorKind::TimedOut, "timed out")
@@ -298,6 +303,352 @@ fn read_reply(socket: &mut UnixStream, budget: ReplyBudget) -> Result<Value, Pro
             {
                 return Ok(value);
             }
+        }
+    }
+}
+
+fn read_exact_or_empty_eof(
+    socket: &mut UnixStream,
+    buf: &mut [u8],
+    deadline: Instant,
+) -> io::Result<bool> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        let read = receive(socket, &mut buf[filled..], Some(deadline))?;
+        if read == 0 {
+            if filled == 0 {
+                return Ok(false);
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "IPC frame ended before completion",
+            ));
+        }
+        filled += read;
+    }
+    Ok(true)
+}
+
+fn read_exact_required(
+    socket: &mut UnixStream,
+    buf: &mut [u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    if buf.is_empty() {
+        return Ok(());
+    }
+    if read_exact_or_empty_eof(socket, buf, deadline)? {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "IPC frame ended before completion",
+        ))
+    }
+}
+
+fn read_frame_after_first(
+    socket: &mut UnixStream,
+    first: u8,
+    deadline: Instant,
+    expected: Option<FrameKind>,
+) -> Result<Frame, ProtocolError> {
+    let mut header = [0_u8; IPC_FRAME_HEADER_LEN];
+    header[0] = first;
+    read_exact_required(socket, &mut header[1..], deadline)?;
+    let (kind, payload_len) = decode_frame_header(&header)?;
+    if let Some(expected) = expected
+        && kind != expected
+    {
+        return Err(crate::FrameError::WrongKind {
+            expected,
+            actual: kind,
+        }
+        .into());
+    }
+    // The header has already bounded this allocation. Read directly into the
+    // final buffer rather than concatenating unbounded chunks.
+    let mut payload = Zeroizing::new(vec![0_u8; payload_len]);
+    read_exact_required(socket, &mut payload, deadline)?;
+    Ok(Frame { kind, payload })
+}
+
+fn read_frame_with_kind_until(
+    socket: &mut UnixStream,
+    deadline: Instant,
+    expected: Option<FrameKind>,
+) -> Result<Option<Frame>, ProtocolError> {
+    socket.set_nonblocking(true)?;
+    let mut first = [0_u8; 1];
+    if !read_exact_or_empty_eof(socket, &mut first, deadline)? {
+        return Ok(None);
+    }
+    read_frame_after_first(socket, first[0], deadline, expected).map(Some)
+}
+
+/// Read one versioned IPC frame. Returns `None` only when the peer closes
+/// before the first header byte; EOF anywhere later is an error.
+pub fn read_frame_until(
+    socket: &mut UnixStream,
+    deadline: Instant,
+) -> Result<Option<Frame>, ProtocolError> {
+    read_frame_with_kind_until(socket, deadline, None)
+}
+
+/// Write one versioned IPC frame within the caller's existing absolute deadline.
+pub fn write_frame_until(
+    socket: &mut UnixStream,
+    kind: FrameKind,
+    payload: &[u8],
+    deadline: Instant,
+) -> Result<(), ProtocolError> {
+    socket.set_nonblocking(true)?;
+    let header = frame_header(kind, payload.len())?;
+    write_all_until(socket, &header, Some(deadline))?;
+    write_all_until(socket, payload, Some(deadline))?;
+    socket.flush()?;
+    Ok(())
+}
+
+pub fn write_frame_request_until(
+    socket: &mut UnixStream,
+    request: &Value,
+    deadline: Instant,
+) -> Result<(), ProtocolError> {
+    let payload = crate::frame::json_payload(request)?;
+    write_frame_until(socket, FrameKind::Request, &payload, deadline)
+}
+
+pub fn read_frame_request_until(
+    socket: &mut UnixStream,
+    deadline: Instant,
+) -> Result<Option<Value>, ProtocolError> {
+    let Some(frame) = read_frame_with_kind_until(socket, deadline, Some(FrameKind::Request))?
+    else {
+        return Ok(None);
+    };
+    parse_json_payload(&frame.payload).map(Some)
+}
+
+pub fn write_frame_response_until(
+    socket: &mut UnixStream,
+    response: &Value,
+    deadline: Instant,
+) -> Result<(), ProtocolError> {
+    let payload = Zeroizing::new(crate::reply_bytes(response)?);
+    write_frame_until(socket, FrameKind::Response, &payload, deadline)
+}
+
+pub fn read_frame_response_until(
+    socket: &mut UnixStream,
+    deadline: Instant,
+) -> Result<Value, ProtocolError> {
+    let frame = read_frame_with_kind_until(socket, deadline, Some(FrameKind::Response))?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "IPC response ended before its frame header",
+            )
+        })?;
+    parse_json_payload(&frame.payload)
+}
+
+/// Exchange one framed request for one framed response. Connect, request write
+/// and response read all share the single absolute `deadline`; progress never
+/// extends it.
+pub fn exchange_frames_until(
+    path: &Path,
+    request: &Value,
+    deadline: Instant,
+) -> Result<Value, ProtocolError> {
+    let mut socket = connect_unix(path, Some(deadline))?;
+    write_frame_request_until(&mut socket, request, deadline)?;
+    read_frame_response_until(&mut socket, deadline)
+}
+
+/// Exchange one framed request for one framed response under one overall
+/// timeout. Unlike the legacy compatibility reader, partial progress does not
+/// reset this budget.
+pub fn exchange_frames(
+    path: &Path,
+    request: &Value,
+    timeout: Duration,
+) -> Result<Value, ProtocolError> {
+    let deadline = deadline_after(Some(timeout))?.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "frame exchange requires a deadline",
+        )
+    })?;
+    exchange_frames_until(path, request, deadline)
+}
+
+/// Wire encoding used by an accepted broker request. A service can accept the
+/// legacy unframed JSON encoding while migrated clients use versioned frames,
+/// then answer with the matching encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestWire {
+    LegacyJson,
+    FramedV1,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct BrokerRequest {
+    pub value: Value,
+    pub wire: RequestWire,
+}
+
+/// A broker-request read failure with the request encoding detected before
+/// the failure. `wire` is absent only when the first byte itself could not be
+/// read (or the socket could not be prepared), before either encoding was
+/// identified.
+pub struct BrokerRequestReadError {
+    wire: Option<RequestWire>,
+    error: ProtocolError,
+}
+
+impl BrokerRequestReadError {
+    fn new(wire: Option<RequestWire>, error: ProtocolError) -> Self {
+        Self { wire, error }
+    }
+
+    pub fn wire(&self) -> Option<RequestWire> {
+        self.wire
+    }
+
+    pub fn into_error(self) -> ProtocolError {
+        self.error
+    }
+}
+
+impl std::fmt::Debug for BrokerRequestReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrokerRequestReadError")
+            .field("wire", &self.wire)
+            .field("error", &self.error)
+            .finish()
+    }
+}
+
+impl std::fmt::Display for BrokerRequestReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for BrokerRequestReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl std::fmt::Debug for BrokerRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrokerRequest")
+            .field("value", &"<redacted>")
+            .field("wire", &self.wire)
+            .finish()
+    }
+}
+
+fn read_legacy_json_after_first(
+    socket: &mut UnixStream,
+    first: u8,
+    deadline: Instant,
+) -> Result<Value, ProtocolError> {
+    let mut bytes = vec![first];
+    let mut document_start = 0;
+    let mut chunk = [0_u8; 65_536];
+    loop {
+        while document_start < bytes.len() && json_whitespace(bytes[document_start]) {
+            document_start += 1;
+        }
+        if document_start < bytes.len()
+            && let Some(value) = complete_document(&bytes, document_start)?
+        {
+            return Ok(value);
+        }
+        let read = receive(socket, &mut chunk, Some(deadline))?;
+        if read == 0 {
+            if let Err(error) = std::str::from_utf8(&bytes) {
+                return Err(ProtocolError::InvalidUtf8(python_utf8_error(&bytes, error)));
+            }
+            return serde_json::from_slice(&bytes).map_err(ProtocolError::Json);
+        }
+        if bytes.len().saturating_add(read) > MAX_MSG {
+            return Err(ProtocolError::RequestTooLarge);
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+}
+
+/// Read one broker request in either the current framed encoding or the legacy
+/// unframed JSON encoding. Framed input starts with the versioned magic; every
+/// other byte is handled by the legacy JSON reader, so existing Rust callers do
+/// not need a wire-format negotiation step. This compatibility wrapper keeps
+/// the original error type; callers that must answer a malformed request in
+/// its own encoding use [`read_broker_request_until_preserving_wire`].
+pub fn read_broker_request_until(
+    socket: &mut UnixStream,
+    deadline: Instant,
+) -> Result<Option<BrokerRequest>, ProtocolError> {
+    read_broker_request_until_preserving_wire(socket, deadline)
+        .map_err(BrokerRequestReadError::into_error)
+}
+
+/// Variant of [`read_broker_request_until`] whose errors retain the wire
+/// encoding as soon as the first byte has identified it. This does not extend
+/// the caller's deadline or alter any size limit.
+pub fn read_broker_request_until_preserving_wire(
+    socket: &mut UnixStream,
+    deadline: Instant,
+) -> Result<Option<BrokerRequest>, BrokerRequestReadError> {
+    socket
+        .set_nonblocking(true)
+        .map_err(|error| BrokerRequestReadError::new(None, error.into()))?;
+    let mut first = [0_u8; 1];
+    if !read_exact_or_empty_eof(socket, &mut first, deadline)
+        .map_err(|error| BrokerRequestReadError::new(None, error.into()))?
+    {
+        return Ok(None);
+    }
+    if first[0] == IPC_FRAME_MAGIC[0] {
+        let frame = read_frame_after_first(socket, first[0], deadline, Some(FrameKind::Request))
+            .map_err(|error| BrokerRequestReadError::new(Some(RequestWire::FramedV1), error))?;
+        let value = parse_json_payload(&frame.payload)
+            .map_err(|error| BrokerRequestReadError::new(Some(RequestWire::FramedV1), error))?;
+        return Ok(Some(BrokerRequest {
+            value,
+            wire: RequestWire::FramedV1,
+        }));
+    }
+    let value = read_legacy_json_after_first(socket, first[0], deadline)
+        .map_err(|error| BrokerRequestReadError::new(Some(RequestWire::LegacyJson), error))?;
+    Ok(Some(BrokerRequest {
+        value,
+        wire: RequestWire::LegacyJson,
+    }))
+}
+
+/// Write a response in the same wire encoding as its request. Legacy responses
+/// keep the exact unframed JSON shape; framed responses carry the versioned
+/// header and bounded length.
+pub fn write_broker_response_until(
+    socket: &mut UnixStream,
+    response: &Value,
+    wire: RequestWire,
+    deadline: Instant,
+) -> Result<(), ProtocolError> {
+    match wire {
+        RequestWire::FramedV1 => write_frame_response_until(socket, response, deadline),
+        RequestWire::LegacyJson => {
+            socket.set_nonblocking(true)?;
+            let payload = Zeroizing::new(crate::reply_bytes(response)?);
+            write_all_until(socket, &payload, Some(deadline))?;
+            socket.flush()?;
+            Ok(())
         }
     }
 }
@@ -804,5 +1155,465 @@ finally:
             let python: Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(rust, python, "case={case}, complete={complete}");
         }
+    }
+
+    #[test]
+    fn framed_request_response_round_trip_and_direction_errors() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let request = read_frame_request_until(&mut server, deadline)
+                .unwrap()
+                .expect("request frame");
+            assert_eq!(request, serde_json::json!({"cmd":"status"}));
+            write_frame_response_until(&mut server, &serde_json::json!({"running":true}), deadline)
+                .unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        write_frame_request_until(&mut client, &serde_json::json!({"cmd":"status"}), deadline)
+            .unwrap();
+        assert_eq!(
+            read_frame_response_until(&mut client, deadline).unwrap(),
+            serde_json::json!({"running":true})
+        );
+        worker.join().unwrap();
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        write_frame_response_until(
+            &mut server,
+            &serde_json::json!({"wrong":"direction"}),
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        let error = read_frame_request_until(&mut client, Instant::now() + Duration::from_secs(2))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ProtocolError::Frame(crate::FrameError::WrongKind {
+                expected: FrameKind::Request,
+                actual: FrameKind::Response,
+            })
+        ));
+    }
+
+    #[test]
+    fn broker_request_debug_redacts_json_value() {
+        let request = BrokerRequest {
+            value: serde_json::json!({"token":"dummy-secret"}),
+            wire: RequestWire::FramedV1,
+        };
+        let rendered = format!("{request:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("dummy-secret"));
+    }
+
+    #[test]
+    fn broker_reader_accepts_framed_and_legacy_requests_with_matching_replies() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let framed_worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let request = read_broker_request_until(&mut server, deadline)
+                .unwrap()
+                .expect("framed request");
+            assert_eq!(request.wire, RequestWire::FramedV1);
+            assert_eq!(request.value, serde_json::json!({"cmd":"status"}));
+            write_broker_response_until(
+                &mut server,
+                &serde_json::json!({"ok":true}),
+                request.wire,
+                deadline,
+            )
+            .unwrap();
+        });
+        write_frame_request_until(
+            &mut client,
+            &serde_json::json!({"cmd":"status"}),
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(
+            read_frame_response_until(&mut client, Instant::now() + Duration::from_secs(2))
+                .unwrap(),
+            serde_json::json!({"ok":true})
+        );
+        framed_worker.join().unwrap();
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.write_all(br#"{"cmd":"status"}"#).unwrap();
+        let legacy_worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let request = read_broker_request_until(&mut server, deadline)
+                .unwrap()
+                .expect("legacy request");
+            assert_eq!(request.wire, RequestWire::LegacyJson);
+            assert_eq!(request.value, serde_json::json!({"cmd":"status"}));
+            write_broker_response_until(
+                &mut server,
+                &serde_json::json!({"ok":true}),
+                request.wire,
+                deadline,
+            )
+            .unwrap();
+        });
+        let mut legacy_reply = Vec::new();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client.read_to_end(&mut legacy_reply).unwrap();
+        assert_eq!(legacy_reply.first(), Some(&b'{'));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&legacy_reply).unwrap(),
+            serde_json::json!({"ok":true})
+        );
+        legacy_worker.join().unwrap();
+    }
+
+    #[test]
+    fn broker_read_errors_preserve_the_detected_wire() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.write_all(b"{").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::LegacyJson));
+        assert!(matches!(error.into_error(), ProtocolError::Json(_)));
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let malformed = crate::encode_frame(FrameKind::Request, b"{").unwrap();
+        client.write_all(&malformed).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::FramedV1));
+        assert!(matches!(error.into_error(), ProtocolError::Json(_)));
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let writer = thread::spawn(move || {
+            let _ = client.write_all(&vec![b' '; MAX_MSG + 1]);
+            let _ = client.shutdown(std::net::Shutdown::Write);
+        });
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::LegacyJson));
+        assert!(matches!(error.into_error(), ProtocolError::RequestTooLarge));
+        writer.join().unwrap();
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let mut header = [0_u8; IPC_FRAME_HEADER_LEN];
+        header[..4].copy_from_slice(&IPC_FRAME_MAGIC);
+        header[4..6].copy_from_slice(&crate::IPC_FRAME_VERSION.to_be_bytes());
+        header[6] = 1;
+        header[8..12].copy_from_slice(&((MAX_MSG + 1) as u32).to_be_bytes());
+        client.write_all(&header).unwrap();
+        let error = read_broker_request_until_preserving_wire(
+            &mut server,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.wire(), Some(RequestWire::FramedV1));
+        assert!(matches!(
+            error.into_error(),
+            ProtocolError::Frame(crate::FrameError::PayloadTooLarge {
+                kind: FrameKind::Request,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn framed_exchange_enforces_one_overall_deadline_while_response_trickles() {
+        let path = SocketPath::new();
+        let listener = UnixListener::bind(&path.0).unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let request = read_frame_request_until(&mut socket, deadline).unwrap();
+            assert!(request.is_some());
+            let bytes =
+                crate::encode_json_frame(FrameKind::Response, &serde_json::json!({"slow":true}))
+                    .unwrap();
+            for byte in bytes {
+                if socket.write_all(&[byte]).is_err() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let start = Instant::now();
+        let error = exchange_frames(
+            &path.0,
+            &serde_json::json!({"cmd":"status"}),
+            Duration::from_millis(80),
+        )
+        .unwrap_err();
+        timeout(error);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn framed_write_uses_one_deadline_even_after_partial_progress() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        // Keep the peer open but unread, and fill the socket first so the
+        // result does not depend on a platform's default buffer size.
+        client.set_nonblocking(true).unwrap();
+        let filler = [b'x'; 8192];
+        let mut filled = 0;
+        loop {
+            match client.write(&filler) {
+                Ok(0) => break,
+                Ok(written) => {
+                    filled += written;
+                    assert!(filled < 64 * 1024 * 1024, "socket never backpressured");
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("failed to fill test socket: {error}"),
+            }
+        }
+        // Make room for only part of the frame, so the timeout is reached only
+        // after successful forward progress.
+        let mut space = [0_u8; 8192];
+        server.read_exact(&mut space).unwrap();
+        let payload = vec![b' '; MAX_AGENT_RESPONSE_BYTES];
+        let start = Instant::now();
+        let error = write_frame_until(
+            &mut client,
+            FrameKind::Response,
+            &payload,
+            start + Duration::from_millis(80),
+        )
+        .unwrap_err();
+        timeout(error);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        server.set_nonblocking(true).unwrap();
+        let mut received = Vec::new();
+        let mut chunk = [0_u8; 8192];
+        while let Ok(read) = server.read(&mut chunk) {
+            if read == 0 {
+                break;
+            }
+            received.extend_from_slice(&chunk[..read]);
+        }
+        let filler_remainder = filled - space.len();
+        assert!(
+            received.len() > filler_remainder + IPC_FRAME_HEADER_LEN,
+            "the deadline must expire only after the header and some payload bytes are written"
+        );
+        assert_eq!(
+            &received[filler_remainder..filler_remainder + IPC_FRAME_MAGIC.len()],
+            b"KVIP"
+        );
+    }
+
+    #[test]
+    fn framed_oversize_reply_uses_structured_truncation_fallback() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let response = serde_json::json!({"secret":"x".repeat(MAX_AGENT_RESPONSE_BYTES)});
+        let deadline = Instant::now() + Duration::from_secs(2);
+        write_frame_response_until(&mut server, &response, deadline).unwrap();
+        let answer = read_frame_response_until(&mut client, deadline).unwrap();
+        assert_eq!(answer["response_truncated"], true);
+        assert_eq!(answer["error"], "response too large");
+    }
+
+    #[test]
+    fn wrong_direction_is_rejected_before_payload_read_or_allocation() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let header = frame_header(FrameKind::Response, MAX_AGENT_RESPONSE_BYTES).unwrap();
+        server.write_all(&header).unwrap();
+        let start = Instant::now();
+        let error =
+            read_frame_request_until(&mut client, start + Duration::from_secs(5)).unwrap_err();
+        assert!(matches!(
+            error,
+            ProtocolError::Frame(crate::FrameError::WrongKind {
+                expected: FrameKind::Request,
+                actual: FrameKind::Response,
+            })
+        ));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(server);
+    }
+
+    #[test]
+    fn oversized_declared_frame_is_rejected_before_payload_read_or_allocation() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let mut header = frame_header(FrameKind::Response, 0).unwrap();
+        header[8..12].copy_from_slice(&u32::MAX.to_be_bytes());
+        server.write_all(&header).unwrap();
+        let start = Instant::now();
+        let error =
+            read_frame_response_until(&mut client, start + Duration::from_secs(5)).unwrap_err();
+        assert!(matches!(
+            error,
+            ProtocolError::Frame(crate::FrameError::PayloadTooLarge {
+                kind: FrameKind::Response,
+                actual,
+                ..
+            }) if actual == u32::MAX as usize
+        ));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(server);
+    }
+
+    #[test]
+    fn frame_eof_rules_distinguish_clean_idle_close_from_truncation() {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        drop(server);
+        assert!(
+            read_frame_until(&mut client, Instant::now() + Duration::from_secs(1))
+                .unwrap()
+                .is_none()
+        );
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let bytes = crate::encode_json_frame(FrameKind::Response, &serde_json::json!({})).unwrap();
+        server.write_all(&bytes[..bytes.len() - 1]).unwrap();
+        drop(server);
+        let error =
+            read_frame_until(&mut client, Instant::now() + Duration::from_secs(1)).unwrap_err();
+        assert!(
+            matches!(error, ProtocolError::Io(ref error) if error.kind() == io::ErrorKind::UnexpectedEof),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn exact_cap_frame_round_trips_without_extra_memory_slop() {
+        let mut payload = vec![b' '; MAX_AGENT_RESPONSE_BYTES - 2];
+        payload.extend_from_slice(b"{}");
+        assert_eq!(payload.len(), MAX_AGENT_RESPONSE_BYTES);
+        let bytes = crate::encode_frame(FrameKind::Response, &payload).unwrap();
+        assert_eq!(bytes.len(), IPC_FRAME_HEADER_LEN + MAX_AGENT_RESPONSE_BYTES);
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let writer = thread::spawn(move || {
+            server.write_all(&bytes).unwrap();
+        });
+        assert_eq!(
+            read_frame_response_until(&mut client, Instant::now() + Duration::from_secs(5))
+                .unwrap(),
+            serde_json::json!({})
+        );
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn legacy_compatibility_reader_also_uses_one_overall_deadline() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let writer = thread::spawn(move || {
+            for byte in br#"{"cmd":"status"}"# {
+                if server.write_all(&[*byte]).is_err() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let start = Instant::now();
+        let error =
+            read_broker_request_until(&mut client, start + Duration::from_millis(80)).unwrap_err();
+        timeout(error);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(client);
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn framed_agent_exchange_uses_frames_for_preflight_and_request() {
+        let path = SocketPath::new();
+        let listener = UnixListener::bind(&path.0).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            for expected in ["enforcement", "list"] {
+                let mut socket = accept_bounded(&listener);
+                let request = read_frame_request_until(&mut socket, deadline)
+                    .unwrap()
+                    .expect("framed agent request");
+                assert_eq!(request["cmd"], expected);
+                let response = if expected == "enforcement" {
+                    serde_json::json!({"enforcement":crate::ENFORCEMENT_GENERATION})
+                } else {
+                    serde_json::json!({"ok":true})
+                };
+                write_frame_response_until(&mut socket, &response, deadline).unwrap();
+            }
+        });
+        let answer = crate::framed_agent_exchange(
+            &path.0,
+            &serde_json::json!({"cmd":"list","token":"test"}),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(answer, serde_json::json!({"ok":true}));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn framed_status_skips_preflight_and_fields_cannot_forge_command_or_token() {
+        let path = SocketPath::new();
+        let listener = UnixListener::bind(&path.0).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut socket = accept_bounded(&listener);
+            let request = read_frame_request_until(&mut socket, deadline)
+                .unwrap()
+                .expect("framed status request");
+            assert_eq!(request["cmd"], "status");
+            assert_eq!(request["token"], "trusted-token");
+            write_frame_response_until(&mut socket, &serde_json::json!({"ok":true}), deadline)
+                .unwrap();
+        });
+        let mut fields = serde_json::Map::new();
+        fields.insert("cmd".into(), serde_json::json!("forged"));
+        fields.insert("token".into(), serde_json::json!("forged"));
+        fields.insert("dummy_secret".into(), serde_json::json!("dummy"));
+        let request = crate::request_document("status", "trusted-token".into(), &fields, true);
+        let answer =
+            crate::framed_agent_exchange(&path.0, &request, Duration::from_secs(2)).unwrap();
+        assert_eq!(answer, serde_json::json!({"ok":true}));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn framed_agent_deadline_spans_preflight_and_request() {
+        let path = SocketPath::new();
+        let listener = UnixListener::bind(&path.0).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            for expected in ["enforcement", "list"] {
+                let mut socket = accept_bounded(&listener);
+                let Ok(Some(request)) = read_frame_request_until(&mut socket, deadline) else {
+                    return;
+                };
+                assert_eq!(request["cmd"], expected);
+                thread::sleep(Duration::from_millis(120));
+                let response = if expected == "enforcement" {
+                    serde_json::json!({"enforcement":crate::ENFORCEMENT_GENERATION})
+                } else {
+                    serde_json::json!({"ok":true})
+                };
+                let _ = write_frame_response_until(&mut socket, &response, deadline);
+            }
+        });
+        let start = Instant::now();
+        let error = crate::framed_agent_exchange(
+            &path.0,
+            &serde_json::json!({"cmd":"list","token":"test"}),
+            Duration::from_millis(200),
+        )
+        .unwrap_err();
+        timeout(error);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        server.join().unwrap();
     }
 }
