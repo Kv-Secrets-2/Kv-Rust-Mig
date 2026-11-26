@@ -192,6 +192,12 @@ impl Audit {
             )
             .map(|bytes| (bytes, None)),
             EncodeInput::Authenticated(position) => {
+                let mut fields = fields;
+                if let Some(label) = state.vault_label.as_deref() {
+                    fields
+                        .entry("vault")
+                        .or_insert_with(|| Value::String(label.into()));
+                }
                 let chain = self
                     .0
                     .authenticated

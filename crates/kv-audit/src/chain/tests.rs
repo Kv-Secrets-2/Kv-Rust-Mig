@@ -605,6 +605,29 @@ fn writer_advances_position_and_refuses_a_rolled_back_tail_before_appending() {
 }
 
 #[test]
+fn authenticated_writer_preserves_the_vault_label_metadata_rule() {
+    let temp = Temp::new();
+    let directory = temp.audit_dir();
+    let audit = Audit::with_authenticated_chain(&directory, trust(ChainPosition::genesis()));
+    audit.set_vault_label(Some("work"));
+    audit
+        .emit_at("labeled", Map::new(), "2026-01-02T03:04:05Z")
+        .unwrap();
+    let bytes = fs::read(directory.join("audit.jsonl")).unwrap();
+    let record: Value = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
+    assert_eq!(record["vault"], "work");
+    assert_eq!(
+        verify_bytes(
+            &bytes,
+            Some(&trust(audit.authenticated_chain_position().unwrap()))
+        ),
+        ChainVerification::Valid {
+            position: audit.authenticated_chain_position().unwrap()
+        }
+    );
+}
+
+#[test]
 fn writer_refuses_corrupt_and_partial_tails_before_appending() {
     for partial in [true, false] {
         let temp = Temp::new();
