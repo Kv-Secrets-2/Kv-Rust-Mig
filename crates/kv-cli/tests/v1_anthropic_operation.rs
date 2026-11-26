@@ -233,7 +233,10 @@ impl Fixture {
             .stdout(Stdio::null())
             .stderr(fs::File::create(log).unwrap());
         if let Some(scale) = clock_scale {
+            let offset_file = self.root.join("permit-clock-offset");
+            fs::write(&offset_file, "0").unwrap();
             command.env("KV_TEST_PERMIT_CLOCK_SCALE", scale);
+            command.env("KV_TEST_PERMIT_CLOCK_OFFSET_FILE", offset_file);
         }
         let child = command.spawn().unwrap();
         wait_until("daemon socket", Duration::from_secs(15), || {
@@ -653,10 +656,10 @@ fn expired_fixed_operation_permit_never_reaches_provider() {
     let provider = start_provider();
     let fixture = Fixture::new();
     fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
-    let _daemon = fixture.start_daemon_with_clock_scale(Some("150"));
+    let _daemon = fixture.start_daemon_with_clock_scale(Some("10"));
     let (request_id, permit_id) = request(&fixture);
     approve_permit(&fixture, &request_id);
-    thread::sleep(Duration::from_secs(4));
+    fs::write(fixture.root.join("permit-clock-offset"), "595").unwrap();
     let args = operation_args(Some(&permit_id), INPUT);
     let (code, expired) = fixture.kv(&args);
     assert_ne!(code, 0);
@@ -668,6 +671,62 @@ fn expired_fixed_operation_permit_never_reaches_provider() {
         provider.events.lock().unwrap().len(),
         0,
         "expiry sends nothing"
+    );
+}
+
+fn execute_approved_once(fixture: &Fixture) -> (i32, String) {
+    let (request_id, permit_id) = request(fixture);
+    approve_permit(fixture, &request_id);
+    fixture.kv(&operation_args(Some(&permit_id), INPUT))
+}
+
+#[test]
+fn checkpoint_loss_or_rollback_blocks_later_approved_operations() {
+    let _serial = TEST_LOCK.lock().unwrap();
+    let provider = start_provider();
+
+    let missing = Fixture::new();
+    fs::write(missing.root.join("ca.der"), &provider.ca_der).unwrap();
+    let missing_daemon = missing.start_daemon();
+    let (code, text) = execute_approved_once(&missing);
+    assert_eq!(code, 0, "initial execution: {text}");
+    assert_eq!(provider.events.lock().unwrap().len(), 1);
+    fs::remove_file(admission_checkpoint_path(&missing)).unwrap();
+    let (code, refused) = execute_approved_once(&missing);
+    assert_ne!(code, 0);
+    assert!(
+        refused.contains("could not be recorded durably"),
+        "missing checkpoint refusal: {refused}"
+    );
+    assert_eq!(
+        provider.events.lock().unwrap().len(),
+        1,
+        "missing checkpoint sent another request"
+    );
+    drop(missing_daemon);
+
+    provider.events.lock().unwrap().clear();
+    let rolled = Fixture::new();
+    fs::write(rolled.root.join("ca.der"), &provider.ca_der).unwrap();
+    let _rolled_daemon = rolled.start_daemon();
+    let (code, text) = execute_approved_once(&rolled);
+    assert_eq!(code, 0, "first rollback-fixture execution: {text}");
+    let checkpoint = admission_checkpoint_path(&rolled);
+    let rolled_back = fs::read(&checkpoint).unwrap();
+    let (code, text) = execute_approved_once(&rolled);
+    assert_eq!(code, 0, "second rollback-fixture execution: {text}");
+    assert_eq!(provider.events.lock().unwrap().len(), 2);
+    fs::write(&checkpoint, rolled_back).unwrap();
+    let (code, refused) = execute_approved_once(&rolled);
+    assert_ne!(code, 0);
+    assert!(
+        refused.contains("could not be recorded durably"),
+        "rolled-back checkpoint refusal: {refused}"
+    );
+    assert_eq!(
+        provider.events.lock().unwrap().len(),
+        2,
+        "rolled-back checkpoint sent another request"
     );
 }
 

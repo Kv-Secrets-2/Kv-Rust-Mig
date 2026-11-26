@@ -32,6 +32,16 @@ pub(super) fn for_session(
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|scale| scale.is_finite() && *scale > 1.0)
     {
+        let clock = ScaledTestClock::new(scale);
+        if let Some(offset_file) = std::env::var_os("KV_TEST_PERMIT_CLOCK_OFFSET_FILE") {
+            return Arc::new(SessionPermits::with_clock(
+                binding,
+                Arc::new(OffsetTestClock {
+                    inner: clock,
+                    offset_file: offset_file.into(),
+                }),
+            ));
+        }
         return Arc::new(SessionPermits::with_clock(
             binding,
             Arc::new(ScaledTestClock::new(scale)),
@@ -59,6 +69,33 @@ impl ScaledTestClock {
             wall_start,
             mono_start: std::time::Instant::now(),
         }
+    }
+}
+
+#[cfg(feature = "test-provider-loopback")]
+struct OffsetTestClock {
+    inner: ScaledTestClock,
+    offset_file: std::path::PathBuf,
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl OffsetTestClock {
+    fn offset(&self) -> f64 {
+        std::fs::read_to_string(&self.offset_file)
+            .ok()
+            .and_then(|text| text.trim().parse::<f64>().ok())
+            .filter(|offset| offset.is_finite() && *offset >= 0.0)
+            .unwrap_or(0.0)
+    }
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl PermitClock for OffsetTestClock {
+    fn wall_seconds(&self) -> f64 {
+        self.inner.wall_seconds() + self.offset()
+    }
+    fn monotonic_seconds(&self) -> f64 {
+        self.inner.monotonic_seconds() + self.offset()
     }
 }
 
