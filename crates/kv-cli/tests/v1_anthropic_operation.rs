@@ -181,6 +181,33 @@ impl Drop for TempDir {
     }
 }
 
+fn run_setup(root: &Path, home: &Path) {
+    let setup = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "v1_fixture_child", "--nocapture"])
+        .env("KV_V1_MODE", "setup")
+        .env("KV_V1_ROOT", root)
+        .env("HOME", home)
+        .output()
+        .unwrap();
+    assert!(
+        setup.status.success(),
+        "setup: {}",
+        String::from_utf8_lossy(&setup.stderr)
+    );
+}
+
+fn reset_vault_contents(fixture: &Fixture) {
+    for entry in fs::read_dir(&fixture.root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            fs::remove_dir_all(path).unwrap();
+        } else {
+            fs::remove_file(path).unwrap();
+        }
+    }
+    run_setup(&fixture.root, &fixture.home);
+}
+
 impl Fixture {
     fn new() -> Self {
         let serial = TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -194,18 +221,7 @@ impl Fixture {
         fs::create_dir(&home).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let home = fs::canonicalize(home).unwrap();
-        let setup = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "v1_fixture_child", "--nocapture"])
-            .env("KV_V1_MODE", "setup")
-            .env("KV_V1_ROOT", &root)
-            .env("HOME", &home)
-            .output()
-            .unwrap();
-        assert!(
-            setup.status.success(),
-            "setup: {}",
-            String::from_utf8_lossy(&setup.stderr)
-        );
+        run_setup(&root, &home);
         let hash = kv_proto::project_hash(Some(&root)).unwrap();
         let socket = home.join(".kv").join(format!("agent-{hash}.sock"));
         Self {
@@ -672,6 +688,37 @@ fn expired_fixed_operation_permit_never_reaches_provider() {
         0,
         "expiry sends nothing"
     );
+}
+
+#[test]
+fn same_path_vault_replacement_gets_fresh_admission_namespace() {
+    let _serial = TEST_LOCK.lock().unwrap();
+    let provider = start_provider();
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
+    let daemon = fixture.start_daemon();
+    let first_journal = admission_journal_dir(&fixture);
+    let (code, text) = execute_approved_once(&fixture);
+    assert_eq!(code, 0, "first generation execution: {text}");
+    assert_eq!(provider.events.lock().unwrap().len(), 1);
+    assert!(first_journal.join("audit.jsonl").exists());
+    drop(daemon);
+
+    reset_vault_contents(&fixture);
+    let _ = fs::remove_file(&fixture.socket);
+    fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
+    let _daemon = fixture.start_daemon();
+    let second_journal = admission_journal_dir(&fixture);
+    assert_ne!(first_journal, second_journal);
+    let (code, text) = execute_approved_once(&fixture);
+    assert_eq!(code, 0, "replacement generation execution: {text}");
+    assert_eq!(
+        provider.events.lock().unwrap().len(),
+        2,
+        "same-path replacement must not inherit the old chain checkpoint"
+    );
+    assert!(first_journal.join("audit.jsonl").exists());
+    assert!(second_journal.join("audit.jsonl").exists());
 }
 
 fn execute_approved_once(fixture: &Fixture) -> (i32, String) {
