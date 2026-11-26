@@ -128,7 +128,10 @@ pub(crate) fn admission_journal(
     master_key: &Key32,
     trust: &TrustContext,
 ) -> Result<kv_audit::AdmissionJournal, AgentError> {
-    let runtime = kv_proto::runtime_dir()?;
+    // The daemon has already validated that the runtime entry itself is a real
+    // owner-only directory. Canonicalize it before constructing the strict audit
+    // namespace so a symlink in HOME cannot make every admission fail closed.
+    let runtime = fs::canonicalize(kv_proto::runtime_dir()?)?;
     let project = kv_proto::project_hash(Some(root))?;
     // The namespace is stable for one initialized or restored vault generation
     // and independent of its path. A same-path restore receives a fresh master

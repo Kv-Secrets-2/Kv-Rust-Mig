@@ -9,7 +9,7 @@ mod owner;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, TcpListener};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -221,17 +221,31 @@ impl Fixture {
     }
 
     fn new_with_mode(approval_mode: Option<&str>) -> Self {
+        Self::new_with_options(approval_mode, false)
+    }
+
+    fn new_with_symlinked_home() -> Self {
+        Self::new_with_options(None, true)
+    }
+
+    fn new_with_options(approval_mode: Option<&str>, symlinked_home: bool) -> Self {
         let serial = TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp =
             TempDir(std::env::temp_dir().join(format!("kvv1{}-{serial}", std::process::id())));
         let _ = fs::remove_dir_all(&temp.0);
         fs::create_dir(&temp.0).unwrap();
         let root = temp.0.join("vault");
-        let home = temp.0.join("home");
+        let real_home = temp.0.join("home");
         fs::create_dir(&root).unwrap();
-        fs::create_dir(&home).unwrap();
+        fs::create_dir(&real_home).unwrap();
         let root = fs::canonicalize(root).unwrap();
-        let home = fs::canonicalize(home).unwrap();
+        let home = if symlinked_home {
+            let link = temp.0.join("home-link");
+            symlink(&real_home, &link).unwrap();
+            link
+        } else {
+            fs::canonicalize(real_home).unwrap()
+        };
         run_setup_with_mode(&root, &home, approval_mode);
         let hash = kv_proto::project_hash(Some(&root)).unwrap();
         let socket = home.join(".kv").join(format!("agent-{hash}.sock"));
@@ -489,7 +503,7 @@ fn admission_checkpoint_path(fixture: &Fixture) -> PathBuf {
 fn fixed_builtin_operation_is_owner_reviewed_once_and_fail_closed() {
     let _serial = TEST_LOCK.lock().unwrap();
     let provider = start_provider();
-    let fixture = Fixture::new();
+    let fixture = Fixture::new_with_symlinked_home();
     fs::write(fixture.root.join("ca.der"), &provider.ca_der).unwrap();
     let _daemon = fixture.start_daemon();
     let count = || provider.events.lock().unwrap().len();
