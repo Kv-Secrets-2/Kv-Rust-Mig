@@ -178,14 +178,22 @@ fn doctor_parser_shape_is_minimal() {
 
 #[test]
 fn fresh_state_is_expected_before_init() {
-    if !sandbox_ready() {
-        eprintln!("SKIP doctor fresh-state regression: trusted working bubblewrap is unavailable");
-        return;
+    let sandbox_ready = sandbox_ready();
+    if cfg!(target_os = "linux") && std::env::var_os("CI").is_some() {
+        assert!(
+            sandbox_ready,
+            "Linux CI must install a trusted working bubblewrap for doctor success-path coverage"
+        );
     }
     let scratch = Scratch::new("doctor-fresh");
     let before = snapshot_tree(&scratch.root);
     let (code, text) = run(&scratch, &["doctor"]);
-    assert_eq!(code, 0, "{text}");
+    if cfg!(target_os = "linux") && sandbox_ready {
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("0 errors"), "{text}");
+    } else {
+        assert_eq!(code, 1, "{text}");
+    }
     assert!(
         text.contains("fresh user state: ~/.kv has not been created yet"),
         "{text}"
@@ -194,7 +202,6 @@ fn fresh_state_is_expected_before_init() {
         text.contains("fresh state: no vault found before kv init"),
         "{text}"
     );
-    assert!(text.contains("0 errors"), "{text}");
     assert_eq!(
         snapshot_tree(&scratch.root),
         before,
