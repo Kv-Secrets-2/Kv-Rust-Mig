@@ -6,12 +6,11 @@ use std::time::Duration;
 use serde_json::{Map, Number, Value};
 
 use crate::chain::{ChainKey, ChainPosition, ChainTrust, VaultIdentity};
-use crate::fs::{AppendFailure, Directory};
+use crate::fs::{AppendFailure, Directory, LOG_LOCK};
 use crate::{
     AuditHealth, Coverage, FolderState, HealthState, LossReason, Order, Warning, WarningChannel,
 };
 
-const LOG_LOCK: &str = "audit.lock";
 const HEALTH_LOCK: &str = "audit-health.lock";
 const HEALTH_FILE: &str = "audit-health.json";
 const UNKEPT: &str = "audit-health.unkept";
@@ -463,7 +462,7 @@ impl Audit {
     }
 }
 
-fn utc_timestamp() -> String {
+pub(crate) fn utc_timestamp() -> String {
     let now = time::OffsetDateTime::now_utc();
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",

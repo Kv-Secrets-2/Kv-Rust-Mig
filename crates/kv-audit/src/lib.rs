@@ -9,10 +9,18 @@
 //! that tuple verification is [`ChainVerification::MissingTrustState`], never
 //! valid history.
 //!
+//! [`AdmissionJournal`] is the fail-closed privileged lifecycle layer: it
+//! verifies the complete authenticated journal and durably publishes an
+//! independent checkpoint before returning a one-shot admission token, then
+//! records terminal outcomes separately. It deliberately contains no hard-lock
+//! latch; hard locking must not wait on audit I/O.
+//!
 //! Audit failure drops the record and queues a fixed warning; under the legacy
 //! policy it never authorizes cancelling an action that already happened. The
 //! Windows writer is not implemented by this crate yet.
 
+#[cfg(unix)]
+mod admission;
 #[cfg(unix)]
 mod chain;
 #[cfg(unix)]
@@ -24,6 +32,12 @@ mod python_json;
 #[cfg(unix)]
 mod runtime;
 
+#[cfg(unix)]
+pub use admission::{
+    ADMISSION_EVENT, Admission, AdmissionJournal, AdmissionOutcomeState, AdmissionReport,
+    AdmissionState, CheckpointFailure, Execution, LifecycleError, MAX_ADMISSION_ACTION_BYTES,
+    OUTCOME_EVENT, OutcomeError, TerminalOutcome, TrustedCheckpoint, scan_admissions,
+};
 #[cfg(unix)]
 pub use chain::{
     CHAIN_FORMAT_VERSION, ChainCorruption, ChainHead, ChainKey, ChainPosition,
