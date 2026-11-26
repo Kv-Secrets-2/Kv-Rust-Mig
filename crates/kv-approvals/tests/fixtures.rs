@@ -154,9 +154,9 @@ fn frame_and_all_wire_message_vectors_match_python() {
         let input = hex_bytes(&vector["in"]);
         assert_eq!(hex::encode(wire::frame(&input)), vector["out"]);
     }
-    assert_eq!(
-        MessageKind::ALL.len(),
-        root["wire_messages"].as_array().unwrap().len()
+    assert!(
+        MessageKind::ALL.len() >= root["wire_messages"].as_array().unwrap().len(),
+        "every Python fixture kind must remain represented; Rust-only v1 kinds may be additional"
     );
     for vector in root["wire_messages"].as_array().unwrap() {
         let kind = MessageKind::from_name(vector["type"].as_str().unwrap()).unwrap();
@@ -184,6 +184,34 @@ fn frame_and_all_wire_message_vectors_match_python() {
             &decoded_tag
         ));
     }
+}
+
+#[test]
+fn rust_permit_deny_ack_wire_roundtrips() {
+    let kind = MessageKind::PermitDenyAckV1;
+    let fields = MessageFields::from([
+        ("challenge".to_owned(), FieldValue::Nonce(vec![1; 32])),
+        ("session_nonce".to_owned(), FieldValue::Nonce(vec![2; 32])),
+        (
+            "permit_id".to_owned(),
+            FieldValue::Text("permit_abc".into()),
+        ),
+        (
+            "request_id".to_owned(),
+            FieldValue::Text("permit_request_def".into()),
+        ),
+        ("status".to_owned(), FieldValue::Enum("denied".into())),
+    ]);
+    let key = [9; 32];
+    let encoded = wire::encode(kind, &fields).unwrap();
+    assert!(!encoded.is_empty());
+    let tag = wire::mac(&key, kind, &fields).unwrap();
+    assert!(wire::verify(&key, kind, &fields, &tag));
+    let json = wire::to_json(kind, &fields, &tag).unwrap();
+    let (decoded_kind, decoded_fields, decoded_tag) = wire::from_json(&json).unwrap();
+    assert_eq!(decoded_kind, kind);
+    assert_eq!(decoded_fields, fields);
+    assert_eq!(decoded_tag, tag);
 }
 
 #[test]
