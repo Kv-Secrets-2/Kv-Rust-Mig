@@ -88,7 +88,11 @@ pub fn show_cli_help(p: &Palette) {
     ui::blank();
     section(p, "Primary local commands");
     ui::cmd(p, "kv ls / get / rm", "Inspect or update stored secrets");
-    ui::cmd(p, "kv export", "Print an environment's secrets");
+    ui::cmd(
+        p,
+        "kv approvals list / watch",
+        "Review one-call permit requests",
+    );
     ui::cmd(p, "kv status", "Check vault health");
     ui::cmd(
         p,
@@ -100,13 +104,14 @@ pub fn show_cli_help(p: &Palette) {
     ui::cmd(p, "kv env ...", "Multiple environments in one vault");
     ui::cmd(p, "kv history ...", "Earlier values, undo and forget");
     ui::cmd(p, "kv backup ...", "Encrypted backup files and restore");
+    ui::cmd(p, "kv export", "Print an environment's secrets");
     ui::cmd(
         p,
         "kv vault approve-config",
         "Approve where this vault may send credentials",
     );
     ui::blank();
-    ui::info("Other commands of the Python release are not part of this build yet.");
+    ui::info("This Linux v1 surface is intentionally limited to supported local vault commands.");
     ui::info(&format!(
         "{}Use 'kv COMMAND --help' for per-command flags. Version: {VERSION}{}",
         p.dim, p.reset

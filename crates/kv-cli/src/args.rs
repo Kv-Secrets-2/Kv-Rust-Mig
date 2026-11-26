@@ -94,7 +94,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,run,preflight,policy,approval-mode,export,envs,env,vault,status,version,unlock,lock,allow,deny,network-allow,network-deny,provider,mcp-server}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,export,envs,env,vault,status,version,unlock,lock,approvals}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -294,6 +294,13 @@ struct Parsed {
     options: Vec<(&'static str, String)>,
 }
 
+fn show_option_in_help(spec_name: &str, option: &str) -> bool {
+    // v1 exposes HTTP provider configuration only; the older database/SSH
+    // options remain parse-compatible while their implementation is removed.
+    !(spec_name == "provider add"
+        && matches!(option, "--host" | "--port" | "--database" | "--username"))
+}
+
 fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
     let mut parsed = Parsed {
         positionals: Vec::new(),
@@ -320,8 +327,10 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
                 for (_, text) in spec.flags {
                     help.push_str(text);
                 }
-                for (_, text) in spec.options {
-                    help.push_str(text);
+                for (option, text) in spec.options {
+                    if show_option_in_help(spec.name, option) {
+                        help.push_str(text);
+                    }
                 }
                 return Err(ParseError::Help(help));
             }
@@ -779,14 +788,12 @@ fn negative_number(value: &str) -> bool {
 }
 
 fn preflight_top_error(message: &str) -> ParseError {
-    ParseError::Usage(format!(
-        "usage: kv [-h] [--version]\n          {{init,set,get,ls,rm,history,backup,run,preflight,cap,approvals,policy,approval-mode,grant,export,import,envs,env,vault,status,doctor,audit,export-key,import-key,version,mcp,setup,setup-2fa,2fa,recovery-key,passphrase,recover,upgrade-security,agent,unlock,lock,resume,allow,deny,network-allow,network-deny,provider,signup,login,logout,push,pull,remote,sync,team,token}}\n          ...\nkv: error: {message}\n"
-    ))
+    ParseError::Usage(format!("{USAGE_TOP}kv: error: {message}\n"))
 }
 
-const ENV_USAGE: &str = "usage: kv env [-h]\n              {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n              ...\n";
+const ENV_USAGE: &str = "usage: kv env [-h]\n              {create,copy,rename,delete,restore,purge,default,keep-deleted}\n              ...\n";
 
-const ENV_HELP_TEXT: &str = "\npositional arguments:\n  {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n    create              Create a new environment\n    copy                Copy secrets between environments\n    repair-names        Preview recovery of invalid environment registrations\n    rename              Rename an environment, keeping its secrets and history\n    delete              Delete an environment (recoverable for a while)\n    restore             Bring a deleted environment back (no name: list them)\n    purge               Wipe a deleted environment now\n    default             Show or set the default environment\n    keep-deleted        Show or set how many days a deleted environment is\n                        kept\n\noptions:\n  -h, --help            show this help message and exit\n";
+const ENV_HELP_TEXT: &str = "\npositional arguments:\n  {create,copy,rename,delete,restore,purge,default,keep-deleted}\n    create              Create a new environment\n    copy                Copy secrets between environments\n    rename              Rename an environment, keeping its secrets and history\n    delete              Delete an environment (recoverable for a while)\n    restore             Bring a deleted environment back (no name: list them)\n    purge               Wipe a deleted environment now\n    default             Show or set the default environment\n    keep-deleted        Show or set how many days a deleted environment is\n                        kept\n\noptions:\n  -h, --help            show this help message and exit\n";
 
 const NAME_HELP: &str = "\npositional arguments:\n  name        Environment name\n\noptions:\n  -h, --help  show this help message and exit\n";
 
@@ -890,7 +897,7 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if action == "repair-names" {
         return Err(ParseError::Usage(format!(
-            "{ENV_USAGE}kv env: error: repair-names is not available in this build: it repairs registrations left by pre-drawer releases\n"
+            "{ENV_USAGE}kv env: error: repair-names is not available in the Linux v1 surface\n"
         )));
     }
     let Some(spec) = ENV_SPECS
@@ -898,7 +905,7 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
         .find(|spec| spec.name.strip_prefix("env ") == Some(action.as_str()))
     else {
         return Err(ParseError::Usage(format!(
-            "{ENV_USAGE}kv env: error: argument env_action: invalid choice: '{action}' (choose from 'create', 'copy', 'repair-names', 'rename', 'delete', 'restore', 'purge', 'default', 'keep-deleted')\n"
+            "{ENV_USAGE}kv env: error: argument env_action: invalid choice: '{action}' (choose from 'create', 'copy', 'rename', 'delete', 'restore', 'purge', 'default', 'keep-deleted')\n"
         )));
     };
     let parsed = parse_spec(spec, &rest[1..])?;
@@ -973,10 +980,10 @@ const APPROVAL_MODE_STATUS_SPEC: Spec = Spec {
     options: &[],
 };
 
-const PROVIDER_USAGE: &str = "usage: kv provider [-h] {add,list,rm} ...\n";
+const PROVIDER_USAGE: &str = "usage: kv provider [-h] {list} ...\n";
 const PROVIDER_ADD: Spec = Spec {
     name: "provider add",
-    usage: "usage: kv provider add [-h] [--type {http,postgres,mysql,redis,ssh}]\n                       [--url URL] [--host HOST] [--port PORT]\n                       [--database DATABASE] [--username USERNAME] --secret\n                       SECRET [--auth {bearer,x-api-key,query,basic,header}]\n                       [--query-param QUERY_PARAM] [--header-name HEADER_NAME]\n                       name\n",
+    usage: "usage: kv provider add [-h] [--type {http}] [--url URL] --secret\n                       SECRET [--auth {bearer,x-api-key,query,basic,header}]\n                       [--query-param QUERY_PARAM] [--header-name HEADER_NAME]\n                       name\n",
     help: "\npositional arguments:\n  name                  Provider name (e.g., stripe, twilio)\n\noptions:\n  -h, --help            show this help message and exit\n",
     positionals: &["name"],
     env: false,
@@ -984,7 +991,7 @@ const PROVIDER_ADD: Spec = Spec {
     options: &[
         (
             "--type",
-            "  --type {http,postgres,mysql,redis,ssh}\n                        Provider type (default: http)\n",
+            "  --type {http}          Provider type (default: http)\n",
         ),
         (
             "--url",
@@ -1008,7 +1015,7 @@ const PROVIDER_ADD: Spec = Spec {
         ),
         (
             "--secret",
-            "  --secret SECRET       Secret name in vault (e.g., STRIPE_SECRET_KEY,\n                        DB_PASSWORD, SSH_KEY)\n",
+            "  --secret SECRET       Secret name in vault (e.g., STRIPE_SECRET_KEY)\n",
         ),
         (
             "--auth",
@@ -1053,8 +1060,16 @@ fn provider_port(value: &str) -> Option<i64> {
 }
 
 fn validate_provider_option(spec: &Spec, key: &str, value: &str) -> Result<(), ParseError> {
+    if key == "--type" {
+        if matches!(value, "http" | "postgres" | "mysql" | "redis" | "ssh") {
+            return Ok(());
+        }
+        return Err(spec_error(
+            spec,
+            &format!("argument --type: invalid choice: '{value}' (choose from 'http')"),
+        ));
+    }
     let choices: &[&str] = match key {
-        "--type" => &["http", "postgres", "mysql", "redis", "ssh"],
         "--auth" => &["bearer", "x-api-key", "query", "basic", "header"],
         "--port" => {
             if provider_port(value).is_none() {
@@ -1136,11 +1151,11 @@ const HTTP_ADD: Spec = Spec {
     ],
 };
 
-const APPROVALS_USAGE: &str = "usage: kv approvals [-h]\n                    {list,watch,request,approve,page,pause,deny,prune} ...\n";
+const APPROVALS_USAGE: &str = "usage: kv approvals [-h] {list,watch,approve} ...\n";
 const APPROVALS_CHOICES: &[&str] = &[
     "list", "watch", "request", "approve", "page", "pause", "deny", "prune",
 ];
-const APPROVE_USAGE: &str = "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n";
+const APPROVE_USAGE: &str = "usage: kv approvals approve [-h] request_id\n";
 
 const APPROVALS_HELP: &[(&str, &str)] = &[
     (
@@ -1157,7 +1172,7 @@ const APPROVALS_HELP: &[(&str, &str)] = &[
     ),
     (
         "approve",
-        "usage: kv approvals approve [-h] [--reuse] [--ttl TTL] [--no-call-limit]\n                            [--when-spent {pause,end}]\n                            [--wait-minutes WAIT_MINUTES]\n                            [--wait-seconds WAIT_SECONDS]\n                            [--add-calls ADD_CALLS]\n                            [--add-minutes ADD_MINUTES]\n                            [--max-calls MAX_CALLS]\n                            [--max-calls-for SERVICE=N]\n                            [--post-rule api:PROVIDER/RULE=N]\n                            [--max-runs MAX_RUNS] [--reason REASON]\n                            request_id\n\npositional arguments:\n  request_id            Approval request ID\n\noptions:\n  -h, --help            show this help message and exit\n  --reuse               Allow matching runs until expiry; call budget is per\n                        run (default: one run)\n  --ttl TTL             Grant lifetime in seconds (default: the agent's\n                        suggestion, else kv's: 300)\n  --no-call-limit       No call count for the service(s) named: any number of\n                        calls until the time limit (the approval screen shows\n                        a red caution)\n  --when-spent {pause,end}\n                        When calls or time run out: pause the job and ask you\n                        (default on a passphrase-protected vault), or end it\n  --wait-minutes WAIT_MINUTES\n                        How long a paused job or a call waits for your answer\n                        (default 60)\n  --wait-seconds WAIT_SECONDS\n                        The same wait, in seconds\n  --add-calls ADD_CALLS\n                        Answering a paused job: calls to add (default: what it\n                        asked)\n  --add-minutes ADD_MINUTES\n                        Answering a paused job: minutes to add (default: what\n                        it asked)\n  --max-calls MAX_CALLS\n                        Override broker capability call budget\n  --max-calls-for SERVICE=N\n                        Calls per run for one service of several (repeatable),\n                        e.g. api:openai=10\n  --post-rule api:PROVIDER/RULE=N\n                        One entry of a POST wallet (repeatable): up to N POST\n                        calls per run to one HTTP rule of one service, with\n                        any body. Every service of the approval needs an\n                        entry; the counts are the entries' (do not use --max-\n                        calls, --max-calls-for or --no-call-limit with it)\n  --max-runs MAX_RUNS   With --reuse: how many runs the grant allows (required\n                        on a passphrase-protected vault)\n  --reason REASON       Human note stored with the grant\n",
+        "usage: kv approvals approve [-h] request_id\n\npositional arguments:\n  request_id  One-call permit request ID\n\noptions:\n  -h, --help  show this help message and exit\n",
     ),
     (
         "page",
@@ -1197,6 +1212,12 @@ fn python_int(text: &str) -> Option<i64> {
     Some(if negative { -magnitude } else { magnitude })
 }
 
+fn approvals_public_help() -> String {
+    format!(
+        "{APPROVALS_USAGE}\npositional arguments:\n  {{list,watch,approve}}\n    list     List pending approval requests\n    watch    Show the terminal approval inbox\n    approve  Review and approve a pending one-call permit\n\noptions:\n  -h, --help  show this help message and exit\n"
+    )
+}
+
 fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::approvalscmd::ApprovalsAction;
     let Some(action) = rest.first() else {
@@ -1208,23 +1229,26 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
         })));
     };
     if action == "-h" || action == "--help" {
-        return Err(ParseError::Help(format!(
-            "{APPROVALS_USAGE}\npositional arguments:\n  {{list,watch,request,approve,page,pause,deny,prune}}\n    list                List pending approval requests\n    watch               Show the terminal approval inbox\n    request             Create a pending approval request\n    approve             Approve a pending run grant or one-call permit\n    page                Approve requests on a local page in your browser (one-\n                        use link)\n    pause               Pause a running counted job at once (it goes on only\n                        after kv approvals approve); without a job: list the\n                        running jobs\n    deny                Deny a pending request, or refuse a paused job more\n                        calls or time\n    prune               Remove decided request records; missed requests are\n                        kept 24 h after expiry\n\noptions:\n  -h, --help            show this help message and exit\n"
-        )));
+        return Err(ParseError::Help(approvals_public_help()));
     }
     let Some(choice) = APPROVALS_CHOICES.iter().find(|c| *c == action) else {
         return Err(ParseError::Usage(format!(
-            "{APPROVALS_USAGE}kv approvals: error: argument approvals_action: invalid choice: '{action}' (choose from 'list', 'watch', 'request', 'approve', 'page', 'pause', 'deny', 'prune')\n"
+            "{APPROVALS_USAGE}kv approvals: error: argument approvals_action: invalid choice: '{action}' (choose from 'list', 'watch', 'approve')\n"
         )));
     };
     let rest = &rest[1..];
     if rest.iter().any(|v| v == "-h" || v == "--help") {
-        let help = APPROVALS_HELP
-            .iter()
-            .find(|(name, _)| name == choice)
-            .map(|(_, help)| *help)
-            .unwrap_or("");
-        return Err(ParseError::Help(help.to_owned()));
+        let help = if matches!(*choice, "list" | "watch" | "approve") {
+            APPROVALS_HELP
+                .iter()
+                .find(|(name, _)| name == choice)
+                .map(|(_, help)| *help)
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            approvals_public_help()
+        };
+        return Err(ParseError::Help(help));
     }
     if *choice == "list" || *choice == "watch" {
         let watch = *choice == "watch";
@@ -1519,14 +1543,22 @@ fn parse_command_policy(rest: &[String]) -> Result<Option<Command>, ParseError> 
     Ok(Some(Command::Policy(action)))
 }
 
+fn provider_public_help() -> String {
+    format!(
+        "{PROVIDER_USAGE}\npositional arguments:\n  {{list}}\n    list     List built-in providers\n\noptions:\n  -h, --help  show this help message and exit\n"
+    )
+}
+
+fn provider_add_v1_help() -> &'static str {
+    "kv provider add is not part of the Linux v1 surface.\n\nThe v1 broker uses built-in provider definitions with fixed endpoints.\n"
+}
+
 fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
     let Some(action) = rest.first() else {
         return Ok(Some(Command::Provider(ProviderAction::List)));
     };
     if action == "-h" || action == "--help" {
-        return Err(ParseError::Help(format!(
-            "{PROVIDER_USAGE}\npositional arguments:\n  {{add,list,rm}}\n    add          Add a custom provider\n    list         List all providers\n    rm           Remove a custom provider\n\noptions:\n  -h, --help     show this help message and exit\n"
-        )));
+        return Err(ParseError::Help(provider_public_help()));
     }
     let spec = match action.as_str() {
         "add" => &PROVIDER_ADD,
@@ -1534,10 +1566,22 @@ fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
         "list" => &PROVIDER_LIST,
         _ => {
             return Err(ParseError::Usage(format!(
-                "{PROVIDER_USAGE}kv provider: error: argument provider_action: invalid choice: '{action}' (choose from 'add', 'list', 'rm')\n"
+                "{PROVIDER_USAGE}kv provider: error: argument provider_action: invalid choice: '{action}' (choose from 'list')\n"
             )));
         }
     };
+    if rest[1..]
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "-h" || arg == "--help")
+    {
+        if action == "add" {
+            return Err(ParseError::Help(provider_add_v1_help().to_owned()));
+        }
+        if action == "rm" {
+            return Err(ParseError::Help(provider_public_help()));
+        }
+    }
     let parsed = parse_spec(spec, &rest[1..])?;
     let option = |key| {
         parsed
@@ -1805,9 +1849,9 @@ fn parse_backup(rest: &[String]) -> Result<Option<Command>, ParseError> {
     })))
 }
 
-const VAULT_USAGE: &str = "usage: kv vault [-h]\n                {approve-local,approve-config,restore-old-key,relocate,migrate-drawers,backup-drawers,rollback-drawers}\n                ...\n";
+const VAULT_USAGE: &str = "usage: kv vault [-h] {approve-config} ...\n";
 
-const VAULT_HELP_TEXT: &str = "\npositional arguments:\n  {approve-local,approve-config,restore-old-key,relocate,migrate-drawers,backup-drawers,rollback-drawers}\n    approve-local       Approve a supplied vault on this machine at your\n                        terminal\n    approve-config      Review and approve config authority with your\n                        passphrase\n    restore-old-key     Put the saved old key back so kv 0.3.0 opens this\n                        vault (Linux only)\n    relocate            Bind a moved vault's key file to this folder\n    migrate-drawers     Migrate env-bundle vaults to drawer storage\n    backup-drawers      Create private migration backup before drawer migration\n    rollback-drawers    Verify or restore a drawer migration backup\n\noptions:\n  -h, --help            show this help message and exit\n";
+const VAULT_HELP_TEXT: &str = "\npositional arguments:\n  {approve-config}\n    approve-config  Review and approve config authority with your passphrase\n\noptions:\n  -h, --help       show this help message and exit\n";
 
 const VAULT_ACTIONS: &[&str] = &[
     "approve-local",
@@ -1828,11 +1872,7 @@ fn parse_vault(rest: &[String]) -> Result<Option<Command>, ParseError> {
         return Err(ParseError::Help(format!("{VAULT_USAGE}{VAULT_HELP_TEXT}")));
     }
     if !VAULT_ACTIONS.contains(&action.as_str()) {
-        let choices = VAULT_ACTIONS
-            .iter()
-            .map(|name| format!("'{name}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let choices = "'approve-config'";
         return Err(ParseError::Usage(format!(
             "{VAULT_USAGE}kv vault: error: argument vault_action: invalid choice: '{action}' (choose from {choices})\n"
         )));

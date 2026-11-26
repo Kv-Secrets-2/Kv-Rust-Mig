@@ -38,6 +38,10 @@ fn main() {
         std::process::exit(0);
     }
     if argv.first().map(String::as_str) == Some("mcp-server") {
+        if argv[1..].iter().any(|arg| arg == "-h" || arg == "--help") {
+            println!("kv mcp-server is not part of the Linux v1 surface.");
+            std::process::exit(0);
+        }
         std::process::exit(kv_mcp::main(&argv[1..]));
     }
     let code = match args::parse(&argv) {
