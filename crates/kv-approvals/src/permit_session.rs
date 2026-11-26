@@ -539,10 +539,13 @@ impl SessionPermits {
         let facts = crate::permit_facts::verify_artifact(&self.0.binding, artifact)?;
         let canonical = canonical(&facts)?;
         let mut state = self.state();
-        if state
-            .denied_permits
-            .contains(facts["permit_id"].as_str().expect("issued id"))
-        {
+        let Some(permit_id) = facts["permit_id"].as_str() else {
+            return Err(PermitError::new(
+                "unknown_request",
+                "the signed permit is not this session's request",
+            ));
+        };
+        if state.denied_permits.contains(permit_id) {
             return Err(PermitError::new(
                 "denied",
                 "the owner denied this permit; it cannot be approved",

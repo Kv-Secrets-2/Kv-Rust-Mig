@@ -212,6 +212,19 @@ fn signed_denial_is_terminal_and_revokes_unspent_approval() {
 }
 
 #[test]
+fn signed_permit_with_typed_wrong_id_is_refused_without_panicking() {
+    let fixture = Fixture::new();
+    let request = fixture.request();
+    let mut facts = request.facts().clone();
+    facts["permit_id"] = json!(1);
+    let artifact = crate::permit::attach_permit_approval(&facts, &fixture.seed).unwrap();
+    assert_eq!(
+        error(fixture.registry.register(&artifact)).code,
+        "unknown_request"
+    );
+}
+
+#[test]
 fn expiry_uses_fractional_initial_lifetime_and_both_clocks_without_renewal() {
     let fixture = Fixture::new();
     let request = fixture.request();
