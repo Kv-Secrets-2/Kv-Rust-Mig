@@ -37,6 +37,8 @@ use std::os::unix::fs::MetadataExt;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+#[cfg(unix)]
+mod admission;
 #[cfg(all(unix, test))]
 mod audit_reply_tests;
 #[cfg(unix)]
@@ -787,6 +789,7 @@ pub fn run_agent_with_api_caller(
     let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
     let audit = kv_audit::Audit::new(kv_proto::runtime_dir()?);
+    let admissions = admission::admission_journal(&root, &master_key, &trust)?;
     let mut workers = WorkerTracker::new();
     let mut accept_error = None;
 
@@ -822,6 +825,7 @@ pub fn run_agent_with_api_caller(
                 let http_policy = Arc::clone(&http_policy);
                 let api_caller = Arc::clone(&api_caller);
                 let audit = audit.clone();
+                let admissions = admissions.clone();
                 let root = root.clone();
                 let root_text = root_text.clone();
                 let memory_hardening = memory_hardening.clone();
@@ -843,6 +847,7 @@ pub fn run_agent_with_api_caller(
                             &http_policy,
                             &api_caller,
                             &audit,
+                            Some(&admissions),
                             &worker_lifecycle,
                             &worker_shared,
                             &connection_guard,
@@ -1175,6 +1180,7 @@ fn handle_connection(
     http_policy: &kv_broker::HttpPolicySnapshot,
     api_caller: &kv_broker::ApiCaller,
     audit: &kv_audit::Audit,
+    admissions: Option<&kv_audit::AdmissionJournal>,
     lifecycle: &Arc<Lifecycle>,
     shared: &Shared,
     connection: &ConnectionGuard,
@@ -1521,6 +1527,7 @@ fn handle_connection(
                         permits,
                         shared,
                         audit,
+                        admissions,
                         lifecycle,
                         connection,
                     );
@@ -1555,6 +1562,7 @@ fn handle_connection(
                 permits,
                 shared,
                 audit,
+                admissions,
                 lifecycle,
                 connection,
             );
@@ -2246,6 +2254,7 @@ fn api_call_response(
     permits: &SessionPermits,
     shared: &Shared,
     audit: &kv_audit::Audit,
+    admissions: Option<&kv_audit::AdmissionJournal>,
     lifecycle: &Arc<Lifecycle>,
     connection: &ConnectionGuard,
 ) -> Value {
@@ -2356,55 +2365,134 @@ fn api_call_response(
     } else {
         None
     };
+    // Publish the dispatch window before bounded audit I/O so retirement cannot
+    // pass it. The final pin, denial, expiry and one-call spend are rechecked in
+    // the inner transport gate below.
+    let _operation_window = if per_call {
+        match lifecycle
+            .try_commit_for_with_charge(connection, || Ok::<(), std::convert::Infallible>(()))
+        {
+            Ok(window) => Some(window),
+            Err(_) => {
+                return json!({
+                    "error":"the agent is stopping; new requests are refused",
+                    "error_code":"agent_stopping",
+                });
+            }
+        }
+    } else {
+        None
+    };
+    let admission = if per_call {
+        let Some(admissions) = admissions else {
+            return json!({
+                "error":"the privileged action could not be recorded durably; it was not sent",
+                "error_code":"audit_admission_failed",
+                "audit_admission_error":"missing_admission_journal",
+            });
+        };
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("provider".into(), json!(provider_name));
+        metadata.insert("method".into(), method.clone());
+        metadata.insert("path".into(), path.clone());
+        metadata.insert("env".into(), json!(env));
+        if let Some(id) = permit_id {
+            metadata.insert("permit_id_sha256".into(), json!(hex(&Sha256::digest(id))));
+        }
+        match admissions.admit("broker.http.anthropic.count_tokens", metadata) {
+            Ok(admission) => Some(admission),
+            Err(error) => {
+                return json!({
+                    "error":"the privileged action could not be recorded durably; it was not sent",
+                    "error_code":"audit_admission_failed",
+                    "audit_admission_error":error.as_str(),
+                });
+            }
+        }
+    } else {
+        None
+    };
     let empty_headers = serde_json::Map::new();
     let caller_headers = headers.as_object().unwrap_or(&empty_headers);
     let callback_refused = std::cell::Cell::new(false);
-    let mut result = caller.call_with_checks(
-        api_request,
-        |preview| {
-            let checked = permit_id
-                .map(|id| {
-                    permits
-                        .match_call(
-                            id,
-                            permits::call_facts(
-                                env,
-                                provider_name,
-                                provider,
-                                caller_headers,
-                                preview,
-                                None,
-                            ),
-                        )
-                        .map_err(permits::invalid_error)
-                })
-                .transpose();
-            callback_refused.set(checked.is_err());
-            checked
-        },
-        |matched| {
-            let committed = lifecycle
-                .try_commit_for_with_charge(connection, || {
-                    let pin = trust.observe_held().map_err(permits::hard_lock_error)?;
-                    if matched.is_some() && permit_is_denied(shared, request.get("permit_id")) {
-                        return Err(permit_denied_response());
-                    }
-                    if let Some(matched) = matched {
-                        permits.spend(&matched).map_err(permits::invalid_error)?;
-                    }
-                    Ok(pin)
-                })
-                .map_err(|error| match error {
-                    CommitError::Stopping => json!({
-                        "error":"the agent is stopping; new requests are refused",
-                        "error_code":"agent_stopping",
-                    }),
-                    CommitError::Charge(refusal) => refusal,
-                });
-            callback_refused.set(committed.is_err());
-            committed
-        },
-    );
+    let perform_call = || {
+        caller.call_with_checks(
+            api_request,
+            |preview| {
+                let checked = permit_id
+                    .map(|id| {
+                        permits
+                            .match_call(
+                                id,
+                                permits::call_facts(
+                                    env,
+                                    provider_name,
+                                    provider,
+                                    caller_headers,
+                                    preview,
+                                    None,
+                                ),
+                            )
+                            .map_err(permits::invalid_error)
+                    })
+                    .transpose();
+                callback_refused.set(checked.is_err());
+                checked
+            },
+            |matched| {
+                let committed = lifecycle
+                    .try_commit_for_with_charge(connection, || {
+                        let pin = trust.observe_held().map_err(permits::hard_lock_error)?;
+                        if matched.is_some() && permit_is_denied(shared, request.get("permit_id")) {
+                            return Err(permit_denied_response());
+                        }
+                        if let Some(matched) = matched {
+                            permits.spend(&matched).map_err(permits::invalid_error)?;
+                        }
+                        Ok(pin)
+                    })
+                    .map_err(|error| match error {
+                        CommitError::Stopping => json!({
+                            "error":"the agent is stopping; new requests are refused",
+                            "error_code":"agent_stopping",
+                        }),
+                        CommitError::Charge(refusal) => refusal,
+                    });
+                callback_refused.set(committed.is_err());
+                committed
+            },
+        )
+    };
+    let mut result = if let Some(admission) = admission {
+        let execution = admission.run(|_| perform_call());
+        let output = execution.output();
+        let outcome = if output.get("error").is_some() {
+            kv_audit::TerminalOutcome::Failed
+        } else {
+            kv_audit::TerminalOutcome::Completed
+        };
+        let mut outcome_metadata = serde_json::Map::new();
+        outcome_metadata.insert("provider".into(), json!(provider_name));
+        outcome_metadata.insert("method".into(), method.clone());
+        outcome_metadata.insert("path".into(), path.clone());
+        outcome_metadata.insert("env".into(), json!(env));
+        for key in ["status", "error_code"] {
+            if let Some(value) = output.get(key) {
+                outcome_metadata.insert(key.into(), value.clone());
+            }
+        }
+        match execution.finish(outcome, outcome_metadata) {
+            Ok(output) => output,
+            Err(error) => {
+                let outcome_error = error.error;
+                let mut output = error.into_output();
+                output["audit_outcome_error"] = json!(outcome_error.as_str());
+                output
+            }
+        }
+    } else {
+        perform_call()
+    };
     // Python's matching/admission exceptions bypass policy-warning attachment;
     // a transport result (including an HTTP failure) still receives the warning.
     if callback_refused.get() {
@@ -3025,6 +3113,7 @@ mod tests {
                 &http_policy,
                 &api_caller,
                 &audit,
+                None,
                 &lifecycle,
                 &shared,
                 &connection,

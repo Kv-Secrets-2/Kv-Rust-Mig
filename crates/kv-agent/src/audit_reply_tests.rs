@@ -460,6 +460,7 @@ fn dispatch(audit: &kv_audit::Audit, request: Value, retired: bool) -> Value {
         &kv_broker::load_http_policy_snapshot(&approved),
         &kv_broker::ApiCaller::new(),
         audit,
+        None,
         &lifecycle,
         &shared,
         &connection,

@@ -633,21 +633,27 @@ fn audit_write_failure_allows_no_additional_provider_request() {
     let _daemon = fixture.start_daemon();
     let (request_id, permit_id) = request(&fixture);
     approve_permit(&fixture, &request_id);
-    let audit_log = fixture.home.join(".kv").join("audit.log");
-    let _ = fs::remove_file(&audit_log);
-    fs::create_dir(&audit_log).unwrap();
+    let hash = kv_proto::project_hash(Some(&fixture.root)).unwrap();
+    let admission_dir = fixture.home.join(".kv").join(format!("admissions-{hash}"));
+    fs::create_dir_all(&admission_dir).unwrap();
+    fs::create_dir(admission_dir.join("audit.jsonl")).unwrap();
     let args = operation_args(Some(&permit_id), INPUT);
-    let (_code, executed) = fixture.kv(&args);
+    let (code, first) = fixture.kv(&args);
+    assert_ne!(code, 0);
+    assert!(
+        first.contains("could not be recorded durably"),
+        "first audit failure refusal: {first}"
+    );
     assert_eq!(
         provider.events.lock().unwrap().len(),
-        1,
-        "first committed call is not multiplied: {executed}"
+        0,
+        "first audit failure sends nothing: {first}"
     );
-    let (code, replay) = fixture.kv(&args);
+    let (code, retry) = fixture.kv(&args);
     assert_ne!(code, 0);
     assert_eq!(
         provider.events.lock().unwrap().len(),
-        1,
-        "audit failure leads to no additional send: {replay}"
+        0,
+        "audit failure leads to no additional send: {retry}"
     );
 }
