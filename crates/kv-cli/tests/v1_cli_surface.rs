@@ -11,7 +11,7 @@ mod owner;
 use owner::{Scratch, kv_bin, pty, python3};
 use std::process::Command;
 
-fn run(scratch: &Scratch, args: &[&str]) -> (i32, String) {
+fn run_streams(scratch: &Scratch, args: &[&str]) -> (i32, String, String) {
     let output = Command::new(kv_bin())
         .args(args)
         .current_dir(scratch.proj())
@@ -19,9 +19,17 @@ fn run(scratch: &Scratch, args: &[&str]) -> (i32, String) {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    (output.status.code().unwrap_or(-1), text)
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+fn run(scratch: &Scratch, args: &[&str]) -> (i32, String) {
+    let (code, mut text, stderr) = run_streams(scratch, args);
+    text.push_str(&stderr);
+    (code, text)
 }
 
 fn assert_absent(text: &str, needles: &[&str]) {
@@ -57,26 +65,21 @@ fn top_level_help_matches_the_v1_surface() {
 }
 
 #[test]
-fn mcp_server_help_is_not_shipped() {
-    let scratch = Scratch::new("mcp-help");
-    let (code, text) = run(&scratch, &["mcp-server", "--help"]);
-    assert_eq!(code, 0, "{text}");
-    assert!(text.contains("not part of the Linux v1 surface"), "{text}");
-    assert_absent(
-        &text,
-        &[
-            "--allow-execute",
-            "--allow-mutate",
-            "--allow-reveal",
-            "--allow-direct-vault-access",
-            "kv_run",
-            "kv_query",
-            "kv_ssh",
-            "database/Redis",
-            "remote SSH",
-            "subprocess",
-        ],
-    );
+fn mcp_server_invocation_is_refused_without_starting_mcp() {
+    let scratch = Scratch::new("mcp-refusal");
+    for args in [
+        vec!["mcp-server"],
+        vec!["mcp-server", "--help"],
+        vec!["mcp-server", "--allow-execute"],
+    ] {
+        let (code, stdout, stderr) = run_streams(&scratch, &args);
+        assert_eq!(code, 1, "{args:?}: {stderr}");
+        assert_eq!(stdout, "", "{args:?}");
+        assert_eq!(
+            stderr, "kv mcp-server is not part of the Linux v1 surface.\n",
+            "{args:?}"
+        );
+    }
 }
 
 #[test]
