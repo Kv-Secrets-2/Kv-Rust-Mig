@@ -106,10 +106,14 @@ inside_runtime() {
     timeout 45 script -q -e -c "$command" /dev/null <"$fifo" >"$out" 2>&1
     rc=$?
     set -e
-    wait "$writer" 2>/dev/null || true
+    local writer_rc=0
+    wait "$writer" 2>/dev/null || writer_rc=$?
 
     if [[ "$rc" -ne "$expected_rc" ]]; then
       fail "$name exited $rc, expected $expected_rc"
+    fi
+    if [[ "$writer_rc" -ne 0 ]]; then
+      fail "$name did not receive every intended prompt response"
     fi
   }
 
@@ -126,6 +130,17 @@ inside_runtime() {
     set -e
     if [[ "$rc" -ne "$expected_rc" ]]; then
       fail "$name exited $rc, expected $expected_rc"
+    fi
+  }
+
+  check_step_regex() {
+    local name=$1
+    local regex=$2
+    local out=$smoke_work/$name.out
+
+    [[ -f "$out" ]] || fail "$name produced no captured output"
+    if ! grep -E -q -- "$regex" "$out"; then
+      fail "$name output did not match required status"
     fi
   }
 
@@ -171,7 +186,7 @@ inside_runtime() {
   run_pty list 0 \
     'Passphrase:' "$pass" \
     -- "$binary" ls
-  check_step list "dev (1 secret)" "SMOKE_KEY"
+  check_step list "dev (1 secret)" "SMOKE_KEY" "●●●●●●●●"
   log "list passed and showed only the secret name"
 
   # Config approval is required before the daemon will start. It is part of the
@@ -186,7 +201,8 @@ inside_runtime() {
   run_pty unlock 0 \
     'Passphrase:' "$pass" \
     -- "$binary" unlock
-  check_step unlock "vault unlocked" "protected session"
+  check_step_regex unlock '^[[:space:]]*protected session \(owner key [0-9a-f]{12}\)'
+  check_step unlock "vault unlocked"
 
   run_plain status-unlocked 0 "$binary" status
   check_step status-unlocked "vault unlocked" "agent running" "1 secret"
@@ -224,14 +240,15 @@ command -v docker >/dev/null 2>&1 || fail "docker is required to create the clea
 payload=$(mktemp -d)
 chmod 0755 "$payload"
 trap 'rm -rf "$payload"' EXIT
+archive_base=$(basename "$archive")
+checksum_base=$(basename "$checksum")
 script_copy=$payload/$(basename "$0")
 cp "$0" "$script_copy"
 chmod 0755 "$script_copy"
 cp "$archive" "$payload/"
 cp "$checksum" "$payload/"
+chmod 0644 "$payload/$archive_base" "$payload/$checksum_base"
 
-archive_base=$(basename "$archive")
-checksum_base=$(basename "$checksum")
 script_base=$(basename "$script_copy")
 
 docker run \

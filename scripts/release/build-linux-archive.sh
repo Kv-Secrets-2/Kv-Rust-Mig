@@ -23,12 +23,23 @@ if [[ -z "$version" ]]; then
   exit 1
 fi
 
+metadata=$(cargo metadata --no-deps --format-version 1)
+target_dir=$(printf '%s' "$metadata" | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+if [[ -z "$target_dir" ]]; then
+  echo "could not determine Cargo's target directory" >&2
+  exit 1
+fi
+
+cargo_home=${CARGO_HOME:-$HOME/.cargo}
+path_remap="--remap-path-prefix=$cargo_home/registry/src=/cargo/registry/src"
+if [[ -n "${RUSTFLAGS:-}" ]]; then
+  export RUSTFLAGS="$RUSTFLAGS $path_remap"
+else
+  export RUSTFLAGS=$path_remap
+fi
+
 cargo build --release --locked --target "$target" -p kv-cli
 
-target_dir=${CARGO_TARGET_DIR:-$root/target}
-if [[ "$target_dir" != /* ]]; then
-  target_dir=$root/$target_dir
-fi
 binary=$target_dir/$target/release/kv
 if [[ ! -x "$binary" ]]; then
   echo "expected release binary is missing: $binary" >&2
@@ -45,7 +56,11 @@ command -v readelf >/dev/null 2>&1 || {
   echo "readelf is required to verify static linkage" >&2
   exit 1
 }
-if readelf -d "$binary" 2>/dev/null | grep -q '(NEEDED)'; then
+readelf_output=$(readelf -d "$binary" 2>&1) || {
+  echo "readelf could not inspect the release binary; static linkage is unverified" >&2
+  exit 1
+}
+if grep -q '(NEEDED)' <<<"$readelf_output"; then
   echo "release binary is dynamically linked; a static musl binary is required" >&2
   exit 1
 fi
