@@ -140,6 +140,31 @@ impl Directory {
         Ok(file)
     }
 
+    /// Synchronize every parent directory that can contain this directory's
+    /// name, ending at the filesystem root. A first-use journal creation is
+    /// durable only after each of those entries has been committed.
+    pub(crate) fn sync_parent_chain(&self) -> io::Result<()> {
+        let mut child = self.file.try_clone()?;
+        for _ in 0..1024 {
+            let parent = File::from(unix::openat(
+                &child,
+                "..",
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?);
+            let child_metadata = child.metadata()?;
+            let parent_metadata = parent.metadata()?;
+            if child_metadata.dev() == parent_metadata.dev()
+                && child_metadata.ino() == parent_metadata.ino()
+            {
+                return Ok(());
+            }
+            parent.sync_all()?;
+            child = parent;
+        }
+        Err(invalid("directory ancestry exceeds durability scan bound"))
+    }
+
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {
         self.lock_with_hook(name, wait, || {})
     }

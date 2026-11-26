@@ -107,10 +107,13 @@ that checkpoint outside this lifecycle.
 3. load the independent trusted checkpoint;
 4. verify every journal record from the start against that checkpoint,
    including canonical bytes, sequence, links, vault identity, and HMACs;
-5. append exactly one authenticated admission record, synchronize the file,
-   close it, and synchronize the directory;
-6. re-check lock identity and durably publish the advanced checkpoint; and
-7. only then return an `Admission` token.
+5. on a trusted-genesis first write, synchronize every parent directory that
+   can contain the audit directory's name, so a newly created journal directory
+   hierarchy is durable before it can authorize work;
+6. append exactly one authenticated admission record, synchronize the file,
+   close it, and synchronize the audit directory;
+7. re-check lock identity and durably publish the advanced checkpoint; and
+8. only then return an `Admission` token.
 
 Any failure returns a closed `LifecycleError` and no usable token exists. The
 token is intentionally not `Clone`: `Admission::run(effect)` consumes it and is
@@ -121,14 +124,19 @@ critical section. If the outcome cannot be committed, `OutcomeError` retains
 the effect output so the caller cannot mistake the already-run effect for an
 unexecuted one.
 
-A dropped `Admission`, a panic or process exit before `finish`, or a failed
-outcome commit leaves no outcome record. `admission_states()` and the read-only
-`scan_admissions(directory, trust)` report that admission as
+A dropped `Admission`, a panic or process exit before `finish`, or an outcome
+failure before any outcome bytes are appended leaves no outcome record. In a
+journal that verifies against its checkpoint, `admission_states()` and the
+read-only `scan_admissions(directory, trust)` report that admission as
 `AdmissionOutcomeState::Unknown`; unknown means the effect may or may not have
-happened and is never authorization to repeat it automatically. Multiple
-outcomes for one admission are reported as `Conflicted`; outcomes without an
-admission and malformed lifecycle-shaped records are counted separately in
-`AdmissionReport` instead of being silently paired.
+happened and is never authorization to repeat it automatically. A failed
+outcome commit is uncertain rather than clean: outcome bytes may have landed
+even though the checkpoint was not advanced. In that case later scans fail
+closed with continuity loss (commonly `beyond_checkpoint`) instead of hiding
+those bytes or reporting a paired state. Multiple outcomes for one admission
+are reported as `Conflicted`; outcomes without an admission and malformed
+lifecycle-shaped records are counted separately in `AdmissionReport` instead of
+being silently paired.
 
 Lifecycle actions are non-empty ASCII strings of at most 128 bytes using
 alphanumerics or `._-:/+`. `privileged_admission` and `privileged_outcome` are
@@ -138,14 +146,17 @@ fields described above. Metadata remains subject to the canonical JSON, 1 MiB
 record, and nesting limits and must exclude secrets and request/response
 bodies.
 
-Crash behavior is deliberately conservative. If append or synchronization
-fails, bytes may or may not have reached the journal; because the checkpoint is
-not advanced in that case, a partially or completely landed record makes the
-next verification fail closed (`beyond_checkpoint`, truncation, or corruption)
-instead of being hidden or replayed. If checkpoint publication fails, the same
-rule applies: no token is returned and later lifecycle writes fail closed until
-broker-owned recovery reconciles the independent checkpoint. This crate does
-not repair, rewrite, or compact journals.
+Crash behavior is deliberately conservative. If first-use parent-chain
+synchronization fails, the lifecycle stops before journal append, checkpoint
+publication, admission-token creation, or any effect callback. If append or
+later synchronization fails, bytes may or may not have reached the journal;
+because the checkpoint is not advanced in that case, a partially or completely
+landed record makes the next verification fail closed (`beyond_checkpoint`,
+truncation, or corruption) instead of being hidden or replayed. If checkpoint
+publication fails, the same rule applies: no token is returned and later
+lifecycle writes fail closed until broker-owned recovery reconciles the
+independent checkpoint. This crate does not repair, rewrite, or compact
+journals.
 
 The lifecycle module contains no hard-lock latch and no hard-lock callback.
 Hard-lock state and key purging belong outside the audit journal and must not

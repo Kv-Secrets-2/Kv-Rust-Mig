@@ -2,11 +2,13 @@
 //!
 //! The ordering is deliberately strict: while the audit log lock is held, the
 //! broker-owned checkpoint is read, the complete journal is authenticated to
-//! that checkpoint, the admission record is appended with file and directory
+//! that checkpoint, a first-use journal directory hierarchy is committed through
+//! its parent chain, the admission record is appended with file and directory
 //! synchronization, and the advanced checkpoint is published durably. Only then
 //! does [`AdmissionJournal::admit`] return a usable [`Admission`]. Dropping an
-//! admission never repeats or completes its effect; an admission without a
-//! later terminal outcome is reported as unknown.
+//! admission never repeats or completes its effect; in a journal that verifies
+//! against its checkpoint, an admission without a later terminal outcome is
+//! reported as unknown.
 //!
 //! This module deliberately has no hard-lock latch and no hard-lock callback.
 //! Vault hard-lock state belongs outside the audit journal and must never wait
@@ -14,6 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -171,6 +174,7 @@ impl TerminalOutcome {
 }
 
 type AppendDurable = dyn Fn(&Directory, &[u8]) -> Result<(), DurableAppendFailure> + Send + Sync;
+type ParentChainSync = dyn Fn(&Directory) -> io::Result<()> + Send + Sync;
 
 struct Inner {
     directory: PathBuf,
@@ -178,6 +182,7 @@ struct Inner {
     identity: VaultIdentity,
     checkpoint: Mutex<Box<dyn TrustedCheckpoint + Send>>,
     append_durable: Box<AppendDurable>,
+    sync_parent_chain: Box<ParentChainSync>,
 }
 
 /// Authenticated privileged-admission journal. Clones share the checkpoint
@@ -258,6 +263,7 @@ impl AdmissionJournal {
             identity,
             checkpoint,
             Box::new(|directory, bytes| directory.append_durable(bytes)),
+            Box::new(|directory| directory.sync_parent_chain()),
         )
     }
 
@@ -268,8 +274,16 @@ impl AdmissionJournal {
         identity: VaultIdentity,
         checkpoint: Box<dyn TrustedCheckpoint + Send>,
         append_durable: Box<AppendDurable>,
+        sync_parent_chain: Box<ParentChainSync>,
     ) -> Self {
-        Self::with_parts(directory, key, identity, checkpoint, append_durable)
+        Self::with_parts(
+            directory,
+            key,
+            identity,
+            checkpoint,
+            append_durable,
+            sync_parent_chain,
+        )
     }
 
     fn with_parts(
@@ -278,6 +292,7 @@ impl AdmissionJournal {
         identity: VaultIdentity,
         checkpoint: Box<dyn TrustedCheckpoint + Send>,
         append_durable: Box<AppendDurable>,
+        sync_parent_chain: Box<ParentChainSync>,
     ) -> Self {
         Self(Arc::new(Inner {
             directory: directory.into(),
@@ -285,6 +300,7 @@ impl AdmissionJournal {
             identity,
             checkpoint: Mutex::new(checkpoint),
             append_durable,
+            sync_parent_chain,
         }))
     }
 
@@ -356,6 +372,10 @@ impl AdmissionJournal {
             ChainVerification::Valid { position } => position,
             other => return Err(verification_error(other)),
         };
+        if position.count == 0 {
+            (self.0.sync_parent_chain)(&directory)
+                .map_err(|_| LifecycleError::JournalSyncFailed)?;
+        }
         if !directory.lock_matches(&log_lock, LOG_LOCK).unwrap_or(false) {
             return Err(LifecycleError::LockUnavailable);
         }
@@ -450,8 +470,8 @@ impl<T> Execution<T> {
     /// Commit the separate terminal outcome record. On success the effect
     /// output is returned. On failure the output is retained in
     /// [`OutcomeError`] so callers do not mistake a completed effect for an
-    /// unexecuted one; its journal state remains unknown until the outcome is
-    /// durable and checkpointed.
+    /// unexecuted one. If outcome bytes may have landed without checkpoint
+    /// publication, later scans fail closed instead of reporting a paired state.
     pub fn finish(
         self,
         outcome: TerminalOutcome,

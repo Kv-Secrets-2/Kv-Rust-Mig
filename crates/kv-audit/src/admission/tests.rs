@@ -1,6 +1,7 @@
 use super::*;
 use std::collections::VecDeque;
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -80,6 +81,7 @@ struct Fixture {
     journal: AdmissionJournal,
     checkpoint: MemoryCheckpoint,
     append_failures: Arc<Mutex<VecDeque<DurableAppendFailure>>>,
+    parent_sync_failures: Arc<Mutex<VecDeque<()>>>,
 }
 
 fn key() -> ChainKey {
@@ -94,10 +96,12 @@ fn fixture() -> Fixture {
     let temp = Temp::new();
     let checkpoint = MemoryCheckpoint::new();
     let events = checkpoint.state.clone();
+    let append_events = events.clone();
+    let sync_events = events;
     let append_failures = Arc::new(Mutex::new(VecDeque::new()));
     let injected = append_failures.clone();
     let append = Box::new(move |directory: &Directory, bytes: &[u8]| {
-        events.lock().unwrap().events.push("journal_append");
+        append_events.lock().unwrap().events.push("journal_append");
         if let Some(failure) = injected.lock().unwrap().pop_front() {
             if failure == DurableAppendFailure::SyncFailed {
                 let _ = directory.append_durable(bytes);
@@ -106,18 +110,29 @@ fn fixture() -> Fixture {
         }
         directory.append_durable(bytes)
     });
+    let parent_sync_failures = Arc::new(Mutex::new(VecDeque::new()));
+    let injected_parent_sync = parent_sync_failures.clone();
+    let sync_parent_chain = Box::new(move |directory: &Directory| {
+        sync_events.lock().unwrap().events.push("parent_chain_sync");
+        if injected_parent_sync.lock().unwrap().pop_front().is_some() {
+            return Err(io::Error::other("injected parent chain sync failure"));
+        }
+        directory.sync_parent_chain()
+    });
     let journal = AdmissionJournal::with_append_failure_injection(
         temp.audit_dir(),
         key(),
         identity(),
         Box::new(checkpoint.clone()),
         append,
+        sync_parent_chain,
     );
     Fixture {
         temp,
         journal,
         checkpoint,
         append_failures,
+        parent_sync_failures,
     }
 }
 
@@ -158,7 +173,12 @@ fn admission_and_terminal_outcome_commit_in_order_and_effect_runs_once() {
     assert_eq!(admission.sequence(), 1);
     assert_eq!(
         checkpoint_state(&fixture).1,
-        ["checkpoint_read", "journal_append", "checkpoint_publish"]
+        [
+            "checkpoint_read",
+            "parent_chain_sync",
+            "journal_append",
+            "checkpoint_publish",
+        ]
     );
 
     let callback_effect = effect.clone();
@@ -247,7 +267,12 @@ fn checkpoint_write_and_sync_failures_block_usable_admission_and_effect() {
         assert_eq!(position, ChainPosition::genesis());
         assert_eq!(
             events,
-            ["checkpoint_read", "journal_append", "checkpoint_publish"]
+            [
+                "checkpoint_read",
+                "parent_chain_sync",
+                "journal_append",
+                "checkpoint_publish",
+            ]
         );
         let trust = ChainTrust::new(key(), identity(), ChainPosition::genesis());
         assert!(matches!(
@@ -285,7 +310,10 @@ fn journal_write_and_sync_failures_block_checkpoint_and_effect() {
         assert_eq!(effect.load(Ordering::SeqCst), 0);
         let (position, events) = checkpoint_state(&fixture);
         assert_eq!(position, ChainPosition::genesis());
-        assert_eq!(events, ["checkpoint_read", "journal_append"]);
+        assert_eq!(
+            events,
+            ["checkpoint_read", "parent_chain_sync", "journal_append"]
+        );
         if failure == DurableAppendFailure::SyncFailed {
             let retry_effect = counter();
             let retry = fixture.journal.admit("broker.http.retry", Map::new());
@@ -299,6 +327,42 @@ fn journal_write_and_sync_failures_block_checkpoint_and_effect() {
             assert_eq!(retry_effect.load(Ordering::SeqCst), 0);
         }
     }
+}
+
+#[test]
+fn first_use_parent_chain_sync_failure_blocks_admission_checkpoint_and_effect() {
+    let fixture = fixture();
+    fixture.parent_sync_failures.lock().unwrap().push_back(());
+    let effect = counter();
+    let result = fixture.journal.admit("broker.http.get", Map::new());
+    let admission_count = if result.is_ok() { 1 } else { 0 };
+    assert_eq!(
+        result.as_ref().err(),
+        Some(&LifecycleError::JournalSyncFailed)
+    );
+    assert!(run_if_admitted(result, effect.clone()).is_none());
+
+    let (position, events) = checkpoint_state(&fixture);
+    let checkpoint_publish_count = events
+        .iter()
+        .filter(|event| **event == "checkpoint_publish")
+        .count();
+    assert_eq!(admission_count, 0);
+    assert_eq!(checkpoint_publish_count, 0);
+    assert_eq!(effect.load(Ordering::SeqCst), 0);
+    assert_eq!(position, ChainPosition::genesis());
+    assert_eq!(events, ["checkpoint_read", "parent_chain_sync"]);
+    assert!(!fixture.temp.audit_dir().join("audit.jsonl").exists());
+
+    let retry_effect = counter();
+    let retry = fixture
+        .journal
+        .admit("broker.http.retry", Map::new())
+        .unwrap();
+    let execution = retry.run(|_| retry_effect.fetch_add(1, Ordering::SeqCst));
+    drop(execution);
+    assert_eq!(retry_effect.load(Ordering::SeqCst), 1);
+    assert_eq!(checkpoint_state(&fixture).0.count, 1);
 }
 
 #[test]
@@ -405,6 +469,34 @@ fn outcome_write_failure_preserves_effect_output_and_leaves_admission_unknown() 
 }
 
 #[test]
+fn outcome_checkpoint_publish_failure_preserves_output_and_fails_scans_closed() {
+    let fixture = fixture();
+    let execution = fixture
+        .journal
+        .admit("broker.http.get", Map::new())
+        .unwrap()
+        .run(|_| 13_usize);
+    fixture
+        .checkpoint
+        .state
+        .lock()
+        .unwrap()
+        .publish_failures
+        .push_back(CheckpointFailure::SyncFailed);
+    let error = execution
+        .finish(TerminalOutcome::Completed, Map::new())
+        .unwrap_err();
+    assert_eq!(error.error, LifecycleError::CheckpointSyncFailed);
+    assert_eq!(error.into_output(), 13);
+    assert!(matches!(
+        fixture.journal.admission_states(),
+        Err(LifecycleError::ChainContinuityLoss(
+            ChainPositionMismatch::BeyondCheckpoint
+        ))
+    ));
+}
+
+#[test]
 fn invalid_actions_and_lifecycle_metadata_are_rejected_before_io() {
     let fixture = fixture();
     for action in ["", "bad action", "bad\naction", &"x".repeat(129)] {
@@ -445,7 +537,12 @@ fn lifecycle_fields_in_outcome_metadata_preserve_output_without_appending() {
     assert_eq!(position.count, 1);
     assert_eq!(
         events,
-        ["checkpoint_read", "journal_append", "checkpoint_publish"]
+        [
+            "checkpoint_read",
+            "parent_chain_sync",
+            "journal_append",
+            "checkpoint_publish",
+        ]
     );
     let report = fixture.journal.admission_states().unwrap();
     assert_eq!(report.admissions[0].outcome, AdmissionOutcomeState::Unknown);
