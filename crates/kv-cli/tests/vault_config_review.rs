@@ -59,5 +59,19 @@ fn approval_rejects_config_changed_after_review_and_preserves_prior_approval() {
         kv_store::config_authority::approved_authority(&root, &master).unwrap(),
         approved_before
     );
+
+    fs::write(&config, &original).unwrap();
+    let formatting_review = kv_store::config_authority::review_config(&root).unwrap();
+    let mut whitespace_only = original.clone();
+    whitespace_only.extend_from_slice(b"\n\n");
+    fs::write(&config, whitespace_only).unwrap();
+    let error = kv_store::config_authority::approve_reviewed(&root, &master, &formatting_review)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed"), "{error}");
+    assert_eq!(
+        kv_store::config_authority::approved_authority(&root, &master).unwrap(),
+        approved_before
+    );
     fs::write(&config, original).unwrap();
 }
