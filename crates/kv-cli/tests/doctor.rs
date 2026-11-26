@@ -42,7 +42,8 @@ fn valid_config() -> &'static [u8] {
   "default_env": "dev",
   "environments": ["dev"],
   "storage": {"format": "drawers"},
-  "security": {"passphrase": true, "totp": false, "approval_mode": "unset"}
+  "security": {"passphrase": true, "totp": false, "approval_mode": "unset"},
+  "canary": "CANARY-CONFIG-CONTENTS"
 }
 "#
 }
@@ -52,7 +53,11 @@ fn make_valid_vault_shape(scratch: &Scratch) -> PathBuf {
     make_private_dir(&secrets);
     write_file(&secrets.join("key"), b"CANARY-KEY-CONTENTS", 0o000);
     write_file(&secrets.join("config.json"), valid_config(), 0o600);
-    write_file(&secrets.join("vault-marker"), b"marker", 0o600);
+    write_file(
+        &secrets.join("vault-marker"),
+        b"CANARY-MARKER-CONTENTS",
+        0o600,
+    );
     write_file(&secrets.join(".gitignore"), b"*\n!.gitignore\n", 0o600);
     let drawers = secrets.join("drawers");
     make_private_dir(&drawers);
@@ -211,11 +216,23 @@ fn valid_vault_shape_passes_without_opening_credential_files() {
         "{text}"
     );
     assert!(
+        text.contains("vault config file present (metadata only; contents not read)"),
+        "{text}"
+    );
+    assert!(
         text.contains("drawer storage present (entries not opened)"),
         "{text}"
     );
-    assert!(!text.contains("CANARY-KEY-CONTENTS"), "{text}");
-    assert!(!text.contains("CANARY-DRAWER-CONTENTS"), "{text}");
+    assert!(text.contains("scope: metadata only"), "{text}");
+    assert!(!text.contains("vault config valid"), "{text}");
+    for canary in [
+        "CANARY-KEY-CONTENTS",
+        "CANARY-CONFIG-CONTENTS",
+        "CANARY-MARKER-CONTENTS",
+        "CANARY-DRAWER-CONTENTS",
+    ] {
+        assert!(!text.contains(canary), "{text}");
+    }
     assert_eq!(
         snapshot_tree(&scratch.root),
         before,
@@ -237,10 +254,8 @@ fn config_permission_warning_is_not_hidden_by_validity() {
         text.contains("vault config privacy needs review: group or other users have access"),
         "{text}"
     );
-    assert!(
-        text.contains("vault config valid (1 environment)"),
-        "{text}"
-    );
+    assert!(text.contains("scope: metadata only"), "{text}");
+    assert!(!text.contains("vault config valid"), "{text}");
     assert_eq!(
         snapshot_tree(&scratch.root),
         before,
@@ -288,19 +303,23 @@ fn wrong_secrets_shape_is_broken_not_fresh() {
 }
 
 #[test]
-fn malformed_config_is_broken_not_fresh() {
+fn config_contents_are_outside_structural_scope() {
     let scratch = Scratch::new("doctor-config");
     make_valid_vault_shape(&scratch);
     write_file(
         &scratch.proj().join(".secrets").join("config.json"),
-        b"not json",
+        b"CANARY-CONFIG-CONTENTS",
         0o600,
     );
     let before = snapshot_tree(&scratch.root);
-    let (code, text) = run(&scratch, &["doctor"]);
-    assert_eq!(code, 1, "{text}");
-    assert!(text.contains("vault config is not valid JSON"), "{text}");
-    assert!(!text.contains("fresh state: no vault found"), "{text}");
+    let (_code, text) = run(&scratch, &["doctor"]);
+    assert!(
+        text.contains("vault config file present (metadata only; contents not read)"),
+        "{text}"
+    );
+    assert!(!text.contains("vault config is not valid JSON"), "{text}");
+    assert!(!text.contains("CANARY-CONFIG-CONTENTS"), "{text}");
+    assert!(text.contains("semantic corruption"), "{text}");
     assert_eq!(
         snapshot_tree(&scratch.root),
         before,

@@ -1,15 +1,13 @@
 //! `kv doctor`: a read-only first-install and vault-structure check.
 //!
 //! This command deliberately does not use the vault's normal config/key loaders: those
-//! loaders take locks, repair folders, or decrypt credential material. Doctor reads only
-//! metadata for credential-bearing files; the one file whose contents it parses is
-//! `.secrets/config.json`, which stores policy and settings rather than secret values.
+//! loaders take locks, repair folders, or decrypt credential material. Doctor uses only
+//! filesystem metadata for every vault file; it does not open, parse, or validate the
+//! contents of key, config, marker, ignore, or drawer data.
 
 use std::path::{Path, PathBuf};
 
 use kv_sandbox::bwrap::{Isolation, Platform, bwrap_path, probe_isolation};
-use kv_store::{envname, fsx};
-use serde_json::Value;
 
 use crate::project::{CmdResult, Exit};
 use crate::ui::{self, Palette};
@@ -130,80 +128,6 @@ fn private_dir_check(path: &Path, label: &str, pass_message: &str) -> Check {
     Check::pass(pass_message.to_owned())
 }
 
-fn validate_config(value: &Value) -> Result<usize, String> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| "config.json must contain a JSON object".to_owned())?;
-    let format = object
-        .get("storage")
-        .and_then(|storage| storage.get("format"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| "config.json does not name a storage format".to_owned())?;
-    if format != "drawers" {
-        return Err(format!(
-            "unsupported storage format {format:?}; this build expects drawers"
-        ));
-    }
-    let environments = object
-        .get("environments")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "config.json has no environments list".to_owned())?;
-    let names: Result<Vec<String>, String> = environments
-        .iter()
-        .map(|entry| {
-            entry
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| "environment names must be strings".to_owned())
-        })
-        .collect();
-    let names = names?;
-    if names.is_empty() {
-        return Err("config.json has no environments".to_owned());
-    }
-    let default_env = object
-        .get("default_env")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "config.json has no default environment".to_owned())?;
-    envname::validate_environment_registry(&names, default_env)
-        .map_err(|error| error.to_string())?;
-    Ok(names.len())
-}
-
-fn config_checks(path: &Path) -> Vec<Check> {
-    let metadata_check = private_file_check(path, "vault config", "vault config present", true);
-    if metadata_check.severity == Severity::Fail {
-        return vec![metadata_check];
-    }
-    let mut checks = Vec::new();
-    if metadata_check.severity == Severity::Warn {
-        checks.push(metadata_check);
-    }
-    let (raw, _) =
-        match fsx::read_regular_limit_with_metadata(path, "config file", 16 * 1024 * 1024) {
-            Ok(contents) => contents,
-            Err(error) => {
-                checks.push(Check::fail(format!("vault config cannot be read: {error}")));
-                return checks;
-            }
-        };
-    let value: Value = match serde_json::from_slice(&raw) {
-        Ok(value) => value,
-        Err(_) => {
-            checks.push(Check::fail("vault config is not valid JSON"));
-            return checks;
-        }
-    };
-    checks.push(match validate_config(&value) {
-        Ok(count) => Check::pass(format!(
-            "vault config valid ({count} environment{})",
-            if count == 1 { "" } else { "s" }
-        )),
-        Err(message) => Check::fail(format!("vault config invalid: {message}")),
-    });
-    checks
-}
-
 fn find_secrets_entry() -> Result<Option<(PathBuf, PathBuf)>, (PathBuf, std::io::Error)> {
     let mut root = std::env::current_dir().map_err(|error| (PathBuf::new(), error))?;
     loop {
@@ -262,7 +186,12 @@ fn vault_checks() -> Vec<Check> {
         "vault key file present (metadata only; contents not read)",
         true,
     ));
-    checks.extend(config_checks(&secrets.join("config.json")));
+    checks.push(private_file_check(
+        &secrets.join("config.json"),
+        "vault config",
+        "vault config file present (metadata only; contents not read)",
+        true,
+    ));
     checks.push(private_dir_check(
         &secrets.join("drawers"),
         "drawer storage directory",
@@ -271,7 +200,7 @@ fn vault_checks() -> Vec<Check> {
     checks.push(private_file_check(
         &secrets.join("vault-marker"),
         "vault marker",
-        "vault marker present (contents not read)",
+        "vault marker present (metadata only; contents not read)",
         true,
     ));
     if std::fs::symlink_metadata(secrets.join(".gitignore")).is_err() {
@@ -381,38 +310,13 @@ pub fn cmd_doctor(p: &Palette) -> CmdResult {
         print_check(p, check);
     }
     ui::blank();
+    ui::info(
+        "scope: metadata only; no vault file contents are read, so semantic corruption and moved-vault provenance are outside this structural check",
+    );
     ui::info(&format!(
         "{passed} passed, {failures} error{}, {warnings} warning{}",
         if failures == 1 { "" } else { "s" },
         if warnings == 1 { "" } else { "s" }
     ));
     if failures == 0 { Ok(()) } else { Err(Exit(1)) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::validate_config;
-    use serde_json::json;
-
-    #[test]
-    fn valid_fresh_config_is_accepted() {
-        let config = json!({
-            "default_env": "dev",
-            "environments": ["dev"],
-            "storage": {"format": "drawers"},
-        });
-        assert_eq!(validate_config(&config), Ok(1));
-    }
-
-    #[test]
-    fn malformed_configs_are_broken_not_fresh() {
-        for config in [
-            json!({}),
-            json!({"default_env": "dev", "environments": ["dev"], "storage": {"format": "env-bundle"}}),
-            json!({"default_env": "missing", "environments": ["dev"], "storage": {"format": "drawers"}}),
-            json!({"default_env": "dev", "environments": [], "storage": {"format": "drawers"}}),
-        ] {
-            assert!(validate_config(&config).is_err(), "{config}");
-        }
-    }
 }
