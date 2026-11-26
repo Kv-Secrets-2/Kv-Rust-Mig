@@ -71,10 +71,13 @@ jobs:
               raise SystemExit("fixed-operation guard failed: cargo selected zero tests")
           passed = sum(int(summary[1]) for summary in summaries)
           failed = sum(int(summary[2]) for summary in summaries)
+          ignored = sum(int(summary[3]) for summary in summaries)
           if failed != 0 or any(summary[0] != "ok" for summary in summaries):
               raise SystemExit("fixed-operation guard failed: one or more selected tests failed")
+          if ignored != 0:
+              raise SystemExit("fixed-operation guard failed: ignored tests were selected")
           if passed == 0:
-              raise SystemExit("fixed-operation guard failed: all selected tests were ignored")
+              raise SystemExit("fixed-operation guard failed: no selected tests passed")
           PYEOF
         env:
           TMPDIR: /var/tmp
@@ -89,9 +92,13 @@ jobs:
           import re
           import subprocess
           from pathlib import Path
-          log = Path(os.environ["RUNNER_TEMP"]) / "kv-native-tests.log"
-          if log.is_file():
-              text = log.read_text(errors="replace")
+          logs = [
+              Path(os.environ["RUNNER_TEMP"]) / "kv-native-tests.log",
+              Path(os.environ["RUNNER_TEMP"]) / "v1-anthropic-operation.log",
+          ]
+          texts = [log.read_text(errors="replace") for log in logs if log.is_file()]
+          if texts:
+              text = "\n".join(texts)
               tracked = subprocess.check_output(["git", "ls-files", "-z", "crates"], text=True, encoding="utf-8", errors="replace").split("\0")
               public_functions = set()
               source_lines = {}
