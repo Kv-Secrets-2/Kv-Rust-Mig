@@ -14,9 +14,10 @@ Unix audit storage for two explicit chain modes:
 
 Each record is one canonical compact JSON object followed by `\n`. Object keys
 are sorted recursively by UTF-8 bytes, JSON has no insignificant whitespace,
-numbers use the crate's deterministic Python-compatible spelling, and every line is at most
-1 MiB. The verifier requires exact canonical bytes; reordered keys, extra
-whitespace, duplicate-key ambiguity, or another noncanonical spelling is
+numbers use the crate's deterministic Python-compatible spelling, every line is
+at most 1 MiB, and container nesting is at most 127 deep. The verifier requires
+exact canonical bytes; reordered keys, extra whitespace, duplicate-key ambiguity,
+or another noncanonical spelling is
 corruption even when the semantic JSON value is unchanged.
 
 Top-level `ts` and `event` are broker-owned strings. Caller metadata must not

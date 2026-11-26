@@ -24,6 +24,7 @@ pub const MAX_VAULT_IDENTITY_BYTES: usize = 4096;
 const DOMAIN: &[u8] = b"kv-audit-chain-v1\0";
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 const TAIL_READ_EXTRA_BYTES: u64 = 2;
+const MAX_CHAIN_JSON_DEPTH: usize = 127;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -488,6 +489,29 @@ fn write_canonical_json(value: &Value, output: &mut Vec<u8>) -> Result<(), Strin
     Ok(())
 }
 
+fn json_container_depth(value: &Value) -> usize {
+    let mut deepest = 0_usize;
+    let mut pending = vec![(value, 0_usize)];
+    while let Some((value, parent_depth)) = pending.pop() {
+        let depth = if matches!(value, Value::Array(_) | Value::Object(_)) {
+            parent_depth + 1
+        } else {
+            parent_depth
+        };
+        deepest = deepest.max(depth);
+        match value {
+            Value::Array(items) => {
+                pending.extend(items.iter().map(|item| (item, depth)));
+            }
+            Value::Object(items) => {
+                pending.extend(items.values().map(|item| (item, depth)));
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
 fn canonical_json(value: &Value) -> Result<Vec<u8>, String> {
     let mut output = Vec::new();
     write_canonical_json(value, &mut output)?;
@@ -776,7 +800,11 @@ pub(crate) fn encode_authenticated_entry(
     content.insert("ts".into(), Value::String(timestamp.into()));
     content.insert("event".into(), Value::String(event.into()));
     content.extend(fields);
-    let content_bytes = canonical_json(&Value::Object(content.clone()))?;
+    let content_value = Value::Object(content.clone());
+    if json_container_depth(&content_value) > MAX_CHAIN_JSON_DEPTH {
+        return Err("authenticated audit entry exceeds its nesting bound".into());
+    }
+    let content_bytes = canonical_json(&content_value)?;
     let sequence = position
         .count
         .checked_add(1)

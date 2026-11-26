@@ -239,6 +239,34 @@ fn broker_owned_fields_empty_events_and_oversized_records_are_refused() {
 }
 
 #[test]
+fn authenticated_entries_enforce_the_verifier_nesting_bound() {
+    fn nested(depth: usize) -> Value {
+        let mut value = Value::from(0);
+        for _ in 0..depth {
+            value = Value::Array(vec![value]);
+        }
+        value
+    }
+
+    let mut accepted_fields = Map::new();
+    accepted_fields.insert("nested".into(), nested(126));
+    let accepted = try_encode_at("deep", accepted_fields, ChainPosition::genesis()).unwrap();
+    assert_eq!(
+        verify_bytes(&accepted.bytes, Some(&trust(accepted.position))),
+        ChainVerification::Valid {
+            position: accepted.position
+        }
+    );
+
+    let mut rejected_fields = Map::new();
+    rejected_fields.insert("nested".into(), nested(127));
+    assert_eq!(
+        try_encode_at("deep", rejected_fields, ChainPosition::genesis()).unwrap_err(),
+        "authenticated audit entry exceeds its nesting bound"
+    );
+}
+
+#[test]
 fn valid_history_and_empty_history_are_distinct_from_missing_trust_state() {
     let (bytes, position) = generated_chain(2);
     assert_eq!(
