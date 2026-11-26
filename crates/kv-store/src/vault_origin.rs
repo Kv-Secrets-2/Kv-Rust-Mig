@@ -360,6 +360,13 @@ fn write_record(
     folder.write(&record_path_name(here)?, record)
 }
 
+#[cfg(unix)]
+pub fn key_metadata_is_private(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    metadata.uid() == rustix::process::getuid().as_raw() && metadata.mode() & 0o777 == 0o600
+}
+
 pub fn check_key(root: impl AsRef<Path>) -> Result<Option<String>, VaultOriginError> {
     #[cfg(windows)]
     {
@@ -368,8 +375,6 @@ pub fn check_key(root: impl AsRef<Path>) -> Result<Option<String>, VaultOriginEr
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt;
-
         let root = fs::canonicalize(root.as_ref())?;
         if tracked_key(&root)? {
             return Ok(Some("The key is tracked by git; rotate any affected credentials and create a new vault with kv init.".into()));
@@ -385,8 +390,7 @@ pub fn check_key(root: impl AsRef<Path>) -> Result<Option<String>, VaultOriginEr
                 "the key must be a regular private file".into(),
             ));
         }
-        if metadata.uid() != rustix::process::getuid().as_raw() || metadata.mode() & 0o777 != 0o600
-        {
+        if !key_metadata_is_private(&metadata) {
             return Ok(Some("The key was readable outside its owner or is not private; rotate any affected credentials and create a new vault with kv init.".into()));
         }
         Ok(None)

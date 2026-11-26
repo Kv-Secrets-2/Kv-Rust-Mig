@@ -51,7 +51,7 @@ fn valid_config() -> &'static [u8] {
 fn make_valid_vault_shape(scratch: &Scratch) -> PathBuf {
     let secrets = scratch.proj().join(".secrets");
     make_private_dir(&secrets);
-    write_file(&secrets.join("key"), b"CANARY-KEY-CONTENTS", 0o000);
+    write_file(&secrets.join("key"), b"CANARY-KEY-CONTENTS", 0o600);
     write_file(&secrets.join("config.json"), valid_config(), 0o600);
     write_file(
         &secrets.join("vault-marker"),
@@ -113,6 +113,14 @@ fn trusted_candidate(path: &str) -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+#[cfg(target_os = "linux")]
+fn strace_available() -> bool {
+    Command::new("strace")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 fn sandbox_ready() -> bool {
@@ -324,5 +332,128 @@ fn config_contents_are_outside_structural_scope() {
         snapshot_tree(&scratch.root),
         before,
         "doctor changed the filesystem"
+    );
+}
+
+#[test]
+fn unwritable_home_is_unhealthy_before_init() {
+    if rustix::process::getuid().as_raw() == 0 {
+        eprintln!("SKIP doctor unwritable-home regression: root can write through mode bits");
+        return;
+    }
+    let scratch = Scratch::new("doctor-unwritable-home");
+    set_mode(&scratch.home(), 0o555);
+    let before = snapshot_tree(&scratch.root);
+    let (code, text) = run(&scratch, &["doctor"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(
+        text.contains("HOME does not allow creating ~/.kv"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("fresh user state: ~/.kv has not been created yet"),
+        "{text}"
+    );
+    assert_eq!(
+        snapshot_tree(&scratch.root),
+        before,
+        "doctor changed the filesystem"
+    );
+}
+
+#[test]
+fn key_mode_that_unlock_rejects_is_unhealthy() {
+    let scratch = Scratch::new("doctor-key-mode");
+    make_valid_vault_shape(&scratch);
+    set_mode(&scratch.proj().join(".secrets").join("key"), 0o400);
+    let before = snapshot_tree(&scratch.root);
+    let (code, text) = run(&scratch, &["doctor"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(
+        text.contains("vault key file mode is not owner-only 0600; kv unlock will refuse it"),
+        "{text}"
+    );
+    assert_eq!(
+        snapshot_tree(&scratch.root),
+        before,
+        "doctor changed the filesystem"
+    );
+}
+
+#[test]
+fn linked_ignore_file_is_unhealthy() {
+    let scratch = Scratch::new("doctor-ignore-link");
+    let secrets = make_valid_vault_shape(&scratch);
+    let ignore = secrets.join(".gitignore");
+    std::fs::remove_file(&ignore).unwrap();
+    let target = scratch.root.join("shared-ignore");
+    std::fs::write(&target, b"*\n!.gitignore\n").unwrap();
+    std::os::unix::fs::symlink(&target, &ignore).unwrap();
+    let before = snapshot_tree(&scratch.root);
+    let (code, text) = run(&scratch, &["doctor"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(
+        text.contains(".gitignore exists but is not a regular file"),
+        "{text}"
+    );
+    assert_eq!(
+        snapshot_tree(&scratch.root),
+        before,
+        "doctor changed the filesystem"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn doctor_does_not_open_vault_paths_on_linux() {
+    if !strace_available() {
+        eprintln!("SKIP doctor file-access regression: strace is unavailable");
+        return;
+    }
+    let scratch = Scratch::new("doctor-strace");
+    let secrets = make_valid_vault_shape(&scratch);
+    let trace_path = scratch.root.join("doctor.strace");
+    let output = Command::new("strace")
+        .arg("-f")
+        .arg("-o")
+        .arg(&trace_path)
+        .arg("-e")
+        .arg("trace=%file")
+        .arg(kv_bin())
+        .arg("doctor")
+        .current_dir(scratch.proj())
+        .env("HOME", scratch.home())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output
+            .status
+            .code()
+            .is_some_and(|code| (0..=1).contains(&code)),
+        "strace did not run kv doctor to completion: {output:?}"
+    );
+    let trace = std::fs::read_to_string(&trace_path).unwrap();
+    let secrets_text = secrets.to_string_lossy();
+    let opened = trace
+        .lines()
+        .filter(|line| {
+            let touches_vault = line.contains(secrets_text.as_ref())
+                || line.contains("\".secrets")
+                || line.contains("./.secrets");
+            if !touches_vault {
+                return false;
+            }
+            let Some((prefix, _)) = line.split_once('(') else {
+                return false;
+            };
+            let call = prefix.split_whitespace().last().unwrap_or_default();
+            matches!(call, "open" | "openat" | "openat2" | "creat")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        opened.is_empty(),
+        "doctor opened vault paths instead of using metadata only:\n{}",
+        opened.join("\n")
     );
 }

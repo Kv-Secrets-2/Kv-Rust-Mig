@@ -48,6 +48,12 @@ impl Check {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FilePrivacyPolicy {
+    Generic,
+    VaultKey,
+}
+
 #[cfg(unix)]
 fn owner_matches(metadata: &std::fs::Metadata) -> Option<bool> {
     use std::os::unix::fs::MetadataExt;
@@ -70,6 +76,20 @@ fn mode_bits(_metadata: &std::fs::Metadata) -> Option<u32> {
     None
 }
 
+#[cfg(unix)]
+fn allows_write_search(path: &Path) -> bool {
+    rustix::fs::access(
+        path,
+        rustix::fs::Access::WRITE_OK | rustix::fs::Access::EXEC_OK,
+    )
+    .is_ok()
+}
+
+#[cfg(not(unix))]
+fn allows_write_search(_path: &Path) -> bool {
+    true
+}
+
 fn privacy_problem(metadata: &std::fs::Metadata) -> Option<&'static str> {
     if owner_matches(metadata) == Some(false) {
         return Some("owned by another account");
@@ -81,7 +101,13 @@ fn privacy_problem(metadata: &std::fs::Metadata) -> Option<&'static str> {
     None
 }
 
-fn private_file_check(path: &Path, label: &str, pass_message: &str, non_empty: bool) -> Check {
+fn private_file_check(
+    path: &Path,
+    label: &str,
+    pass_message: &str,
+    non_empty: bool,
+    privacy_policy: FilePrivacyPolicy,
+) -> Check {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -100,8 +126,24 @@ fn private_file_check(path: &Path, label: &str, pass_message: &str, non_empty: b
     if owner_matches(&metadata) == Some(false) {
         return Check::fail(format!("{label} is owned by another account"));
     }
-    if let Some(problem) = privacy_problem(&metadata) {
-        return Check::warn(format!("{label} privacy needs review: {problem}"));
+    match privacy_policy {
+        FilePrivacyPolicy::VaultKey => {
+            #[cfg(unix)]
+            if !kv_store::vault_origin::key_metadata_is_private(&metadata) {
+                return Check::fail(format!(
+                    "{label} mode is not owner-only 0600; kv unlock will refuse it"
+                ));
+            }
+            #[cfg(not(unix))]
+            if let Some(problem) = privacy_problem(&metadata) {
+                return Check::warn(format!("{label} privacy needs review: {problem}"));
+            }
+        }
+        FilePrivacyPolicy::Generic => {
+            if let Some(problem) = privacy_problem(&metadata) {
+                return Check::warn(format!("{label} privacy needs review: {problem}"));
+            }
+        }
     }
     Check::pass(pass_message.to_owned())
 }
@@ -128,8 +170,10 @@ fn private_dir_check(path: &Path, label: &str, pass_message: &str) -> Check {
     Check::pass(pass_message.to_owned())
 }
 
-fn find_secrets_entry() -> Result<Option<(PathBuf, PathBuf)>, (PathBuf, std::io::Error)> {
-    let mut root = std::env::current_dir().map_err(|error| (PathBuf::new(), error))?;
+fn find_secrets_entry(
+    start: &Path,
+) -> Result<Option<(PathBuf, PathBuf)>, (PathBuf, std::io::Error)> {
+    let mut root = start.to_path_buf();
     loop {
         let candidate = root.join(".secrets");
         match std::fs::symlink_metadata(&candidate) {
@@ -143,14 +187,26 @@ fn find_secrets_entry() -> Result<Option<(PathBuf, PathBuf)>, (PathBuf, std::io:
     }
 }
 
-fn vault_checks() -> Vec<Check> {
-    let entry = match find_secrets_entry() {
-        Ok(entry) => entry,
-        Err((path, error)) if path.as_os_str().is_empty() => {
-            return vec![Check::fail(format!(
-                "working directory cannot be inspected: {error}"
-            ))];
+fn ignore_file_check(path: &Path) -> Option<Check> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Some(Check::fail(
+                ".gitignore exists but is not a regular file; vault config loading will refuse it",
+            ))
         }
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(Check::warn(
+            ".gitignore missing; key and local authority files are not protected from accidental commits",
+        )),
+        Err(error) => Some(Check::fail(format!(
+            ".gitignore cannot be inspected: {error}"
+        ))),
+    }
+}
+
+fn vault_checks(start: &Path) -> Vec<Check> {
+    let entry = match find_secrets_entry(start) {
+        Ok(entry) => entry,
         Err((path, error)) => {
             return vec![Check::fail(format!(
                 ".secrets candidate at {} cannot be inspected: {error}",
@@ -185,12 +241,14 @@ fn vault_checks() -> Vec<Check> {
         "vault key file",
         "vault key file present (metadata only; contents not read)",
         true,
+        FilePrivacyPolicy::VaultKey,
     ));
     checks.push(private_file_check(
         &secrets.join("config.json"),
         "vault config",
         "vault config file present (metadata only; contents not read)",
         true,
+        FilePrivacyPolicy::Generic,
     ));
     checks.push(private_dir_check(
         &secrets.join("drawers"),
@@ -202,22 +260,21 @@ fn vault_checks() -> Vec<Check> {
         "vault marker",
         "vault marker present (metadata only; contents not read)",
         true,
+        FilePrivacyPolicy::Generic,
     ));
-    if std::fs::symlink_metadata(secrets.join(".gitignore")).is_err() {
-        checks.push(Check::warn(
-            ".gitignore missing; key and local authority files are not protected from accidental commits",
-        ));
+    if let Some(check) = ignore_file_check(&secrets.join(".gitignore")) {
+        checks.push(check);
     }
     checks
 }
 
-fn home_checks() -> Vec<Check> {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+fn home_checks(home: Option<&Path>) -> Vec<Check> {
+    let Some(home) = home else {
         return vec![Check::fail(
             "HOME is not set; kv cannot keep its local state",
         )];
     };
-    let metadata = match std::fs::metadata(&home) {
+    let metadata = match std::fs::metadata(home) {
         Ok(metadata) => metadata,
         Err(error) => return vec![Check::fail(format!("HOME cannot be inspected: {error}"))],
     };
@@ -228,9 +285,13 @@ fn home_checks() -> Vec<Check> {
     let metadata = match std::fs::symlink_metadata(&kv) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return vec![Check::pass(
-                "fresh user state: ~/.kv has not been created yet",
-            )];
+            return vec![if allows_write_search(home) {
+                Check::pass("fresh user state: ~/.kv has not been created yet")
+            } else {
+                Check::fail(
+                    "HOME does not allow creating ~/.kv; kv init needs write and search access",
+                )
+            }];
         }
         Err(error) => {
             return vec![Check::fail(format!("~/.kv cannot be inspected: {error}"))];
@@ -246,6 +307,11 @@ fn home_checks() -> Vec<Check> {
         return vec![Check::warn(format!(
             "~/.kv privacy needs review: {problem}"
         ))];
+    }
+    if !allows_write_search(&kv) {
+        return vec![Check::fail(
+            "~/.kv does not allow write and search access; kv cannot maintain local vault state",
+        )];
     }
     vec![Check::pass("~/.kv exists and is private")]
 }
@@ -276,11 +342,27 @@ fn host_checks() -> Vec<Check> {
     checks
 }
 
-fn collect_checks() -> Vec<Check> {
-    let mut checks = host_checks();
-    checks.extend(home_checks());
-    checks.extend(vault_checks());
+fn collect_checks_for(host: Vec<Check>, home: Option<&Path>, cwd: &Path) -> Vec<Check> {
+    let mut checks = host;
+    checks.extend(home_checks(home));
+    checks.extend(vault_checks(cwd));
     checks
+}
+
+fn collect_checks() -> Vec<Check> {
+    let host = host_checks();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match std::env::current_dir() {
+        Ok(cwd) => collect_checks_for(host, home.as_deref(), &cwd),
+        Err(error) => {
+            let mut checks = host;
+            checks.extend(home_checks(home.as_deref()));
+            checks.push(Check::fail(format!(
+                "working directory cannot be inspected: {error}"
+            )));
+            checks
+        }
+    }
 }
 
 fn print_check(p: &Palette, check: &Check) {
@@ -319,4 +401,89 @@ pub fn cmd_doctor(p: &Palette) -> CmdResult {
         if warnings == 1 { "" } else { "s" }
     ));
     if failures == 0 { Ok(()) } else { Err(Exit(1)) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestRoot(PathBuf);
+
+    impl TestRoot {
+        fn new(tag: &str) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let root = std::env::temp_dir()
+                .join(format!("kv-doctor-unit-{}-{tag}-{n}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(root.join("home")).unwrap();
+            std::fs::create_dir_all(root.join("proj")).unwrap();
+            Self(root)
+        }
+
+        fn home(&self) -> PathBuf {
+            self.0.join("home")
+        }
+
+        fn proj(&self) -> PathBuf {
+            self.0.join("proj")
+        }
+    }
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    fn set_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn healthy_pre_init_shape_has_no_failures_without_host_probe() {
+        let scratch = TestRoot::new("healthy");
+        let checks = collect_checks_for(
+            vec![Check::pass("Linux platform")],
+            Some(&scratch.home()),
+            &scratch.proj(),
+        );
+        assert!(
+            checks.iter().all(|check| check.severity != Severity::Fail),
+            "{checks:?}"
+        );
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.message == "fresh state: no vault found before kv init"),
+            "{checks:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unwritable_home_without_state_is_a_failure_before_init() {
+        if rustix::process::getuid().as_raw() == 0 {
+            return;
+        }
+        let scratch = TestRoot::new("unwritable-home");
+        set_mode(&scratch.home(), 0o555);
+        let checks = collect_checks_for(
+            vec![Check::pass("Linux platform")],
+            Some(&scratch.home()),
+            &scratch.proj(),
+        );
+        assert!(
+            checks.iter().any(|check| {
+                check.severity == Severity::Fail
+                    && check.message.contains("HOME does not allow creating ~/.kv")
+            }),
+            "{checks:?}"
+        );
+    }
 }
