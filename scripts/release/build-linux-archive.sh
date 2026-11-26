@@ -31,12 +31,29 @@ if [[ -z "$target_dir" ]]; then
 fi
 
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
-path_remap="--remap-path-prefix=$cargo_home/registry/src=/cargo/registry/src"
-if [[ -n "${RUSTFLAGS:-}" ]]; then
-  export RUSTFLAGS="$RUSTFLAGS $path_remap"
-else
-  export RUSTFLAGS=$path_remap
+export KV_RELEASE_PATH_REMAP="--remap-path-prefix=$cargo_home/registry/src=/cargo/registry/src"
+
+# A rustc wrapper keeps the remap as one argv entry even when CARGO_HOME contains
+# spaces, and unlike RUSTFLAGS it does not replace rustflags from Cargo configuration.
+rustc_wrapper=$(mktemp)
+trap 'rm -f "$rustc_wrapper"' EXIT
+cat >"$rustc_wrapper" <<'EOF'
+#!/usr/bin/env bash
+set -e
+rustc=$1
+shift
+if [[ -n "${KV_RELEASE_INNER_RUSTC_WRAPPER:-}" ]]; then
+  exec "$KV_RELEASE_INNER_RUSTC_WRAPPER" "$rustc" "$@" "$KV_RELEASE_PATH_REMAP"
 fi
+exec "$rustc" "$@" "$KV_RELEASE_PATH_REMAP"
+EOF
+chmod 0755 "$rustc_wrapper"
+inner_wrapper=${RUSTC_WRAPPER:-${CARGO_BUILD_RUSTC_WRAPPER:-}}
+if [[ -n "$inner_wrapper" ]]; then
+  export KV_RELEASE_INNER_RUSTC_WRAPPER=$inner_wrapper
+fi
+export RUSTC_WRAPPER=$rustc_wrapper
+export CARGO_BUILD_RUSTC_WRAPPER=$rustc_wrapper
 
 cargo build --release --locked --target "$target" -p kv-cli
 
@@ -70,7 +87,7 @@ archive_name=$name.tar.gz
 checksum_name=$archive_name.sha256
 mkdir -p "$out_dir"
 staging=$(mktemp -d "$out_dir/staging.XXXXXX")
-trap 'rm -rf "$staging"' EXIT
+trap 'rm -f "$rustc_wrapper"; rm -rf "$staging"' EXIT
 
 mkdir "$staging/$name"
 install -m 0755 "$binary" "$staging/$name/kv"
