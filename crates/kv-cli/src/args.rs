@@ -1570,7 +1570,11 @@ fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
             )));
         }
     };
-    if rest[1..].iter().any(|arg| arg == "-h" || arg == "--help") {
+    if rest[1..]
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "-h" || arg == "--help")
+    {
         if action == "add" {
             return Err(ParseError::Help(provider_add_v1_help().to_owned()));
         }
