@@ -1,14 +1,20 @@
-//! Audit records compatible with the pinned Python 0.4.0 writer.
+//! Unix audit storage with legacy Python-compatible and authenticated v1 chains.
 //!
-//! The Unix writer serializes cooperating Python and Rust processes through
-//! `audit.lock`. Audit failure drops the record and queues a fixed warning;
-//! it never authorizes cancelling an action that already happened. The chain
-//! is unkeyed and cannot prove completeness against a same-account writer.
+//! [`Audit::new`] retains the pinned Python 0.4.0 writer, including its
+//! truncated unkeyed chain for migration interoperability.
+//! [`Audit::with_authenticated_chain`] writes canonical records with full-width
+//! HMAC-SHA256 chain tags bound to a broker-supplied vault identity. Extending
+//! or verifying that format requires a [`ChainTrust`] containing the secret
+//! chain key, raw vault identity, and independently trusted head/count. Without
+//! that tuple verification is [`ChainVerification::MissingTrustState`], never
+//! valid history.
 //!
-//! Construct one [`Audit`] per process and clone it for every producer. The
-//! directory is normally `~/.kv`; callers may supply an isolated directory.
-//! The Windows writer is not implemented by this crate yet.
+//! Audit failure drops the record and queues a fixed warning; under the legacy
+//! policy it never authorizes cancelling an action that already happened. The
+//! Windows writer is not implemented by this crate yet.
 
+#[cfg(unix)]
+mod chain;
 #[cfg(unix)]
 mod codec;
 #[cfg(unix)]
@@ -19,7 +25,17 @@ mod python_json;
 mod runtime;
 
 #[cfg(unix)]
+pub use chain::{
+    CHAIN_FORMAT_VERSION, ChainCorruption, ChainHead, ChainKey, ChainPosition,
+    ChainPositionMismatch, ChainReadFailure, ChainStatus, ChainTrust, ChainVerification, HexError,
+    IdentityError, MAX_CHAIN_ENTRY_BYTES, MAX_VAULT_IDENTITY_BYTES, VaultIdentity, verify_bytes,
+    verify_directory, verify_reader,
+};
+#[cfg(unix)]
 pub use codec::{label_text, requester_fields};
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use fs::darwin_file_has_acl;
 #[cfg(unix)]
 pub use runtime::{Audit, WarningLease};
 
@@ -37,6 +53,7 @@ pub enum LossReason {
     WriteFailed,
     LockUnavailable,
     LockUnsupported,
+    ChainUnauthenticated,
 }
 
 impl std::fmt::Display for LossReason {
@@ -47,6 +64,7 @@ impl std::fmt::Display for LossReason {
             Self::WriteFailed => "write_failed",
             Self::LockUnavailable => "lock_unavailable",
             Self::LockUnsupported => "lock_unsupported",
+            Self::ChainUnauthenticated => "chain_unauthenticated",
         })
     }
 }
