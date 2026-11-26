@@ -1,0 +1,22 @@
+[package]
+name = "kv-v1-launch-gate"
+version = "0.5.0-dev"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+# Deliberately standalone from the repository workspace: QA owns this harness,
+# while product crates and the root workspace remain owned by implementation tracks.
+[workspace]
+
+[dependencies]
+serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order"] }
+sha2 = "0.10"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pty-process = "0.5"
+rustix = { version = "1", features = ["fs", "process", "pty", "stdio", "termios"] }
+
+[lints.rust]
+unsafe_code = "deny"
