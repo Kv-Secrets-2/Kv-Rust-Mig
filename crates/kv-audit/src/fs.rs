@@ -86,7 +86,7 @@ pub(crate) fn uses_canonical_namespace(path: &Path) -> bool {
         match fs::symlink_metadata(&prefix) {
             Ok(metadata) if metadata.file_type().is_symlink() => return false,
             Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(_) => return false,
         }
     }
@@ -612,7 +612,7 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir(&path).unwrap();
-            Self(path)
+            Self(fs::canonicalize(path).unwrap())
         }
     }
     impl Drop for Temp {
@@ -780,6 +780,9 @@ mod tests {
 
         assert!(!uses_canonical_namespace(Path::new("relative/audit")));
         assert!(!uses_canonical_namespace(&target.join("..").join("audit")));
+        assert!(!uses_canonical_namespace(
+            &temp.0.join("missing").join("..").join("audit")
+        ));
         assert!(!uses_canonical_namespace(&link.join("audit")));
         assert!(!uses_canonical_namespace(&link));
     }
