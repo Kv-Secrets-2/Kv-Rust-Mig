@@ -6,6 +6,7 @@ mod approvalscmd;
 mod args;
 mod backup;
 mod command_policy;
+mod doctor;
 mod envcmd;
 mod fsutil;
 mod help;
@@ -101,6 +102,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         } => lifecycle::cmd_unlock(p, foreground, install),
         Lock => lifecycle::cmd_lock(p),
         Status => lifecycle::cmd_status(p),
+        Doctor => doctor::cmd_doctor(p),
         ApprovalMode(mode) => owner_policy::cmd_approval_mode(p, mode.as_deref()),
         Allow(pattern) => allowcmd::cmd_allow(p, pattern.as_deref()),
         Deny(pattern) => allowcmd::cmd_deny(p, &pattern),

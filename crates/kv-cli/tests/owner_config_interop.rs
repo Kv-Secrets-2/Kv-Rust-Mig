@@ -213,6 +213,7 @@ fn owner_config_top_level_help_matches_python() {
         "unlock",
         "lock",
         "status",
+        "doctor",
         "export",
         "envs",
         "env",
