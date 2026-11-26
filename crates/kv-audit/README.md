@@ -108,9 +108,9 @@ that checkpoint outside this lifecycle.
 4. load the independent trusted checkpoint;
 5. verify every journal record from the start against that checkpoint,
    including canonical bytes, sequence, links, vault identity, and HMACs;
-6. at trusted genesis, synchronize every ancestor directory whose entries form
-   the audit path, even when the audit path already existed before this
-   lifecycle opened it;
+6. at trusted genesis, synchronize the physical and lexical ancestor
+   directories whose entries form the audit path, including symlink entries,
+   even when the audit path already existed before this lifecycle opened it;
 7. append exactly one authenticated admission record, synchronize the file,
    close it, and synchronize the audit directory;
 8. re-check lock identity and durably publish the advanced checkpoint; and

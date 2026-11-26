@@ -116,12 +116,12 @@ fn fixture_in(temp: Temp, directory: PathBuf) -> Fixture {
     let sync_events = checkpoint.state.clone();
     let parent_sync_failures = Arc::new(Mutex::new(VecDeque::new()));
     let injected_parent_sync = parent_sync_failures.clone();
-    let sync_parent_chain = Box::new(move |directory: &Directory| {
+    let sync_parent_chain = Box::new(move |directory: &Directory, path: &std::path::Path| {
         sync_events.lock().unwrap().events.push("parent_chain_sync");
         if injected_parent_sync.lock().unwrap().pop_front().is_some() {
             return Err(io::Error::other("injected parent chain sync failure"));
         }
-        directory.sync_parent_chain()
+        directory.sync_parent_chain(path)
     });
     let journal = AdmissionJournal::with_append_failure_injection(
         directory,

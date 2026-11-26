@@ -175,7 +175,7 @@ impl TerminalOutcome {
 }
 
 type AppendDurable = dyn Fn(&Directory, &[u8]) -> Result<(), DurableAppendFailure> + Send + Sync;
-type ParentChainSync = dyn Fn(&Directory) -> io::Result<()> + Send + Sync;
+type ParentChainSync = dyn Fn(&Directory, &Path) -> io::Result<()> + Send + Sync;
 
 struct Inner {
     directory: PathBuf,
@@ -264,7 +264,7 @@ impl AdmissionJournal {
             identity,
             checkpoint,
             Box::new(|directory, bytes| directory.append_durable(bytes)),
-            Box::new(|directory| directory.sync_parent_chain()),
+            Box::new(|directory, path| directory.sync_parent_chain(path)),
         )
     }
 
@@ -374,7 +374,7 @@ impl AdmissionJournal {
             other => return Err(verification_error(other)),
         };
         if position.count == 0 {
-            (self.0.sync_parent_chain)(&directory)
+            (self.0.sync_parent_chain)(&directory, &self.0.directory)
                 .map_err(|_| LifecycleError::JournalSyncFailed)?;
         }
         if !directory.lock_matches(&log_lock, LOG_LOCK).unwrap_or(false) {
