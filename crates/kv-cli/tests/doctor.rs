@@ -444,7 +444,7 @@ fn doctor_does_not_open_vault_paths_on_linux() {
         return;
     }
     let scratch = Scratch::new("doctor-strace");
-    let secrets = make_valid_vault_shape(&scratch);
+    let secrets = std::fs::canonicalize(make_valid_vault_shape(&scratch)).unwrap();
     let trace_path = scratch.root.join("doctor.strace");
     let output = Command::new("strace")
         .arg("-f")
