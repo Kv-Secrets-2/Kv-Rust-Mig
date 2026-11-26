@@ -290,7 +290,7 @@ pub(crate) fn sanitize_fields(fields: &mut Map<String, Value>) {
 /// Spell a serde number as Python's JSON encoder would after json.loads.
 /// Arbitrary-precision integer tokens stay integers; float tokens are rounded
 /// to IEEE binary64 first, including overflow to Python's accepted Infinity.
-fn python_number(number: &Number, representation: bool) -> Result<String, String> {
+pub(crate) fn python_number(number: &Number, representation: bool) -> Result<String, String> {
     let token = number.to_string();
     if matches!(token.as_str(), "Infinity" | "-Infinity" | "NaN") {
         return Ok(if representation {

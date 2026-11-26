@@ -5,6 +5,7 @@ pub mod canonical;
 pub mod owner;
 pub mod pause;
 pub mod permit;
+pub mod permit_denial;
 mod permit_facts;
 mod permit_render;
 

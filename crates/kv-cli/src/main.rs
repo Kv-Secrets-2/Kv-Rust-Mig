@@ -2,6 +2,7 @@
 //! build carries, plus the MCP server on stdio.
 
 mod allowcmd;
+mod apiopcmd;
 mod approvalscmd;
 mod args;
 mod backup;
@@ -105,6 +106,7 @@ fn run(p: &ui::Palette, command: args::Command) -> Result<(), Exit> {
         Provider(action) => providercmd::cmd_provider(p, action),
         Policy(action) => policycmd::cmd_policy(p, action),
         Approvals(action) => approvalscmd::cmd_approvals(p, action),
+        ApiOperation(args) => apiopcmd::cmd_api_operation(p, args),
         AgentChild => lifecycle::cmd_agent_child(p),
         Hook { mode } => hook::cmd_hook(&mode),
         Run {

@@ -3,6 +3,8 @@
 
 use super::{AgentError, TrustContext, owner_error, signed_owner};
 use kv_approvals::canonical::canonical_json;
+#[cfg(feature = "test-provider-loopback")]
+use kv_approvals::permit_session::PermitClock;
 use kv_approvals::permit_session::{
     CallFacts, PermitError, SessionBinding, SessionPermits, WaitOver,
 };
@@ -15,7 +17,7 @@ pub(super) fn for_session(
     trust: &TrustContext,
     providers: Arc<ProviderTable>,
 ) -> Arc<SessionPermits> {
-    Arc::new(SessionPermits::new(SessionBinding {
+    let binding = SessionBinding {
         protected: trust.protected,
         owner_public_key: trust.owner_public_key,
         owner_key_id: trust.owner_key_id.clone(),
@@ -23,7 +25,88 @@ pub(super) fn for_session(
         location: trust.location.clone(),
         session_nonce: *trust.session_nonce,
         providers,
-    }))
+    };
+    #[cfg(feature = "test-provider-loopback")]
+    if let Some(scale) = std::env::var("KV_TEST_PERMIT_CLOCK_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|scale| scale.is_finite() && *scale > 1.0)
+    {
+        let clock = ScaledTestClock::new(scale);
+        if let Some(offset_file) = std::env::var_os("KV_TEST_PERMIT_CLOCK_OFFSET_FILE") {
+            return Arc::new(SessionPermits::with_clock(
+                binding,
+                Arc::new(OffsetTestClock {
+                    inner: clock,
+                    offset_file: offset_file.into(),
+                }),
+            ));
+        }
+        return Arc::new(SessionPermits::with_clock(
+            binding,
+            Arc::new(ScaledTestClock::new(scale)),
+        ));
+    }
+    Arc::new(SessionPermits::new(binding))
+}
+
+#[cfg(feature = "test-provider-loopback")]
+struct ScaledTestClock {
+    scale: f64,
+    wall_start: f64,
+    mono_start: std::time::Instant,
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl ScaledTestClock {
+    fn new(scale: f64) -> Self {
+        let wall_start = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs_f64(),
+            Err(error) => -error.duration().as_secs_f64(),
+        };
+        Self {
+            scale,
+            wall_start,
+            mono_start: std::time::Instant::now(),
+        }
+    }
+}
+
+#[cfg(feature = "test-provider-loopback")]
+struct OffsetTestClock {
+    inner: ScaledTestClock,
+    offset_file: std::path::PathBuf,
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl OffsetTestClock {
+    fn offset(&self) -> f64 {
+        std::fs::read_to_string(&self.offset_file)
+            .ok()
+            .and_then(|text| text.trim().parse::<f64>().ok())
+            .filter(|offset| offset.is_finite() && *offset >= 0.0)
+            .unwrap_or(0.0)
+    }
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl PermitClock for OffsetTestClock {
+    fn wall_seconds(&self) -> f64 {
+        self.inner.wall_seconds() + self.offset()
+    }
+    fn monotonic_seconds(&self) -> f64 {
+        self.inner.monotonic_seconds() + self.offset()
+    }
+}
+
+#[cfg(feature = "test-provider-loopback")]
+impl PermitClock for ScaledTestClock {
+    fn wall_seconds(&self) -> f64 {
+        self.wall_start + self.mono_start.elapsed().as_secs_f64() * self.scale
+    }
+    fn monotonic_seconds(&self) -> f64 {
+        self.mono_start.elapsed().as_secs_f64() * self.scale
+    }
 }
 
 fn fields(trust: &TrustContext, challenge: Vec<u8>) -> MessageFields {
@@ -116,6 +199,28 @@ pub(super) fn owner_register(
         FieldValue::Enum(registration.status.as_str().into()),
     );
     signed_owner(trust, MessageKind::PermitRegisterAckV1, fields)
+}
+
+pub(super) fn owner_deny(
+    trust: &TrustContext,
+    permits: &SessionPermits,
+    challenge: Vec<u8>,
+    request: &Map<String, Value>,
+) -> Result<Value, AgentError> {
+    trust.observe()?;
+    let artifact = request.get("denial").unwrap_or(&Value::Null);
+    let denial = match permits.deny(artifact) {
+        Ok(denial) => denial,
+        Err(error) => return owner_error(trust, challenge, error.code),
+    };
+    let mut fields = fields(trust, challenge);
+    fields.insert("permit_id".into(), FieldValue::Text(denial.permit_id));
+    fields.insert("request_id".into(), FieldValue::Text(denial.request_id));
+    fields.insert(
+        "status".into(),
+        FieldValue::Enum(denial.status.as_str().into()),
+    );
+    signed_owner(trust, MessageKind::PermitDenyAckV1, fields)
 }
 
 /// A capability run's one-call permit is signed for its grant and run, and waits

@@ -37,6 +37,8 @@ use std::os::unix::fs::MetadataExt;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
+#[cfg(unix)]
+mod admission;
 #[cfg(all(unix, test))]
 mod audit_reply_tests;
 #[cfg(unix)]
@@ -59,7 +61,8 @@ mod tracked;
 mod withhold;
 #[cfg(unix)]
 use lifecycle::{
-    CommitError, ConnectionGuard, Lifecycle, Phase, StopChoice, StopPlan, WorkerTracker,
+    CommitError, ConnectionGuard, LONG_WAIT_SECONDS, Lifecycle, Phase, StopChoice, StopPlan,
+    WorkerTracker,
 };
 
 #[cfg(unix)]
@@ -774,11 +777,20 @@ pub fn run_agent_with_api_caller(
     let trust = Arc::new(trust);
     let master_key = Arc::new(master_key);
     let approved = Arc::new(approved.value);
-    let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+    #[cfg(feature = "test-provider-loopback")]
+    let mut provider_table = kv_broker::build_provider_table(&approved).0;
+    #[cfg(not(feature = "test-provider-loopback"))]
+    let provider_table = kv_broker::build_provider_table(&approved).0;
+    #[cfg(feature = "test-provider-loopback")]
+    if let Some(anthropic) = provider_table.get_mut("anthropic") {
+        anthropic["base_url"] = json!(v1_anthropic_base_url());
+    }
+    let providers = Arc::new(provider_table);
     let permits = permits::for_session(&trust, Arc::clone(&providers));
     let http_policy = Arc::new(kv_broker::load_http_policy_snapshot(&approved));
     let cache = Arc::new(Mutex::new(SecretCache::default()));
     let audit = kv_audit::Audit::new(kv_proto::runtime_dir()?);
+    let admissions = admission::admission_journal(&root, &master_key, &trust)?;
     let mut workers = WorkerTracker::new();
     let mut accept_error = None;
 
@@ -814,6 +826,7 @@ pub fn run_agent_with_api_caller(
                 let http_policy = Arc::clone(&http_policy);
                 let api_caller = Arc::clone(&api_caller);
                 let audit = audit.clone();
+                let admissions = admissions.clone();
                 let root = root.clone();
                 let root_text = root_text.clone();
                 let memory_hardening = memory_hardening.clone();
@@ -835,6 +848,7 @@ pub fn run_agent_with_api_caller(
                             &http_policy,
                             &api_caller,
                             &audit,
+                            Some(&admissions),
                             &worker_lifecycle,
                             &worker_shared,
                             &connection_guard,
@@ -968,6 +982,159 @@ impl Shared {
 }
 
 #[cfg(unix)]
+const V1_COUNT_TOKENS_CMD: &str = "v1_anthropic_count_tokens";
+#[cfg(unix)]
+const V1_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
+#[cfg(unix)]
+const V1_COUNT_TOKENS_MODEL: &str = "claude-3-5-haiku-latest";
+#[cfg(unix)]
+const V1_COUNT_TOKENS_RULE: &str = "v1-anthropic-count-tokens";
+
+/// Build the one typed v1 broker operation. Callers supply text and optional
+/// approval state only; provider, method, path, headers, model and payload
+/// shape are fixed here so a client cannot turn this into arbitrary HTTP.
+#[cfg(unix)]
+fn v1_count_tokens_call(
+    request: &serde_json::Map<String, Value>,
+) -> Result<serde_json::Map<String, Value>, Value> {
+    const ALLOWED: &[&str] = &[
+        "cmd",
+        "token",
+        "audit_warning",
+        "env",
+        "permit_id",
+        "input",
+        "audit_ctx",
+        "reason",
+    ];
+    if request.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
+        return Err(
+            json!({"error":"unsupported field for the fixed v1 broker operation","error_code":"unsupported_operation"}),
+        );
+    }
+    let Some(input) = request.get("input").and_then(Value::as_str) else {
+        return Err(json!({"error":"input must be a string","error_code":"invalid_operation"}));
+    };
+    if input.is_empty() || input.len() > 16 * 1024 {
+        return Err(
+            json!({"error":"input must be 1..16384 bytes","error_code":"invalid_operation"}),
+        );
+    }
+    if let Some(permit_id) = request.get("permit_id")
+        && permit_id
+            .as_str()
+            .is_none_or(|id| id.is_empty() || id.len() > 128)
+    {
+        return Err(
+            json!({"error":"permit_id must be a string of at most 128 bytes","error_code":"invalid_operation"}),
+        );
+    }
+    let mut operation = serde_json::Map::new();
+    operation.insert("provider".into(), json!("anthropic"));
+    operation.insert("method".into(), json!("POST"));
+    operation.insert("path".into(), json!(V1_COUNT_TOKENS_PATH));
+    operation.insert("headers".into(), json!({}));
+    operation.insert(
+        "body".into(),
+        json!({
+            "model": V1_COUNT_TOKENS_MODEL,
+            "messages": [{"role":"user", "content": input}],
+        }),
+    );
+    for key in ["env", "permit_id", "audit_ctx", "reason"] {
+        if let Some(value) = request.get(key) {
+            operation.insert(key.into(), value.clone());
+        }
+    }
+    Ok(operation)
+}
+
+#[cfg(unix)]
+fn v1_anthropic_base_url() -> &'static str {
+    // Production is fixed to the real Anthropic origin. The test-only feature
+    // keeps the same host name but moves the fixture to a fixed high loopback
+    // port; it is never enabled in release builds and has no runtime override.
+    #[cfg(feature = "test-provider-loopback")]
+    {
+        "https://api.anthropic.com:18443"
+    }
+    #[cfg(not(feature = "test-provider-loopback"))]
+    {
+        "https://api.anthropic.com"
+    }
+}
+
+#[cfg(unix)]
+fn v1_count_tokens_provider() -> (kv_broker::ProviderTable, kv_broker::HttpPolicySnapshot) {
+    let base_url = v1_anthropic_base_url();
+    let builtin = kv_broker::snapshot_providers(&json!({}));
+    let mut provider = builtin.get("anthropic").cloned().unwrap_or_else(|| {
+        json!({
+            "base_url":"https://api.anthropic.com",
+            "secret_name":"ANTHROPIC_API_KEY",
+            "auth_type":"x-api-key",
+            "default_headers":{"Content-Type":"application/json","anthropic-version":"2023-06-01"}
+        })
+    });
+    provider["base_url"] = json!(base_url);
+    let mut providers = kv_broker::ProviderTable::new();
+    providers.insert("anthropic".into(), provider);
+    let policy = kv_broker::HttpPolicySnapshot {
+        configured: true,
+        legacy_providers: None,
+        providers: json!({
+            "anthropic": {
+                "origin":base_url,
+                "secret_name":"ANTHROPIC_API_KEY",
+                "rules":[{
+                    "id":V1_COUNT_TOKENS_RULE,
+                    "methods":["POST"],
+                    "path":V1_COUNT_TOKENS_PATH,
+                    "approval":"per-call"
+                }]
+            }
+        }),
+    };
+    (providers, policy)
+}
+
+#[cfg(unix)]
+fn permit_is_denied(permits: &SessionPermits, permit_id: Option<&Value>) -> bool {
+    permit_id
+        .and_then(Value::as_str)
+        .is_some_and(|permit_id| permits.is_denied(permit_id))
+}
+
+#[cfg(unix)]
+fn permit_denied_response() -> Value {
+    json!({"error":"the owner denied this permit; it is never sent","error_code":"permit_denied"})
+}
+
+#[cfg(unix)]
+#[cfg(unix)]
+fn zeroize_json_value(value: &mut Value) {
+    use kv_crypto::Zeroize as _;
+    match value {
+        Value::String(text) => text.zeroize(),
+        Value::Array(items) => items.iter_mut().for_each(zeroize_json_value),
+        Value::Object(object) => object.values_mut().for_each(zeroize_json_value),
+        _ => {}
+    }
+}
+
+/// Framed transport wipes its byte buffers; this guard owns the parsed JSON
+/// values those buffers became and wipes strings on every exit path.
+#[cfg(unix)]
+struct ZeroizedRequest(Value);
+
+#[cfg(unix)]
+impl Drop for ZeroizedRequest {
+    fn drop(&mut self) {
+        zeroize_json_value(&mut self.0);
+    }
+}
+
+#[cfg(unix)]
 #[allow(clippy::too_many_arguments)]
 fn handle_connection(
     stream: &mut std::os::unix::net::UnixStream,
@@ -984,12 +1151,14 @@ fn handle_connection(
     http_policy: &kv_broker::HttpPolicySnapshot,
     api_caller: &kv_broker::ApiCaller,
     audit: &kv_audit::Audit,
+    admissions: Option<&kv_audit::AdmissionJournal>,
     lifecycle: &Arc<Lifecycle>,
     shared: &Shared,
     connection: &ConnectionGuard,
     memory_hardening: &Value,
     request_timeout: Duration,
 ) -> Result<(), AgentError> {
+    let mut deadline = Instant::now() + request_timeout;
     let mut replies = Replies {
         lifecycle,
         connection,
@@ -998,11 +1167,20 @@ fn handle_connection(
         cmd: "",
         audit,
         audit_warning: false,
+        wire: kv_proto::RequestWire::FramedV1,
+        deadline,
     };
-    let request = match read_request_with_timeout(stream, request_timeout) {
-        Ok(Some(request)) => request,
+    let request = match kv_proto::read_broker_request_until_preserving_wire(stream, deadline) {
+        Ok(Some(request)) => {
+            replies.wire = request.wire;
+            ZeroizedRequest(request.value)
+        }
         Ok(None) => return Ok(()),
         Err(error) => {
+            if let Some(wire) = error.wire() {
+                replies.wire = wire;
+            }
+            let error = error.into_error();
             let _ = replies.write(stream, &request_error_response(&error));
             return Ok(());
         }
@@ -1010,35 +1188,61 @@ fn handle_connection(
     if !connection.mark_dispatching() {
         return Ok(());
     }
-    let Some(request) = request.as_object() else {
+    let Some(request) = request.0.as_object() else {
         replies.write(stream, &json!({"error":"request must be a JSON object"}))?;
         return Ok(());
     };
     let cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
+    if cmd == "stop" {
+        // The initial deadline bounds receipt of a complete request. A valid
+        // stop can then wait through the lifecycle's long drain before its
+        // control outcome is written, so it needs a fresh drain-plus-reply
+        // budget rather than the already elapsed request deadline.
+        deadline = Instant::now() + Duration::from_secs(LONG_WAIT_SECONDS) + request_timeout;
+        replies.deadline = deadline;
+    }
     replies.cmd = cmd;
     replies.audit_warning = request.get("audit_warning") == Some(&Value::Bool(true));
     if cmd == "enforcement" {
         connection.mark_control();
-        kv_proto::write_reply(
+        kv_proto::write_broker_response_until(
             stream,
             &json!({"enforcement":kv_proto::ENFORCEMENT_GENERATION}),
+            replies.wire,
+            deadline,
         )?;
         return Ok(());
     }
     if lifecycle.phase() != Phase::Running && cmd != "stop" {
         connection.mark_control();
-        kv_proto::write_reply(
+        kv_proto::write_broker_response_until(
             stream,
             &json!({
                 "error":"the agent is stopping; new requests are refused",
                 "error_code":"agent_stopping"
+            }),
+            replies.wire,
+            deadline,
+        )?;
+        return Ok(());
+    }
+    let broker_v1_command = cmd == V1_COUNT_TOKENS_CMD
+        || cmd == "permit_requests"
+        || kv_proto::OWNER_ENDPOINTS.contains(&cmd);
+    if broker_v1_command && replies.wire != kv_proto::RequestWire::FramedV1 {
+        replies.write(
+            stream,
+            &json!({
+                "error":"v1 broker operations require framed KVIP IPC",
+                "error_code":"unsupported_wire"
             }),
         )?;
         return Ok(());
     }
     if kv_proto::OWNER_ENDPOINTS.contains(&cmd) {
         let _ = serve_owner_endpoint(
-            stream, cmd, request, trust, root, approved, master_key, providers, permits, &replies,
+            stream, cmd, request, trust, root, approved, master_key, providers, permits, shared,
+            &replies,
         );
         return Ok(());
     }
@@ -1060,6 +1264,20 @@ fn handle_connection(
             &json!({
                 "error":error.to_string(),
                 "error_code":"config_authority_changed"
+            }),
+        )?;
+        return Ok(());
+    }
+    // v1 has one typed broker operation. Legacy arbitrary HTTP, database/SSH
+    // broker commands and process execution are refused at the daemon boundary
+    // even if an older client or CLI still knows how to ask for them.
+    if matches!(cmd, "api" | "cap_api" | "query" | "ssh" | "run") {
+        replies.write(
+            stream,
+            &json!({
+                "error":"unsupported legacy operation in v1; use the fixed built-in broker operation",
+                "error_code":"unsupported_operation",
+                "exit_code":1,
             }),
         )?;
         return Ok(());
@@ -1140,15 +1358,14 @@ fn handle_connection(
         "cap_api",
         "check_file",
         "tracked_files",
-        "record_request",
         "stop",
         "permit_requests",
+        V1_COUNT_TOKENS_CMD,
         "lock",
         "dashboard_snapshot",
         "owner_pause_right",
         "pause_job",
         "owner_pause_history",
-        "refuse_permit",
     ];
     if !known.contains(&cmd) {
         replies.write(stream, &json!({"error":"unknown command"}))?;
@@ -1197,7 +1414,12 @@ fn handle_connection(
                 .unwrap_or_default();
             json!({"environments":environments,"invalid_environments":[]})
         }
-        "lock" => json!({"locking":true,"ended":true}),
+        "lock" => {
+            if let Ok(mut cache) = cache.lock() {
+                cache.environments.clear();
+            }
+            json!({"locking":true,"ended":true})
+        }
         "run" => {
             // Python: the run's work window opens at admission and closes once the
             // program has started; the hard-lock pin is observed under it.
@@ -1248,7 +1470,12 @@ fn handle_connection(
             if outcome.control {
                 // A stop-time answer rides the control lane, as Python's does.
                 connection.mark_control();
-                kv_proto::write_reply(stream, &outcome.response)?;
+                kv_proto::write_broker_response_until(
+                    stream,
+                    &outcome.response,
+                    replies.wire,
+                    deadline,
+                )?;
                 return Ok(());
             }
             outcome.response
@@ -1257,6 +1484,45 @@ fn handle_connection(
             "requests": permits.pending().iter().map(|pending| pending.to_value()).collect::<Vec<_>>(),
             "pauses": [],
         }),
+        V1_COUNT_TOKENS_CMD => {
+            let api_started = std::time::Instant::now();
+            let env = request
+                .get("env")
+                .and_then(Value::as_str)
+                .or_else(|| approved.get("default_env").and_then(Value::as_str))
+                .unwrap_or("dev");
+            match v1_count_tokens_call(request) {
+                Err(error) => error,
+                Ok(operation) => {
+                    let (operation_providers, operation_policy) = v1_count_tokens_provider();
+                    let response = api_call_response(
+                        &operation,
+                        env,
+                        store,
+                        cache,
+                        &operation_providers,
+                        &operation_policy,
+                        api_caller,
+                        trust,
+                        permits,
+                        shared,
+                        audit,
+                        admissions,
+                        lifecycle,
+                        connection,
+                    );
+                    let _ = audit_api_call(
+                        audit,
+                        &operation,
+                        env,
+                        &response,
+                        api_started.elapsed().as_millis() as u64,
+                        permits,
+                    );
+                    response
+                }
+            }
+        }
         "api" => {
             let api_started = std::time::Instant::now();
             let env = request
@@ -1274,7 +1540,9 @@ fn handle_connection(
                 api_caller,
                 trust,
                 permits,
+                shared,
                 audit,
+                admissions,
                 lifecycle,
                 connection,
             );
@@ -1318,7 +1586,7 @@ fn handle_connection(
                         "cut_off":outcome.cut_off,"ended_runs":shared.runs.ended_brief()})
                 }
             };
-            kv_proto::write_reply(stream, &response)?;
+            kv_proto::write_broker_response_until(stream, &response, replies.wire, deadline)?;
             return Ok(());
         }
         "tracked_files" => shared.tracked.tracked_files(stopping_latched(lifecycle)),
@@ -1348,6 +1616,8 @@ struct Replies<'a> {
     cmd: &'a str,
     audit: &'a kv_audit::Audit,
     audit_warning: bool,
+    wire: kv_proto::RequestWire,
+    deadline: Instant,
 }
 
 #[cfg(unix)]
@@ -1384,12 +1654,18 @@ impl Replies<'_> {
                 response,
                 self.audit,
                 self.audit_warning && signed_hard_lock.is_none(),
+                self.wire,
+                self.deadline,
             )?;
             return Ok(());
         }
         // As in Python, never acknowledge a hard lock while earlier committed
         // work remains. The foreground stop can close this socket sooner.
-        if self.lifecycle.wait_for_open_work(Duration::from_secs(135)) != 0 {
+        let wait_budget = self
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_secs(135));
+        if wait_budget.is_zero() || self.lifecycle.wait_for_open_work(wait_budget) != 0 {
             return Ok(());
         }
         if let Ok(mut cache) = self.cache.lock() {
@@ -1426,27 +1702,27 @@ impl Replies<'_> {
             &replacement,
             self.audit,
             self.audit_warning && signed_hard_lock.is_none(),
+            self.wire,
+            self.deadline,
         )?;
         Ok(())
     }
 }
 
 #[cfg(unix)]
-fn write_audited_reply<W: Write>(
-    writer: &mut W,
+fn prepare_audited_reply(
     response: &Value,
     audit: &kv_audit::Audit,
     wants_warning: bool,
-) -> Result<(), AgentError> {
+) -> Result<(Value, Option<kv_audit::WarningLease>), AgentError> {
     let serialize = |value: &Value| {
         kv_store::pyjson::to_vec_python(value, false).map_err(|error| AgentError(error.to_string()))
     };
     let mut answer = response.clone();
-    let mut encoded = serialize(&answer)?;
-    if encoded.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+    if serialize(&answer)?.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
         answer = json!({"error":"response too large", "response_truncated":true,
             "max_response_bytes":kv_proto::MAX_AGENT_RESPONSE_BYTES});
-        encoded = serialize(&answer)?;
+        serialize(&answer)?;
     }
     // Lease only after the final bounded/hard-lock answer is chosen. Its Drop
     // returns an undelivered warning on serialization, write, or flush failure.
@@ -1458,13 +1734,44 @@ fn write_audited_reply<W: Write>(
     if let Some(lease) = &warning {
         answer["audit_warning"] = json!(lease.as_str());
         let with_warning = serialize(&answer)?;
-        if with_warning.len() <= kv_proto::MAX_AGENT_RESPONSE_BYTES {
-            encoded = with_warning;
-        } else {
-            // Keep the original bounded bytes; the warning remains owed.
+        if with_warning.len() > kv_proto::MAX_AGENT_RESPONSE_BYTES {
+            if let Some(object) = answer.as_object_mut() {
+                object.remove("audit_warning");
+            }
+            // Keep the original bounded response; the warning remains owed.
             drop(warning.take());
         }
     }
+    Ok((answer, warning))
+}
+
+#[cfg(unix)]
+fn write_audited_reply(
+    stream: &mut std::os::unix::net::UnixStream,
+    response: &Value,
+    audit: &kv_audit::Audit,
+    wants_warning: bool,
+    wire: kv_proto::RequestWire,
+    deadline: Instant,
+) -> Result<(), AgentError> {
+    let (answer, warning) = prepare_audited_reply(response, audit, wants_warning)?;
+    kv_proto::write_broker_response_until(stream, &answer, wire, deadline)?;
+    if let Some(warning) = warning {
+        warning.delivered();
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, test))]
+fn write_legacy_audited_reply<W: Write>(
+    writer: &mut W,
+    response: &Value,
+    audit: &kv_audit::Audit,
+    wants_warning: bool,
+) -> Result<(), AgentError> {
+    let (answer, warning) = prepare_audited_reply(response, audit, wants_warning)?;
+    let encoded = kv_store::pyjson::to_vec_python(&answer, false)
+        .map_err(|error| AgentError(error.to_string()))?;
     writer.write_all(&encoded)?;
     writer.flush()?;
     if let Some(warning) = warning {
@@ -1519,6 +1826,7 @@ fn serve_owner_endpoint(
     master_key: &Key32,
     providers: &kv_broker::ProviderTable,
     permits: &SessionPermits,
+    _shared: &Shared,
     replies: &Replies<'_>,
 ) -> Result<(), AgentError> {
     let challenge = owner_challenge(request).unwrap_or_else(|| vec![0; wire::NONCE_LEN]);
@@ -1556,6 +1864,9 @@ fn serve_owner_endpoint(
                     request,
                     approved,
                 );
+            }
+            "owner_permit_deny" => {
+                return permits::owner_deny(trust, permits, challenge.clone(), request);
             }
             "owner_channel" => {}
             _ => return owner_error(trust, challenge.clone(), "unsupported"),
@@ -1628,16 +1939,6 @@ fn owner_providers(providers: &kv_broker::ProviderTable) -> Vec<Vec<FieldValue>>
             ])
         })
         .collect()
-}
-
-#[cfg(unix)]
-fn read_request_with_timeout(
-    stream: &mut std::os::unix::net::UnixStream,
-    timeout: Duration,
-) -> Result<Option<Value>, kv_proto::ProtocolError> {
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    kv_proto::read_request(stream)
 }
 
 #[cfg(unix)]
@@ -1934,7 +2235,9 @@ fn api_call_response(
     caller: &kv_broker::ApiCaller,
     trust: &TrustContext,
     permits: &SessionPermits,
+    _shared: &Shared,
     audit: &kv_audit::Audit,
+    admissions: Option<&kv_audit::AdmissionJournal>,
     lifecycle: &Arc<Lifecycle>,
     connection: &ConnectionGuard,
 ) -> Value {
@@ -1995,6 +2298,9 @@ fn api_call_response(
             "error_code":"permit_invalid"
         });
     }
+    if per_call && permit_is_denied(permits, request.get("permit_id")) {
+        return permit_denied_response();
+    }
     if per_call && let Err(error) = permits.precheck(request.get("permit_id")) {
         return permits::precheck_error(error);
     }
@@ -2042,52 +2348,144 @@ fn api_call_response(
     } else {
         None
     };
+    // Publish the dispatch window before bounded audit I/O so retirement cannot
+    // pass it. The final pin, denial, expiry and one-call spend are rechecked in
+    // the inner transport gate below.
+    let operation_window = match lifecycle
+        .try_commit_for_with_charge(connection, || Ok::<(), std::convert::Infallible>(()))
+    {
+        Ok(window) => window,
+        Err(_) => {
+            return json!({
+                "error":"the agent is stopping; new requests are refused",
+                "error_code":"agent_stopping",
+            });
+        }
+    };
+    let admission = if per_call {
+        let Some(admissions) = admissions else {
+            return json!({
+                "error":"the privileged action could not be recorded durably; it was not sent",
+                "error_code":"audit_admission_failed",
+                "audit_admission_error":"missing_admission_journal",
+            });
+        };
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("provider".into(), json!(provider_name));
+        metadata.insert("method".into(), method.clone());
+        metadata.insert("path".into(), path.clone());
+        metadata.insert("env".into(), json!(env));
+        if let Some(id) = permit_id {
+            metadata.insert("permit_id_sha256".into(), json!(hex(&Sha256::digest(id))));
+        }
+        match admissions.admit("broker.http.anthropic.count_tokens", metadata) {
+            Ok(admission) => Some(admission),
+            Err(error) => {
+                return json!({
+                    "error":"the privileged action could not be recorded durably; it was not sent",
+                    "error_code":"audit_admission_failed",
+                    "audit_admission_error":error.as_str(),
+                });
+            }
+        }
+    } else {
+        None
+    };
     let empty_headers = serde_json::Map::new();
     let caller_headers = headers.as_object().unwrap_or(&empty_headers);
     let callback_refused = std::cell::Cell::new(false);
-    let mut result = caller.call_with_checks(
-        api_request,
-        |preview| {
-            let checked = permit_id
-                .map(|id| {
-                    permits
-                        .match_call(
-                            id,
-                            permits::call_facts(
-                                env,
-                                provider_name,
-                                provider,
-                                caller_headers,
-                                preview,
-                                None,
-                            ),
-                        )
-                        .map_err(permits::invalid_error)
-                })
-                .transpose();
-            callback_refused.set(checked.is_err());
-            checked
-        },
-        |matched| {
-            let committed = lifecycle
-                .try_commit_for_with_charge(connection, || {
-                    let pin = trust.observe_held().map_err(permits::hard_lock_error)?;
-                    if let Some(matched) = matched {
-                        permits.spend(&matched).map_err(permits::invalid_error)?;
-                    }
-                    Ok(pin)
-                })
-                .map_err(|error| match error {
-                    CommitError::Stopping => json!({
-                        "error":"the agent is stopping; new requests are refused",
-                        "error_code":"agent_stopping",
-                    }),
-                    CommitError::Charge(refusal) => refusal,
-                });
-            callback_refused.set(committed.is_err());
-            committed
-        },
-    );
+    let transport_started = std::cell::Cell::new(false);
+    let perform_call = || {
+        caller.call_with_checks(
+            api_request,
+            |preview| {
+                let checked = permit_id
+                    .map(|id| {
+                        permits
+                            .match_call(
+                                id,
+                                permits::call_facts(
+                                    env,
+                                    provider_name,
+                                    provider,
+                                    caller_headers,
+                                    preview,
+                                    None,
+                                ),
+                            )
+                            .map_err(permits::invalid_error)
+                    })
+                    .transpose();
+                callback_refused.set(checked.is_err());
+                checked
+            },
+            |matched| {
+                let committed = operation_window
+                    .charge_committed(|| {
+                        let _pin = trust.observe_held().map_err(permits::hard_lock_error)?;
+                        if matched.is_some() && permit_is_denied(permits, request.get("permit_id"))
+                        {
+                            return Err(permit_denied_response());
+                        }
+                        if let Some(matched) = matched {
+                            permits.spend(&matched).map_err(permits::invalid_error)?;
+                        }
+                        Ok(())
+                    })
+                    .map_err(|error| match error {
+                        CommitError::Stopping => json!({
+                            "error":"the agent is stopping; new requests are refused",
+                            "error_code":"agent_stopping",
+                        }),
+                        CommitError::Charge(refusal) => refusal,
+                    });
+                callback_refused.set(committed.is_err());
+                transport_started.set(committed.is_ok());
+                committed
+            },
+        )
+    };
+    let mut result = if let Some(admission) = admission {
+        let execution = admission.run(|_| perform_call());
+        let output = execution.output().clone();
+        let outcome = if output.get("status").is_some() {
+            Some(kv_audit::TerminalOutcome::Completed)
+        } else if !transport_started.get() {
+            Some(kv_audit::TerminalOutcome::Failed)
+        } else {
+            None
+        };
+        let mut outcome_metadata = serde_json::Map::new();
+        outcome_metadata.insert("provider".into(), json!(provider_name));
+        outcome_metadata.insert("method".into(), method.clone());
+        outcome_metadata.insert("path".into(), path.clone());
+        outcome_metadata.insert("env".into(), json!(env));
+        for key in ["status", "error_code"] {
+            if let Some(value) = output.get(key) {
+                outcome_metadata.insert(key.into(), value.clone());
+            }
+        }
+        match outcome {
+            Some(outcome) => match execution.finish(outcome, outcome_metadata) {
+                Ok(output) => output,
+                Err(error) => {
+                    let outcome_error = error.error;
+                    let mut output = error.into_output();
+                    output["audit_outcome_error"] = json!(outcome_error.as_str());
+                    output
+                }
+            },
+            None => {
+                // A transport or response-read failure can mean the provider already
+                // applied the request. Leave the admitted effect unknown rather than
+                // recording a definite failure.
+                drop(execution);
+                output
+            }
+        }
+    } else {
+        perform_call()
+    };
     // Python's matching/admission exceptions bypass policy-warning attachment;
     // a transport result (including an HTTP failure) still receives the warning.
     if callback_refused.get() {
@@ -2410,6 +2808,78 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
+    fn spawn_test_handler(
+        mut server: std::os::unix::net::UnixStream,
+        lifecycle: Arc<Lifecycle>,
+        timeout: Duration,
+    ) -> thread::JoinHandle<Result<(), AgentError>> {
+        thread::spawn(move || {
+            let store = DrawerStore::open(".", Key32::new([0; 32]));
+            let cache = Mutex::new(SecretCache::default());
+            let master_key = Key32::new([0; 32]);
+            let trust = TrustContext {
+                session_nonce: Zeroizing::new([0; 32]),
+                daemon_auth_key: Key32::new([0; 32]),
+                grant_state_key: Key32::new([0; 32]),
+                token_key: Key32::new([0; 32]),
+                protected: false,
+                owner_public_key: None,
+                owner_key_id: String::new(),
+                local_approval_id: Vec::new(),
+                location: Vec::new(),
+                version: "0.4.0".into(),
+                approval_signing_key: None,
+                pin: Arc::new(TrustPin {
+                    state: std::sync::Mutex::new(PinState {
+                        root: std::path::PathBuf::from("."),
+                        folder_id: (0, 0),
+                        folder: Some(File::open(".").unwrap()),
+                        key_id: None,
+                        key_digest: None,
+                        approval_key_id: None,
+                        approval_key_digest: None,
+                        latched: None,
+                        closed: false,
+                    }),
+                }),
+            };
+            let approved = json!({});
+            let token = Zeroizing::new(String::new());
+            let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
+            let permits = permits::for_session(&trust, Arc::clone(&providers));
+            let http_policy = kv_broker::load_http_policy_snapshot(&approved);
+            let api_caller = kv_broker::ApiCaller::new();
+            let audit = kv_audit::Audit::new(".");
+            let shared = Shared::new();
+            let mut workers = WorkerTracker::new();
+            let connection = workers.register_connection(&server).unwrap();
+            let memory_hardening = json!({});
+            handle_connection(
+                &mut server,
+                Path::new("."),
+                "",
+                &store,
+                &cache,
+                &master_key,
+                &trust,
+                &approved,
+                &token,
+                &providers,
+                &permits,
+                &http_policy,
+                &api_caller,
+                &audit,
+                None,
+                &lifecycle,
+                &shared,
+                &connection,
+                &memory_hardening,
+                timeout,
+            )
+        })
+    }
+
+    #[cfg(unix)]
     #[test]
     fn secret_cache_reloads_after_another_writer_changes_the_environment() {
         let mut random = [0u8; 16];
@@ -2645,80 +3115,81 @@ mod tests {
         use std::io::Read;
         use std::os::unix::net::UnixStream;
 
-        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let (mut client, server) = UnixStream::pair().unwrap();
         client
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
-        let store = DrawerStore::open(".", Key32::new([0; 32]));
-        let cache = Mutex::new(SecretCache::default());
-        let master_key = Key32::new([0; 32]);
-        let trust = TrustContext {
-            session_nonce: Zeroizing::new([0; 32]),
-            daemon_auth_key: Key32::new([0; 32]),
-            grant_state_key: Key32::new([0; 32]),
-            token_key: Key32::new([0; 32]),
-            protected: false,
-            owner_public_key: None,
-            owner_key_id: String::new(),
-            local_approval_id: Vec::new(),
-            location: Vec::new(),
-            version: "0.4.0".into(),
-            approval_signing_key: None,
-            pin: Arc::new(TrustPin {
-                state: std::sync::Mutex::new(PinState {
-                    root: std::path::PathBuf::from("."),
-                    folder_id: (0, 0),
-                    folder: Some(File::open(".").unwrap()),
-                    key_id: None,
-                    key_digest: None,
-                    approval_key_id: None,
-                    approval_key_digest: None,
-                    latched: None,
-                    closed: false,
-                }),
-            }),
-        };
-        let approved = json!({});
-        let token = Zeroizing::new(String::new());
-        let providers = Arc::new(kv_broker::build_provider_table(&approved).0);
-        let permits = permits::for_session(&trust, Arc::clone(&providers));
-        let http_policy = kv_broker::load_http_policy_snapshot(&approved);
-        let api_caller = kv_broker::ApiCaller::new();
-        let audit = kv_audit::Audit::new(".");
-        let lifecycle = Lifecycle::new();
-        let shared = Shared::new();
-        let mut workers = WorkerTracker::new();
-        let connection = workers.register_connection(&server).unwrap();
-        let memory_hardening = json!({});
         let timeout = Duration::from_millis(100);
         let started = Instant::now();
-        let worker = thread::spawn(move || {
-            handle_connection(
-                &mut server,
-                Path::new("."),
-                "",
-                &store,
-                &cache,
-                &master_key,
-                &trust,
-                &approved,
-                &token,
-                &providers,
-                &permits,
-                &http_policy,
-                &api_caller,
-                &audit,
-                &lifecycle,
-                &shared,
-                &connection,
-                &memory_hardening,
-                timeout,
-            )
-        });
+        let worker = spawn_test_handler(server, Lifecycle::new(), timeout);
         let mut reply = Vec::new();
         client.read_to_end(&mut reply).unwrap();
         worker.join().unwrap().unwrap();
-        assert_eq!(reply, br#"{"error": "TimeoutError: timed out"}"#);
+        assert_eq!(
+            reply,
+            Vec::<u8>::new(),
+            "the one absolute connection deadline is already spent when the request read times out"
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_request_errors_match_the_detected_wire() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let worker = spawn_test_handler(server, Lifecycle::new(), Duration::from_secs(2));
+        client.write_all(b"{").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut reply = Vec::new();
+        client.read_to_end(&mut reply).unwrap();
+        assert_eq!(reply, br#"{"error": "invalid JSON"}"#);
+        worker.join().unwrap().unwrap();
+
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let worker = spawn_test_handler(server, Lifecycle::new(), Duration::from_secs(2));
+        let malformed = kv_proto::encode_frame(kv_proto::FrameKind::Request, b"{").unwrap();
+        client.write_all(&malformed).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let reply = kv_proto::read_frame_response_until(
+            &mut client,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(reply, json!({"error":"invalid JSON"}));
+        worker.join().unwrap().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_wait_outcome_survives_the_initial_request_deadline() {
+        use std::os::unix::net::UnixStream;
+
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let lifecycle = Lifecycle::with_test_waits(
+            Duration::from_millis(10),
+            Duration::from_millis(150),
+            Duration::from_millis(10),
+        );
+        let work = lifecycle.try_commit().unwrap();
+        let worker = spawn_test_handler(server, Arc::clone(&lifecycle), Duration::from_millis(30));
+        let write_deadline = Instant::now() + Duration::from_secs(1);
+        kv_proto::write_frame_request_until(
+            &mut client,
+            &json!({"cmd":"stop","choice":"wait"}),
+            write_deadline,
+        )
+        .unwrap();
+        let response = kv_proto::read_frame_response_until(
+            &mut client,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(response["stopping"], true);
+        assert_eq!(response["cut_off"], 1);
+        worker.join().unwrap().unwrap();
+        drop(work);
     }
 }

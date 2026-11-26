@@ -7,7 +7,7 @@ use kv_approvals::canonical::canonical_json;
 use kv_approvals::owner::OwnerSeed;
 use kv_approvals::permit_review::FACT_KEYS;
 use kv_approvals::verify::payload_digest;
-use kv_proto::{Channel, ChannelError, check_answer, open_channel};
+use kv_proto::{Channel, ChannelError, check_answer};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -59,7 +59,15 @@ fn nonce() -> Result<Vec<u8>, SigningError> {
 impl PermitSigningContext {
     /// `begin`: the unwrapped identity opens the owner channel; an unprotected session refuses.
     pub fn begin(root: &Path, identity: kv_crypto::Identity) -> Result<Self, SigningError> {
-        let channel = match open_channel(root, &identity, false) {
+        let mut challenge = vec![0_u8; kv_approvals::wire::NONCE_LEN];
+        getrandom::getrandom(&mut challenge)
+            .map_err(|_| refused("operating-system randomness unavailable"))?;
+        let mut fields = Map::new();
+        fields.insert("challenge".into(), json!(hex::encode(&challenge)));
+        fields.insert("providers".into(), json!(false));
+        let answer = kv_proto::agent_request_framed(root, "owner_channel", &fields)
+            .map_err(|_| refused("no daemon answered; start it with 'kv unlock' and try again"))?;
+        let channel = match kv_proto::check_channel(&answer, &challenge, &identity) {
             Ok(channel) => channel,
             Err(ChannelError::Message(m)) => return Err(refused(m)),
             Err(ChannelError::DaemonRefused(r)) => return Err(refused(r.to_string())),
@@ -81,7 +89,7 @@ impl PermitSigningContext {
     ) -> Result<(Value, Vec<u8>), SigningError> {
         let challenge = nonce()?;
         fields.insert("challenge".into(), json!(hex::encode(&challenge)));
-        let answer = kv_proto::agent_request(&self.root, cmd, &fields)
+        let answer = kv_proto::agent_request_framed(&self.root, cmd, &fields)
             .map_err(|e| refused(e.to_string()))?;
         Ok((answer, challenge))
     }
@@ -154,6 +162,57 @@ impl PermitSigningContext {
         let seed = OwnerSeed::new(*self.identity.owner_seed);
         kv_approvals::permit::attach_permit_approval(&record.facts, &seed)
             .map_err(|e| refused(e.to_string()))
+    }
+
+    /// `sign_denial`: the owner's signature over this service session's exact
+    /// request identity. Denial creates no authority; it only ends it.
+    pub fn sign_denial(&self, record: &PermitRecord) -> Result<Value, SigningError> {
+        let seed = OwnerSeed::new(*self.identity.owner_seed);
+        let facts = &record.facts;
+        let payload = json!({
+            "signer": kv_approvals::permit::SIGNER,
+            "request_id": facts["request_id"],
+            "permit_id": facts["permit_id"],
+            "session_nonce": facts["session_nonce"],
+            "location": facts["location"],
+            "local_approval_id": facts["local_approval_id"],
+            "owner_key_id": facts["owner_key_id"],
+        });
+        kv_approvals::permit_denial::attach_permit_denial(&payload, &seed)
+            .map_err(|e| refused(e.to_string()))
+    }
+
+    /// `register_denial`: two attempts; only an ack naming this exact denied
+    /// permit counts. Retrying is safe because denial is idempotent.
+    pub fn register_denial(
+        &self,
+        denial: &Value,
+        record: &PermitRecord,
+    ) -> Result<String, SigningError> {
+        let expected = (
+            record.facts["permit_id"].as_str().unwrap_or(""),
+            record.facts["request_id"].as_str().unwrap_or(""),
+        );
+        let mut reason = String::from("the service did not confirm this exact denial");
+        for _ in 0..2 {
+            let mut fields = Map::new();
+            fields.insert("denial".into(), denial.clone());
+            let Ok((answer, challenge)) = self.send("owner_permit_deny", fields) else {
+                continue;
+            };
+            match check_answer(&answer, &challenge, &self.identity, "permit-deny-ack-v1") {
+                Ok(fields) => {
+                    let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("");
+                    if text("session_nonce") == hex::encode(&self.channel.session_nonce)
+                        && (text("permit_id"), text("request_id")) == expected
+                    {
+                        return Ok(text("status").to_owned());
+                    }
+                }
+                Err(error) => reason = error.to_string(),
+            }
+        }
+        Err(SigningError::Unconfirmed(reason))
     }
 
     /// `register_permit`: two attempts; only an ack naming this exact permit counts.

@@ -124,7 +124,7 @@ pub fn is_agent_running(root: &Path) -> bool {
 
 /// `agent_request(cmd, **fields)` against this project's daemon.
 pub fn agent_request(root: &Path, cmd: &str, fields: Map<String, Value>) -> Option<Value> {
-    kv_proto::agent_request(root, cmd, &fields).ok()
+    kv_proto::agent_request_framed(root, cmd, &fields).ok()
 }
 
 fn attempts_label(remaining: u32) -> String {

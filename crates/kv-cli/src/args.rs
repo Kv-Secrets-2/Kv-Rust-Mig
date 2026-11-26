@@ -47,6 +47,7 @@ pub enum Command {
     Provider(crate::providercmd::ProviderAction),
     Policy(PolicyAction),
     Approvals(crate::approvalscmd::ApprovalsAction),
+    ApiOperation(crate::apiopcmd::ApiOperationArgs),
     AgentChild,
     Hook {
         mode: String,
@@ -523,6 +524,94 @@ fn parse_spec(spec: &Spec, rest: &[String]) -> Result<Parsed, ParseError> {
     Ok(parsed)
 }
 
+fn parse_api_operation(rest: &[String]) -> Result<Option<Command>, ParseError> {
+    let usage = crate::apiopcmd::USAGE;
+    let before_separator = rest
+        .iter()
+        .take_while(|value| value.as_str() != "--")
+        .any(|value| value == "-h" || value == "--help");
+    if before_separator {
+        return Err(ParseError::Help(format!(
+            "{usage}
+
+Fixed built-in broker operation: count tokens with Anthropic without exposing the key.
+"
+        )));
+    }
+    let Some(operation) = rest.first() else {
+        return Err(ParseError::Usage(format!(
+            "{usage}
+kv api: error: the following arguments are required: operation
+"
+        )));
+    };
+    if operation != "anthropic-count-tokens" {
+        return Err(ParseError::Usage(format!(
+            "{usage}
+kv api: error: unsupported operation '{operation}' (choose from 'anthropic-count-tokens')
+"
+        )));
+    }
+    let mut input = None;
+    let mut permit_id = None;
+    let mut env = None;
+    let mut positional_only = false;
+    let mut index = 1;
+    while index < rest.len() {
+        let value = &rest[index];
+        if !positional_only && value == "--" {
+            positional_only = true;
+        } else if !positional_only && value == "--permit-id" {
+            index += 1;
+            let Some(permit) = rest.get(index) else {
+                return Err(ParseError::Usage(format!(
+                    "{usage}
+kv api: error: argument --permit-id: expected one argument
+"
+                )));
+            };
+            permit_id = Some(permit.clone());
+        } else if !positional_only && value.starts_with("--permit-id=") {
+            permit_id = Some(value["--permit-id=".len()..].to_owned());
+        } else if !positional_only && (value == "--env" || value == "-e") {
+            index += 1;
+            let Some(name) = rest.get(index) else {
+                return Err(ParseError::Usage(format!(
+                    "{usage}
+kv api: error: argument --env: expected one argument
+"
+                )));
+            };
+            env = Some(name.clone());
+        } else if !positional_only && value.starts_with("--env=") {
+            env = Some(value["--env=".len()..].to_owned());
+        } else if input.is_none() {
+            input = Some(value.clone());
+        } else {
+            return Err(ParseError::Usage(format!(
+                "{usage}
+kv api: error: unrecognized arguments: {value}
+"
+            )));
+        }
+        index += 1;
+    }
+    let Some(input) = input else {
+        return Err(ParseError::Usage(format!(
+            "{usage}
+kv api: error: the following arguments are required: INPUT
+"
+        )));
+    };
+    Ok(Some(Command::ApiOperation(
+        crate::apiopcmd::ApiOperationArgs {
+            input,
+            permit_id,
+            env,
+        },
+    )))
+}
+
 pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     let Some(first) = argv.first() else {
         return Ok(None);
@@ -550,6 +639,9 @@ pub fn parse(argv: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if first == "approvals" {
         return parse_approvals(&argv[1..]);
+    }
+    if first == "api" {
+        return parse_api_operation(&argv[1..]);
     }
     if first == "history" {
         return parse_history(&argv[1..]);
@@ -1270,6 +1362,28 @@ fn parse_approvals(rest: &[String]) -> Result<Option<Command>, ParseError> {
             all,
             follow,
             interval,
+        })));
+    }
+    if *choice == "deny" {
+        let usage = "usage: kv approvals deny [-h] request_id
+";
+        let mut request_id = None;
+        for value in rest {
+            if value.starts_with('-') || request_id.replace(value.clone()).is_some() {
+                return Err(ParseError::Usage(format!(
+                    "{usage}kv approvals deny: error: unrecognized arguments: {value}
+"
+                )));
+            }
+        }
+        let Some(request_id) = request_id else {
+            return Err(ParseError::Usage(format!(
+                "{usage}kv approvals deny: error: the following arguments are required: request_id
+"
+            )));
+        };
+        return Ok(Some(Command::Approvals(ApprovalsAction::Deny {
+            request_id,
         })));
     }
     if *choice != "approve" {

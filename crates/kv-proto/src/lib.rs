@@ -37,6 +37,7 @@ pub const OWNER_ENDPOINTS: &[&str] = &[
     "owner_grant_register",
     "owner_permit_request",
     "owner_permit_register",
+    "owner_permit_deny",
     "owner_pause_request",
     "owner_pause_answer",
     "owner_http_rule",

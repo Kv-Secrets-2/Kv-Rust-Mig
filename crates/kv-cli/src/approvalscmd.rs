@@ -19,6 +19,9 @@ pub enum ApprovalsAction {
         request_id: String,
         run_grant_flags: bool,
     },
+    Deny {
+        request_id: String,
+    },
     Unavailable(&'static str),
 }
 
@@ -32,6 +35,7 @@ pub fn cmd_approvals(p: &Palette, action: ApprovalsAction) -> CmdResult {
             request_id,
             run_grant_flags,
         } => approve(p, &request_id, run_grant_flags),
+        ApprovalsAction::Deny { request_id } => deny(p, &request_id),
         ApprovalsAction::List {
             all,
             follow,
@@ -260,7 +264,7 @@ fn list(p: &Palette, all: bool) -> CmdResult {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let (pending_calls, paused_jobs) =
-        match kv_proto::agent_request(&root, "permit_requests", &Map::new()) {
+        match kv_proto::agent_request_framed(&root, "permit_requests", &Map::new()) {
             Ok(reply) => (
                 reply["requests"].as_array().cloned().unwrap_or_default(),
                 reply["pauses"].as_array().cloned().unwrap_or_default(),
@@ -309,7 +313,7 @@ fn list(p: &Palette, all: bool) -> CmdResult {
     if requests.is_empty() && pending_calls.is_empty() && paused_jobs.is_empty() {
         ui::info(&format!("{}no pending approval requests{}", p.dim, p.reset));
         ui::info(&format!(
-            "{}create one: kv preflight --request -- python3 app.py{}",
+            "{}create one: kv api anthropic-count-tokens INPUT{}",
             p.dim, p.reset
         ));
         ui::blank();
@@ -319,6 +323,47 @@ fn list(p: &Palette, all: bool) -> CmdResult {
         print_request(p, request, now);
         ui::blank();
     }
+    Ok(())
+}
+
+/// Deny a pending one-call permit with the owner key over the authenticated
+/// owner channel. Denial is terminal in the daemon's permit state machine.
+fn deny(p: &Palette, request_id: &str) -> CmdResult {
+    let root = project::require_project(p)?;
+    if !owner::vault_has_passphrase(&root) {
+        return Err(project::fail(
+            p,
+            kv_approvals::permit_session::NO_PASSPHRASE_REFUSAL,
+        ));
+    }
+    terminal::check_owner_terminal().map_err(|e| project::fail(p, &e.to_string()))?;
+    if !request_id.starts_with("permit_request_") {
+        return Err(project::fail(
+            p,
+            "denying run grants and paused jobs is not available in this build; a one-call permit (permit_request_...) is",
+        ));
+    }
+    let passphrase =
+        project::read_owner_secret(p, &format!("  {}Passphrase{}: ", p.yellow, p.reset))?;
+    let identity =
+        project::unlock_identity(&root, passphrase.as_bytes()).map_err(|e| project::fail(p, &e))?;
+    let ctx = PermitSigningContext::begin(&root, identity).map_err(|e| signing_failure(p, e))?;
+    let record = ctx
+        .permit_record(request_id)
+        .map_err(|e| signing_failure(p, e))?;
+    let denial = ctx
+        .sign_denial(&record)
+        .map_err(|e| signing_failure(p, e))?;
+    ctx.register_denial(&denial, &record)
+        .map_err(|e| signing_failure(p, e))?;
+    project::audit_event(
+        "call_permit_denied",
+        Map::from_iter([
+            ("request_id".into(), json!(request_id)),
+            ("permit_id".into(), record.facts["permit_id"].clone()),
+        ]),
+    );
+    ui::success(p, "One-call permit denied.");
     Ok(())
 }
 

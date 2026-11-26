@@ -15,7 +15,8 @@ use serde_json::Value;
 #[path = "darwin.rs"]
 mod darwin;
 
-const LOG: &str = "audit.jsonl";
+pub(crate) const LOG: &str = "audit.jsonl";
+pub(crate) const LOG_LOCK: &str = "audit.lock";
 const HEALTH: &str = "audit-health.json";
 const UNKEPT: &str = "audit-health.unkept";
 const UNCERTAIN: &str = "audit.uncertain";
@@ -43,8 +44,53 @@ pub(crate) enum AppendFailure {
     WriteFailed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DurableAppendFailure {
+    FileRefused,
+    WriteFailed,
+    SyncFailed,
+}
+
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+fn sync_directory_once(
+    directory: &File,
+    synced: &mut Vec<(u64, u64)>,
+    sync_parent: &mut impl FnMut(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    let metadata = directory.metadata()?;
+    let identity = (metadata.dev(), metadata.ino());
+    if synced.contains(&identity) {
+        return Ok(());
+    }
+    sync_parent(directory)?;
+    synced.push(identity);
+    Ok(())
+}
+
+pub(crate) fn uses_canonical_namespace(path: &Path) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
+    let mut prefix = std::path::PathBuf::new();
+    for part in path.iter() {
+        if part == ".." {
+            return false;
+        }
+        prefix.push(part);
+        if part == "/" {
+            continue;
+        }
+        match fs::symlink_metadata(&prefix) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 #[allow(unsafe_code)]
@@ -74,6 +120,8 @@ fn single_file(file: &File) -> io::Result<()> {
 fn create_directory(path: &Path) -> io::Result<()> {
     // Match makedirs: missing ancestors use ordinary directory permissions;
     // only the audit directory itself is created private from its first inode.
+    // This ordinary provisioning path deliberately performs no parent-chain
+    // durability barrier; privileged admissions add that stricter barrier.
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -85,6 +133,11 @@ fn create_directory(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+#[cfg(target_os = "macos")]
+pub fn darwin_file_has_acl(file: &File) -> io::Result<bool> {
+    darwin::has_acl(file)
 }
 
 impl Directory {
@@ -119,6 +172,53 @@ impl Directory {
             flags,
             Mode::from_bits_truncate(0o600),
         )?))
+    }
+
+    pub(crate) fn open_single_read(&self, name: &str) -> io::Result<File> {
+        let file = self.open_child(name, OFlags::RDONLY)?;
+        single_file(&file)?;
+        Ok(file)
+    }
+
+    /// Synchronize the physical ancestors of this directory. Privileged
+    /// admission uses this strict barrier at genesis even when the journal path
+    /// already exists, after requiring a canonical absolute namespace path.
+    pub(crate) fn sync_parent_chain(&self, path: &Path) -> io::Result<()> {
+        self.sync_parent_chain_with(path, |parent| parent.sync_all())
+    }
+
+    fn sync_parent_chain_with(
+        &self,
+        path: &Path,
+        mut sync_parent: impl FnMut(&File) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut synced = Vec::new();
+        let mut child = self.file.try_clone()?;
+        let mut reached_root = false;
+        for _ in 0..1024 {
+            let parent = File::from(unix::openat(
+                &child,
+                "..",
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?);
+            let child_metadata = child.metadata()?;
+            let parent_metadata = parent.metadata()?;
+            if child_metadata.dev() == parent_metadata.dev()
+                && child_metadata.ino() == parent_metadata.ino()
+            {
+                reached_root = true;
+                break;
+            }
+            sync_directory_once(&parent, &mut synced, &mut sync_parent)?;
+            child = parent;
+        }
+        if !reached_root {
+            return Err(invalid("directory ancestry exceeds durability scan bound"));
+        }
+
+        let _ = path;
+        Ok(())
     }
 
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {
@@ -251,6 +351,47 @@ impl Directory {
 
     pub(crate) fn append(&self, bytes: &[u8]) -> Result<(), AppendFailure> {
         self.append_with_close(bytes, close_file)
+    }
+
+    /// Append and commit both the log file and its directory entry before
+    /// returning. Unlike `append`, this is a durability barrier for records
+    /// whose completion authorizes later privileged work.
+    pub(crate) fn append_durable(&self, bytes: &[u8]) -> Result<(), DurableAppendFailure> {
+        self.append_durable_with_io(
+            bytes,
+            |file, bytes| file.write_all(bytes),
+            |file| file.sync_all(),
+            close_file,
+            |directory| directory.sync_all(),
+        )
+    }
+
+    fn append_durable_with_io(
+        &self,
+        bytes: &[u8],
+        mut write: impl FnMut(&mut File, &[u8]) -> io::Result<()>,
+        mut sync: impl FnMut(&File) -> io::Result<()>,
+        close: impl FnOnce(File) -> io::Result<()>,
+        mut sync_directory: impl FnMut(&File) -> io::Result<()>,
+    ) -> Result<(), DurableAppendFailure> {
+        let mut file = self
+            .open_child(LOG, OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND)
+            .map_err(|_| DurableAppendFailure::FileRefused)?;
+        single_file(&file).map_err(|_| DurableAppendFailure::FileRefused)?;
+        harden(&file, 0o600).map_err(|_| DurableAppendFailure::FileRefused)?;
+        let written = write(&mut file, bytes);
+        let synced = written.as_ref().ok().map(|()| sync(&file));
+        let closed = close(file);
+        if written.is_err() {
+            return Err(DurableAppendFailure::WriteFailed);
+        }
+        if synced.is_some_and(|result| result.is_err()) || closed.is_err() {
+            return Err(DurableAppendFailure::SyncFailed);
+        }
+        if sync_directory(&self.file).is_err() {
+            return Err(DurableAppendFailure::SyncFailed);
+        }
+        Ok(())
     }
 
     fn append_with_close(
@@ -471,7 +612,7 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir(&path).unwrap();
-            Self(path)
+            Self(fs::canonicalize(path).unwrap())
         }
     }
     impl Drop for Temp {
@@ -569,6 +710,164 @@ mod tests {
         });
         assert_eq!(result, Err(AppendFailure::WriteFailed));
         assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"written\n");
+    }
+
+    #[test]
+    fn parent_chain_sync_walks_multilevel_parents_in_order() {
+        use std::cell::RefCell;
+
+        let temp = Temp::new();
+        let outer = temp.0.join("outer");
+        let inner = outer.join("inner");
+        let leaf = inner.join("audit");
+        fs::create_dir_all(&leaf).unwrap();
+        let directory = Directory::open(&leaf, false).unwrap();
+        let synced = RefCell::new(Vec::new());
+        directory
+            .sync_parent_chain_with(&leaf, |parent| {
+                let metadata = parent.metadata()?;
+                synced.borrow_mut().push((metadata.dev(), metadata.ino()));
+                parent.sync_all()
+            })
+            .unwrap();
+
+        let synced = synced.borrow();
+        assert!(synced.len() >= 3);
+        for ((dev, ino), path) in synced.iter().zip([inner, outer, temp.0.clone()].iter()) {
+            let metadata = fs::metadata(path).unwrap();
+            assert_eq!((*dev, *ino), (metadata.dev(), metadata.ino()));
+        }
+    }
+
+    #[test]
+    fn ordinary_directory_creation_separates_cli_logging_from_admission_barrier() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = Temp::new();
+        let gateway = temp.0.join("gateway");
+        let parent = gateway.join("parent");
+        fs::create_dir(&gateway).unwrap();
+        fs::create_dir(&parent).unwrap();
+        fs::set_permissions(&gateway, fs::Permissions::from_mode(0o300)).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o300)).unwrap();
+        let audit = parent.join("audit");
+        let directory = Directory::open(&audit, true).unwrap();
+        directory.append(b"ordinary audit record\n").unwrap();
+        assert_eq!(
+            fs::read(audit.join(LOG)).unwrap(),
+            b"ordinary audit record\n"
+        );
+        fs::set_permissions(&gateway, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn canonical_namespace_accepts_real_absolute_directories() {
+        let temp = Temp::new();
+        let audit = temp.0.join("audit");
+        fs::create_dir(&audit).unwrap();
+        assert!(uses_canonical_namespace(&audit));
+        assert!(uses_canonical_namespace(&audit.join("missing")));
+    }
+
+    #[test]
+    fn canonical_namespace_rejects_relative_dotdot_and_symlink_paths() {
+        let temp = Temp::new();
+        let target = temp.0.join("target");
+        fs::create_dir(&target).unwrap();
+        let link = temp.0.join("linked-target");
+        symlink(&target, &link).unwrap();
+
+        assert!(!uses_canonical_namespace(Path::new("relative/audit")));
+        assert!(!uses_canonical_namespace(&target.join("..").join("audit")));
+        assert!(!uses_canonical_namespace(
+            &temp.0.join("missing").join("..").join("audit")
+        ));
+        assert!(!uses_canonical_namespace(&link.join("audit")));
+        assert!(!uses_canonical_namespace(&link));
+    }
+
+    #[test]
+    fn durable_append_syncs_file_before_close_and_directory_before_success() {
+        use std::cell::RefCell;
+
+        let temp = Temp::new();
+        let directory = Directory::open(&temp.0, true).unwrap();
+        let events = RefCell::new(Vec::new());
+        directory
+            .append_durable_with_io(
+                b"durable\n",
+                |file, bytes| {
+                    events.borrow_mut().push("write");
+                    file.write_all(bytes)
+                },
+                |file| {
+                    events.borrow_mut().push("file_sync");
+                    file.sync_all()
+                },
+                |file| {
+                    events.borrow_mut().push("close");
+                    close_file(file)
+                },
+                |directory| {
+                    events.borrow_mut().push("directory_sync");
+                    directory.sync_all()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            events.borrow().as_slice(),
+            ["write", "file_sync", "close", "directory_sync"]
+        );
+        assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"durable\n");
+    }
+
+    #[test]
+    fn durable_append_classifies_injected_write_sync_close_and_directory_failures() {
+        let temp = Temp::new();
+        let directory = Directory::open(&temp.0, true).unwrap();
+        let write_failed = directory.append_durable_with_io(
+            b"not-written\n",
+            |_, _| Err(io::Error::other("injected write failure")),
+            |file| file.sync_all(),
+            close_file,
+            |directory| directory.sync_all(),
+        );
+        assert_eq!(write_failed, Err(DurableAppendFailure::WriteFailed));
+
+        for (close_fails, directory_fails) in [(false, false), (true, false), (false, true)] {
+            if temp.0.join(LOG).exists() {
+                fs::remove_file(temp.0.join(LOG)).unwrap();
+            }
+            let result = directory.append_durable_with_io(
+                b"sync-case\n",
+                |file, bytes| file.write_all(bytes),
+                |file| {
+                    if close_fails || directory_fails {
+                        file.sync_all()
+                    } else {
+                        Err(io::Error::other("injected sync failure"))
+                    }
+                },
+                |file| {
+                    if close_fails {
+                        drop(file);
+                        Err(io::Error::other("injected close failure"))
+                    } else {
+                        close_file(file)
+                    }
+                },
+                |directory| {
+                    if directory_fails {
+                        Err(io::Error::other("injected directory sync failure"))
+                    } else {
+                        directory.sync_all()
+                    }
+                },
+            );
+            assert_eq!(result, Err(DurableAppendFailure::SyncFailed));
+            assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"sync-case\n");
+        }
     }
 
     #[test]
