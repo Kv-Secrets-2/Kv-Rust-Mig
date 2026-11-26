@@ -94,10 +94,13 @@ fn identity() -> VaultIdentity {
 
 fn fixture() -> Fixture {
     let temp = Temp::new();
+    let directory = temp.audit_dir();
+    fixture_in(temp, directory)
+}
+
+fn fixture_in(temp: Temp, directory: PathBuf) -> Fixture {
     let checkpoint = MemoryCheckpoint::new();
-    let events = checkpoint.state.clone();
-    let append_events = events.clone();
-    let sync_events = events;
+    let append_events = checkpoint.state.clone();
     let append_failures = Arc::new(Mutex::new(VecDeque::new()));
     let injected = append_failures.clone();
     let append = Box::new(move |directory: &Directory, bytes: &[u8]| {
@@ -110,17 +113,18 @@ fn fixture() -> Fixture {
         }
         directory.append_durable(bytes)
     });
+    let sync_events = checkpoint.state.clone();
     let parent_sync_failures = Arc::new(Mutex::new(VecDeque::new()));
     let injected_parent_sync = parent_sync_failures.clone();
-    let sync_parent_chain = Box::new(move |directory: &Directory| {
+    let sync_parent_chain = Box::new(move |directory: &Directory, path: &std::path::Path| {
         sync_events.lock().unwrap().events.push("parent_chain_sync");
         if injected_parent_sync.lock().unwrap().pop_front().is_some() {
             return Err(io::Error::other("injected parent chain sync failure"));
         }
-        directory.sync_parent_chain()
+        directory.sync_parent_chain(path)
     });
     let journal = AdmissionJournal::with_append_failure_injection(
-        temp.audit_dir(),
+        directory,
         key(),
         identity(),
         Box::new(checkpoint.clone()),
@@ -330,7 +334,7 @@ fn journal_write_and_sync_failures_block_checkpoint_and_effect() {
 }
 
 #[test]
-fn first_use_parent_chain_sync_failure_blocks_admission_checkpoint_and_effect() {
+fn first_admission_fails_closed_when_parent_chain_sync_fails() {
     let fixture = fixture();
     fixture.parent_sync_failures.lock().unwrap().push_back(());
     let effect = counter();
@@ -363,6 +367,59 @@ fn first_use_parent_chain_sync_failure_blocks_admission_checkpoint_and_effect() 
     drop(execution);
     assert_eq!(retry_effect.load(Ordering::SeqCst), 1);
     assert_eq!(checkpoint_state(&fixture).0.count, 1);
+}
+
+#[test]
+fn first_admission_creates_multilevel_journal_directories() {
+    let temp = Temp::new();
+    let audit = temp.0.join("outer").join("inner").join("audit");
+    let fixture = fixture_in(temp, audit.clone());
+    let effect = counter();
+    let admission = fixture
+        .journal
+        .admit("broker.http.get", Map::new())
+        .unwrap();
+    let execution = admission.run(|_| effect.fetch_add(1, Ordering::SeqCst));
+    drop(execution);
+    assert_eq!(effect.load(Ordering::SeqCst), 1);
+    assert!(audit.join("audit.jsonl").is_file());
+    let (position, events) = checkpoint_state(&fixture);
+    assert_eq!(position.count, 1);
+    assert_eq!(
+        events,
+        [
+            "checkpoint_read",
+            "parent_chain_sync",
+            "journal_append",
+            "checkpoint_publish",
+        ]
+    );
+}
+
+#[test]
+fn genesis_admission_syncs_existing_journal_path_before_first_write() {
+    let fixture = fixture();
+    fs::create_dir(fixture.temp.audit_dir()).unwrap();
+    let effect = counter();
+    let admission = fixture
+        .journal
+        .admit("broker.http.get", Map::new())
+        .unwrap();
+    let execution = admission.run(|_| effect.fetch_add(1, Ordering::SeqCst));
+    drop(execution);
+
+    let (position, events) = checkpoint_state(&fixture);
+    assert_eq!(position.count, 1);
+    assert_eq!(effect.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        events,
+        [
+            "checkpoint_read",
+            "parent_chain_sync",
+            "journal_append",
+            "checkpoint_publish",
+        ]
+    );
 }
 
 #[test]

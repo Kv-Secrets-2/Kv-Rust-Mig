@@ -55,6 +55,80 @@ fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
+fn sync_directory_once(
+    directory: &File,
+    synced: &mut Vec<(u64, u64)>,
+    sync_parent: &mut impl FnMut(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    let metadata = directory.metadata()?;
+    let identity = (metadata.dev(), metadata.ino());
+    if synced.contains(&identity) {
+        return Ok(());
+    }
+    sync_parent(directory)?;
+    synced.push(identity);
+    Ok(())
+}
+
+fn sync_directory_path_chain(
+    path: &Path,
+    synced: &mut Vec<(u64, u64)>,
+    sync_parent: &mut impl FnMut(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    for ancestor in path.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        let directory = File::from(unix::open(
+            ancestor,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?);
+        sync_directory_once(&directory, synced, sync_parent)?;
+        close_file(directory)?;
+    }
+    Ok(())
+}
+
+fn sync_symlink_entries(
+    path: &Path,
+    synced: &mut Vec<(u64, u64)>,
+    sync_parent: &mut impl FnMut(&File) -> io::Result<()>,
+    depth: usize,
+) -> io::Result<()> {
+    if depth >= 40 {
+        return Err(invalid("audit path exceeds symlink resolution bound"));
+    }
+    let mut prefixes: Vec<_> = path.ancestors().skip(1).collect();
+    prefixes.reverse();
+    for prefix in prefixes {
+        if prefix.as_os_str().is_empty() {
+            continue;
+        }
+        if !fs::symlink_metadata(prefix)?.file_type().is_symlink() {
+            continue;
+        }
+        let parent = prefix
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let canonical_parent = fs::canonicalize(parent)?;
+        sync_directory_path_chain(&canonical_parent, synced, sync_parent)?;
+        let target = fs::read_link(prefix)?;
+        let mut resolved = if target.is_absolute() {
+            target
+        } else {
+            parent.join(target)
+        };
+        let suffix = path
+            .strip_prefix(prefix)
+            .map_err(|_| invalid("audit path symlink prefix mismatch"))?;
+        resolved.push(suffix);
+        return sync_symlink_entries(&resolved, synced, sync_parent, depth + 1);
+    }
+    Ok(())
+}
+
 #[allow(unsafe_code)]
 fn close_file(file: File) -> io::Result<()> {
     let descriptor = file.into_raw_fd();
@@ -82,6 +156,8 @@ fn single_file(file: &File) -> io::Result<()> {
 fn create_directory(path: &Path) -> io::Result<()> {
     // Match makedirs: missing ancestors use ordinary directory permissions;
     // only the audit directory itself is created private from its first inode.
+    // This ordinary provisioning path deliberately performs no parent-chain
+    // durability barrier; privileged admissions add that stricter barrier.
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -140,11 +216,22 @@ impl Directory {
         Ok(file)
     }
 
-    /// Synchronize every parent directory that can contain this directory's
-    /// name, ending at the filesystem root. A first-use journal creation is
-    /// durable only after each of those entries has been committed.
-    pub(crate) fn sync_parent_chain(&self) -> io::Result<()> {
+    /// Synchronize the physical ancestors of this directory. For every symlink
+    /// in `path`, also synchronize the canonical parent chain containing that
+    /// symlink entry. Privileged admission uses this strict barrier at genesis
+    /// even when the journal path already exists.
+    pub(crate) fn sync_parent_chain(&self, path: &Path) -> io::Result<()> {
+        self.sync_parent_chain_with(path, |parent| parent.sync_all())
+    }
+
+    fn sync_parent_chain_with(
+        &self,
+        path: &Path,
+        mut sync_parent: impl FnMut(&File) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut synced = Vec::new();
         let mut child = self.file.try_clone()?;
+        let mut reached_root = false;
         for _ in 0..1024 {
             let parent = File::from(unix::openat(
                 &child,
@@ -157,12 +244,17 @@ impl Directory {
             if child_metadata.dev() == parent_metadata.dev()
                 && child_metadata.ino() == parent_metadata.ino()
             {
-                return Ok(());
+                reached_root = true;
+                break;
             }
-            parent.sync_all()?;
+            sync_directory_once(&parent, &mut synced, &mut sync_parent)?;
             child = parent;
         }
-        Err(invalid("directory ancestry exceeds durability scan bound"))
+        if !reached_root {
+            return Err(invalid("directory ancestry exceeds durability scan bound"));
+        }
+
+        sync_symlink_entries(path, &mut synced, &mut sync_parent, 0)
     }
 
     pub(crate) fn lock(&self, name: &str, wait: Duration) -> Result<Lock, LockFailure> {
@@ -654,6 +746,127 @@ mod tests {
         });
         assert_eq!(result, Err(AppendFailure::WriteFailed));
         assert_eq!(fs::read(temp.0.join(LOG)).unwrap(), b"written\n");
+    }
+
+    #[test]
+    fn parent_chain_sync_walks_multilevel_parents_in_order() {
+        use std::cell::RefCell;
+
+        let temp = Temp::new();
+        let outer = temp.0.join("outer");
+        let inner = outer.join("inner");
+        let leaf = inner.join("audit");
+        fs::create_dir_all(&leaf).unwrap();
+        let directory = Directory::open(&leaf, false).unwrap();
+        let synced = RefCell::new(Vec::new());
+        directory
+            .sync_parent_chain_with(&leaf, |parent| {
+                let metadata = parent.metadata()?;
+                synced.borrow_mut().push((metadata.dev(), metadata.ino()));
+                parent.sync_all()
+            })
+            .unwrap();
+
+        let synced = synced.borrow();
+        assert!(synced.len() >= 3);
+        for ((dev, ino), path) in synced.iter().zip([inner, outer, temp.0.clone()].iter()) {
+            let metadata = fs::metadata(path).unwrap();
+            assert_eq!((*dev, *ino), (metadata.dev(), metadata.ino()));
+        }
+    }
+
+    #[test]
+    fn ordinary_directory_creation_separates_cli_logging_from_admission_barrier() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = Temp::new();
+        let gateway = temp.0.join("gateway");
+        let parent = gateway.join("parent");
+        fs::create_dir(&gateway).unwrap();
+        fs::create_dir(&parent).unwrap();
+        fs::set_permissions(&gateway, fs::Permissions::from_mode(0o300)).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o300)).unwrap();
+        let audit = parent.join("audit");
+        let directory = Directory::open(&audit, true).unwrap();
+        directory.append(b"ordinary audit record\n").unwrap();
+        assert_eq!(
+            fs::read(audit.join(LOG)).unwrap(),
+            b"ordinary audit record\n"
+        );
+        fs::set_permissions(&gateway, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn parent_chain_sync_ignores_dotdot_artifacts_without_symlinks() {
+        use std::cell::RefCell;
+        use std::collections::HashSet;
+
+        let temp = Temp::new();
+        let decoy = temp.0.join("decoy");
+        let audit = temp.0.join("audit");
+        fs::create_dir(&decoy).unwrap();
+        fs::create_dir(&audit).unwrap();
+        let audit_through_dotdot = decoy.join("..").join("audit");
+        let directory = Directory::open(&audit_through_dotdot, false).unwrap();
+        let synced = RefCell::new(Vec::new());
+        directory
+            .sync_parent_chain_with(&audit_through_dotdot, |parent| {
+                let metadata = parent.metadata()?;
+                synced.borrow_mut().push((metadata.dev(), metadata.ino()));
+                parent.sync_all()
+            })
+            .unwrap();
+
+        let synced: HashSet<_> = synced.borrow().iter().copied().collect();
+        let decoy_metadata = fs::metadata(&decoy).unwrap();
+        assert!(!synced.contains(&(decoy_metadata.dev(), decoy_metadata.ino())));
+        let temp_metadata = fs::metadata(&temp.0).unwrap();
+        assert!(synced.contains(&(temp_metadata.dev(), temp_metadata.ino())));
+    }
+
+    #[test]
+    fn parent_chain_sync_includes_symlink_entries_and_target_ancestors() {
+        use std::cell::RefCell;
+        use std::collections::HashSet;
+
+        let temp = Temp::new();
+        let target_parent = temp.0.join("target-parent");
+        let target = target_parent.join("target");
+        fs::create_dir(&target_parent).unwrap();
+        fs::create_dir(&target).unwrap();
+        let audit = target.join("audit");
+        fs::create_dir(&audit).unwrap();
+        let inner_link_parent = temp.0.join("inner-link-parent");
+        let outer_link_parent = temp.0.join("outer-link-parent");
+        fs::create_dir(&inner_link_parent).unwrap();
+        fs::create_dir(&outer_link_parent).unwrap();
+        let inner_link = inner_link_parent.join("inner-link");
+        symlink(&target, &inner_link).unwrap();
+        let link = outer_link_parent.join("linked-target");
+        symlink(&inner_link, &link).unwrap();
+        let audit_through_link = link.join("audit");
+        let directory = Directory::open(&audit_through_link, false).unwrap();
+        let synced = RefCell::new(Vec::new());
+        directory
+            .sync_parent_chain_with(&audit_through_link, |parent| {
+                let metadata = parent.metadata()?;
+                synced.borrow_mut().push((metadata.dev(), metadata.ino()));
+                parent.sync_all()
+            })
+            .unwrap();
+
+        let synced: HashSet<_> = synced.borrow().iter().copied().collect();
+        for path in [
+            target,
+            target_parent,
+            inner_link_parent,
+            outer_link_parent,
+            temp.0.clone(),
+        ] {
+            let metadata = fs::metadata(path).unwrap();
+            assert!(synced.contains(&(metadata.dev(), metadata.ino())));
+        }
     }
 
     #[test]

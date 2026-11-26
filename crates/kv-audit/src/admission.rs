@@ -2,10 +2,11 @@
 //!
 //! The ordering is deliberately strict: while the audit log lock is held, the
 //! broker-owned checkpoint is read, the complete journal is authenticated to
-//! that checkpoint, a first-use journal directory hierarchy is committed through
-//! its parent chain, the admission record is appended with file and directory
-//! synchronization, and the advanced checkpoint is published durably. Only then
-//! does [`AdmissionJournal::admit`] return a usable [`Admission`]. Dropping an
+//! that checkpoint, a genesis journal path is committed through its parent
+//! chain even when that path already exists, the admission record is appended
+//! with file and directory synchronization, and the advanced checkpoint is
+//! published durably. Only then does [`AdmissionJournal::admit`] return a
+//! usable [`Admission`]. Dropping an
 //! admission never repeats or completes its effect; in a journal that verifies
 //! against its checkpoint, an admission without a later terminal outcome is
 //! reported as unknown.
@@ -174,7 +175,7 @@ impl TerminalOutcome {
 }
 
 type AppendDurable = dyn Fn(&Directory, &[u8]) -> Result<(), DurableAppendFailure> + Send + Sync;
-type ParentChainSync = dyn Fn(&Directory) -> io::Result<()> + Send + Sync;
+type ParentChainSync = dyn Fn(&Directory, &Path) -> io::Result<()> + Send + Sync;
 
 struct Inner {
     directory: PathBuf,
@@ -263,7 +264,7 @@ impl AdmissionJournal {
             identity,
             checkpoint,
             Box::new(|directory, bytes| directory.append_durable(bytes)),
-            Box::new(|directory| directory.sync_parent_chain()),
+            Box::new(|directory, path| directory.sync_parent_chain(path)),
         )
     }
 
@@ -373,7 +374,7 @@ impl AdmissionJournal {
             other => return Err(verification_error(other)),
         };
         if position.count == 0 {
-            (self.0.sync_parent_chain)(&directory)
+            (self.0.sync_parent_chain)(&directory, &self.0.directory)
                 .map_err(|_| LifecycleError::JournalSyncFailed)?;
         }
         if !directory.lock_matches(&log_lock, LOG_LOCK).unwrap_or(false) {
