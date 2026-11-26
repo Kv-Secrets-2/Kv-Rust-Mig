@@ -42,6 +42,7 @@ fn approval_rejects_config_changed_after_review_and_preserves_prior_approval() {
 
     kv_store::config_authority::approve_config_unattended(&root, &master).unwrap();
     let approved_before = kv_store::config_authority::approved_authority(&root, &master).unwrap();
+    let approval_bytes_before = fs::read(root.join(".secrets/config-authority")).unwrap();
     let review = kv_store::config_authority::review_config(&root).unwrap();
     let config = root.join(".secrets/config.json");
     let original = fs::read(&config).unwrap();
@@ -59,6 +60,10 @@ fn approval_rejects_config_changed_after_review_and_preserves_prior_approval() {
         kv_store::config_authority::approved_authority(&root, &master).unwrap(),
         approved_before
     );
+    assert_eq!(
+        fs::read(root.join(".secrets/config-authority")).unwrap(),
+        approval_bytes_before
+    );
 
     fs::write(&config, &original).unwrap();
     let formatting_review = kv_store::config_authority::review_config(&root).unwrap();
@@ -72,6 +77,10 @@ fn approval_rejects_config_changed_after_review_and_preserves_prior_approval() {
     assert_eq!(
         kv_store::config_authority::approved_authority(&root, &master).unwrap(),
         approved_before
+    );
+    assert_eq!(
+        fs::read(root.join(".secrets/config-authority")).unwrap(),
+        approval_bytes_before
     );
     fs::write(&config, original).unwrap();
 }
