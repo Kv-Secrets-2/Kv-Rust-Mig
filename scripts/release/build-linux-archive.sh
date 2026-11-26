@@ -33,7 +33,8 @@ fi
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 path_remap="--remap-path-prefix=$cargo_home/registry/src=/cargo/registry/src"
 
-helper_dir=$(mktemp -d "${TMPDIR:-/tmp}/kv-release-rustflags.XXXXXX")
+mkdir -p "$target_dir"
+helper_dir=$(mktemp -d "$target_dir/kv-release-rustflags.XXXXXX")
 staging=
 cleanup() {
   rm -rf "$helper_dir"
