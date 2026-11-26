@@ -184,7 +184,7 @@ fn agent_unlock(p: &Palette, root: &Path) -> CmdResult<(Unlocked, Zeroizing<Stri
     if has_totp {
         return Err(quiet_error(
             p,
-            "two-factor unlock is not supported by this build yet; use the Python kv for this vault",
+            "two-factor vaults are not supported by the Linux v1 surface",
         ));
     }
     let (identity, passphrase) = project::prompt_verified_passphrase(p, root)?;
@@ -232,7 +232,7 @@ pub fn cmd_unlock(p: &Palette, foreground: bool, install: bool) -> CmdResult {
                         ),
                     );
                     ui::info(&format!(
-                        "{}it was told to stop; run 'kv lock' again to check; see 'kv agent status'{}",
+                        "{}it was told to stop; run 'kv lock' again to check{}",
                         p.dim, p.reset
                     ));
                     return Err(Exit(1));
@@ -411,7 +411,7 @@ pub fn cmd_lock(p: &Palette) -> CmdResult {
             },
         );
         ui::info(&format!(
-            "{}it was told to stop (PID {pid}); run 'kv lock' again to check; see 'kv agent status'{}",
+            "{}it was told to stop (PID {pid}); run 'kv lock' again to check{}",
             p.dim, p.reset
         ));
         ui::blank();
@@ -464,7 +464,7 @@ fn inspect_storage_health(root: &Path, config: &Value) -> StorageHealth {
         messages = vec![
             "Config says drawers but no drawer artifacts were found; storage may be incomplete."
                 .to_owned(),
-            "Run kv doctor and use a verified migration backup if recovery is needed.".to_owned(),
+            "Restore from a verified backup if recovery is needed.".to_owned(),
         ];
     } else if env_bundles {
         messages.push("Legacy .enc bundles are retained as rollback material.".to_owned());
@@ -661,53 +661,14 @@ pub fn cmd_status(p: &Palette) -> CmdResult {
     };
     if truthy("totp") {
         ui::info(&format!(
-            "  {} 2FA {}\u{2014} kv's own prompts ask for a code; the key is locked by your passphrase alone{}",
+            "  {} 2FA {}\u{2014} enabled, but not supported by the Linux v1 surface{}",
             dot_on(p),
-            p.dim,
-            p.reset
-        ));
-        match security.get("backup_codes") {
-            Some(codes) if !matches!(codes, Value::Null | Value::Bool(false)) => {
-                let remaining = codes
-                    .get("codes")
-                    .and_then(Value::as_array)
-                    .map_or(0, |list| {
-                        list.iter()
-                            .filter(|c| c.get("used").and_then(Value::as_bool) != Some(true))
-                            .count()
-                    });
-                let label = if remaining == 1 { "code" } else { "codes" };
-                ui::info(&format!(
-                    "  {} backup codes {}\u{2014} {remaining} {label} remaining{}",
-                    dot_on(p),
-                    p.dim,
-                    p.reset
-                ));
-            }
-            _ => ui::info(&format!(
-                "  {} backup codes {}\u{2014} kv 2fa backup-codes rotate{}",
-                dot_off(p),
-                p.dim,
-                p.reset
-            )),
-        }
-    } else {
-        ui::info(&format!(
-            "  {} 2FA {}\u{2014} kv 2fa enable{}",
-            dot_off(p),
             p.dim,
             p.reset
         ));
     }
     if wrapped && truthy("recovery_key_wrap") {
         ui::info(&format!("  {} recovery key", dot_on(p)));
-    } else if wrapped {
-        ui::info(&format!(
-            "  {} recovery key {}\u{2014} kv recovery-key rotate{}",
-            dot_off(p),
-            p.dim,
-            p.reset
-        ));
     }
     crate::owner_policy::print_approval_mode(p, &config);
     print_approval_inbox(p, &root);
@@ -726,25 +687,12 @@ pub fn cmd_status(p: &Palette) -> CmdResult {
     ui::blank();
     print_storage(p, &inspect_storage_health(&root, &config), false);
     ui::blank();
-    ui::info(&format!("{}Sync{}", p.white, p.reset));
-    ui::info(&format!(
-        "  {}!{} drawer sync not initialized {}\u{2014} kv sync init{}",
-        p.yellow, p.reset, p.dim, p.reset
-    ));
-    ui::info(&format!(
-        "    {}Run kv sync init to create a local drawer sync identity.{}",
-        p.dim, p.reset
-    ));
-    ui::blank();
     ui::info(&format!("{}Environments{}", p.white, p.reset));
     let (valid, invalid): (Vec<&String>, Vec<&String>) = envs
         .iter()
         .partition(|name| !envname::has_path_syntax(name));
     for env in &invalid {
         ui::warn(p, &format!("'{env}' (invalid registration; unavailable)"));
-    }
-    if !invalid.is_empty() {
-        ui::info("Run 'kv env repair-names' to preview config-only recovery.");
     }
     if unlocked {
         let mut counts = Vec::with_capacity(valid.len());

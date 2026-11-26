@@ -94,7 +94,7 @@ pub enum ParseError {
     Unknown,
 }
 
-const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,export,envs,env,vault,status,version,unlock,lock}\n          ...\n";
+const USAGE_TOP: &str = "usage: kv [-h] [--version]\n          {init,set,get,ls,rm,history,backup,export,envs,env,vault,status,version,unlock,lock,approvals}\n          ...\n";
 
 struct Spec {
     name: &'static str,
@@ -791,9 +791,9 @@ fn preflight_top_error(message: &str) -> ParseError {
     ParseError::Usage(format!("{USAGE_TOP}kv: error: {message}\n"))
 }
 
-const ENV_USAGE: &str = "usage: kv env [-h]\n              {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n              ...\n";
+const ENV_USAGE: &str = "usage: kv env [-h]\n              {create,copy,rename,delete,restore,purge,default,keep-deleted}\n              ...\n";
 
-const ENV_HELP_TEXT: &str = "\npositional arguments:\n  {create,copy,repair-names,rename,delete,restore,purge,default,keep-deleted}\n    create              Create a new environment\n    copy                Copy secrets between environments\n    repair-names        Preview recovery of invalid environment registrations\n    rename              Rename an environment, keeping its secrets and history\n    delete              Delete an environment (recoverable for a while)\n    restore             Bring a deleted environment back (no name: list them)\n    purge               Wipe a deleted environment now\n    default             Show or set the default environment\n    keep-deleted        Show or set how many days a deleted environment is\n                        kept\n\noptions:\n  -h, --help            show this help message and exit\n";
+const ENV_HELP_TEXT: &str = "\npositional arguments:\n  {create,copy,rename,delete,restore,purge,default,keep-deleted}\n    create              Create a new environment\n    copy                Copy secrets between environments\n    rename              Rename an environment, keeping its secrets and history\n    delete              Delete an environment (recoverable for a while)\n    restore             Bring a deleted environment back (no name: list them)\n    purge               Wipe a deleted environment now\n    default             Show or set the default environment\n    keep-deleted        Show or set how many days a deleted environment is\n                        kept\n\noptions:\n  -h, --help            show this help message and exit\n";
 
 const NAME_HELP: &str = "\npositional arguments:\n  name        Environment name\n\noptions:\n  -h, --help  show this help message and exit\n";
 
@@ -897,7 +897,7 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
     }
     if action == "repair-names" {
         return Err(ParseError::Usage(format!(
-            "{ENV_USAGE}kv env: error: repair-names is not available in this build: it repairs registrations left by pre-drawer releases\n"
+            "{ENV_USAGE}kv env: error: repair-names is not available in the Linux v1 surface\n"
         )));
     }
     let Some(spec) = ENV_SPECS
@@ -905,7 +905,7 @@ fn parse_env(rest: &[String]) -> Result<Option<Command>, ParseError> {
         .find(|spec| spec.name.strip_prefix("env ") == Some(action.as_str()))
     else {
         return Err(ParseError::Usage(format!(
-            "{ENV_USAGE}kv env: error: argument env_action: invalid choice: '{action}' (choose from 'create', 'copy', 'repair-names', 'rename', 'delete', 'restore', 'purge', 'default', 'keep-deleted')\n"
+            "{ENV_USAGE}kv env: error: argument env_action: invalid choice: '{action}' (choose from 'create', 'copy', 'rename', 'delete', 'restore', 'purge', 'default', 'keep-deleted')\n"
         )));
     };
     let parsed = parse_spec(spec, &rest[1..])?;
@@ -980,7 +980,7 @@ const APPROVAL_MODE_STATUS_SPEC: Spec = Spec {
     options: &[],
 };
 
-const PROVIDER_USAGE: &str = "usage: kv provider [-h] {add,list,rm} ...\n";
+const PROVIDER_USAGE: &str = "usage: kv provider [-h] {list} ...\n";
 const PROVIDER_ADD: Spec = Spec {
     name: "provider add",
     usage: "usage: kv provider add [-h] [--type {http}] [--url URL] --secret\n                       SECRET [--auth {bearer,x-api-key,query,basic,header}]\n                       [--query-param QUERY_PARAM] [--header-name HEADER_NAME]\n                       name\n",
@@ -1060,8 +1060,16 @@ fn provider_port(value: &str) -> Option<i64> {
 }
 
 fn validate_provider_option(spec: &Spec, key: &str, value: &str) -> Result<(), ParseError> {
+    if key == "--type" {
+        if matches!(value, "http" | "postgres" | "mysql" | "redis" | "ssh") {
+            return Ok(());
+        }
+        return Err(spec_error(
+            spec,
+            &format!("argument --type: invalid choice: '{value}' (choose from 'http')"),
+        ));
+    }
     let choices: &[&str] = match key {
-        "--type" => &["http", "postgres", "mysql", "redis", "ssh"],
         "--auth" => &["bearer", "x-api-key", "query", "basic", "header"],
         "--port" => {
             if provider_port(value).is_none() {
@@ -1535,14 +1543,22 @@ fn parse_command_policy(rest: &[String]) -> Result<Option<Command>, ParseError> 
     Ok(Some(Command::Policy(action)))
 }
 
+fn provider_public_help() -> String {
+    format!(
+        "{PROVIDER_USAGE}\npositional arguments:\n  {{list}}\n    list     List built-in providers\n\noptions:\n  -h, --help  show this help message and exit\n"
+    )
+}
+
+fn provider_add_v1_help() -> &'static str {
+    "kv provider add is not part of the Linux v1 surface.\n\nThe v1 broker uses built-in provider definitions with fixed endpoints.\n"
+}
+
 fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
     let Some(action) = rest.first() else {
         return Ok(Some(Command::Provider(ProviderAction::List)));
     };
     if action == "-h" || action == "--help" {
-        return Err(ParseError::Help(format!(
-            "{PROVIDER_USAGE}\npositional arguments:\n  {{add,list,rm}}\n    add          Add a custom provider\n    list         List all providers\n    rm           Remove a custom provider\n\noptions:\n  -h, --help     show this help message and exit\n"
-        )));
+        return Err(ParseError::Help(provider_public_help()));
     }
     let spec = match action.as_str() {
         "add" => &PROVIDER_ADD,
@@ -1550,10 +1566,18 @@ fn parse_provider(rest: &[String]) -> Result<Option<Command>, ParseError> {
         "list" => &PROVIDER_LIST,
         _ => {
             return Err(ParseError::Usage(format!(
-                "{PROVIDER_USAGE}kv provider: error: argument provider_action: invalid choice: '{action}' (choose from 'add', 'list', 'rm')\n"
+                "{PROVIDER_USAGE}kv provider: error: argument provider_action: invalid choice: '{action}' (choose from 'list')\n"
             )));
         }
     };
+    if rest[1..].iter().any(|arg| arg == "-h" || arg == "--help") {
+        if action == "add" {
+            return Err(ParseError::Help(provider_add_v1_help().to_owned()));
+        }
+        if action == "rm" {
+            return Err(ParseError::Help(provider_public_help()));
+        }
+    }
     let parsed = parse_spec(spec, &rest[1..])?;
     let option = |key| {
         parsed
@@ -1825,7 +1849,15 @@ const VAULT_USAGE: &str = "usage: kv vault [-h] {approve-config} ...\n";
 
 const VAULT_HELP_TEXT: &str = "\npositional arguments:\n  {approve-config}\n    approve-config  Review and approve config authority with your passphrase\n\noptions:\n  -h, --help       show this help message and exit\n";
 
-const VAULT_ACTIONS: &[&str] = &["approve-config"];
+const VAULT_ACTIONS: &[&str] = &[
+    "approve-local",
+    "approve-config",
+    "restore-old-key",
+    "relocate",
+    "migrate-drawers",
+    "backup-drawers",
+    "rollback-drawers",
+];
 
 fn parse_vault(rest: &[String]) -> Result<Option<Command>, ParseError> {
     use crate::vaultcmd::VaultAction;
@@ -1836,11 +1868,7 @@ fn parse_vault(rest: &[String]) -> Result<Option<Command>, ParseError> {
         return Err(ParseError::Help(format!("{VAULT_USAGE}{VAULT_HELP_TEXT}")));
     }
     if !VAULT_ACTIONS.contains(&action.as_str()) {
-        let choices = VAULT_ACTIONS
-            .iter()
-            .map(|name| format!("'{name}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let choices = "'approve-config'";
         return Err(ParseError::Usage(format!(
             "{VAULT_USAGE}kv vault: error: argument vault_action: invalid choice: '{action}' (choose from {choices})\n"
         )));

@@ -491,7 +491,7 @@ fn stop_daemon_first(p: &Palette, keeps: &str) -> CmdResult {
     Err(quiet_error(
         p,
         &format!(
-            "stop the vault daemon first: kv agent stop {}(it keeps {keeps} while it runs){}",
+            "stop the vault daemon first: kv lock {}(it keeps {keeps} while it runs){}",
             p.dim, p.reset
         ),
     ))

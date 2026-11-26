@@ -393,10 +393,7 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
     if has_path_syntax(&configured_default) || !envs.contains(&configured_default) {
         ui::warn(
             p,
-            &format!(
-                "{} (unusable default; run kv env repair-names)",
-                py_repr(&configured_default)
-            ),
+            &format!("{} (unusable default)", py_repr(&configured_default)),
         );
     }
     for env in &invalid {
@@ -404,9 +401,6 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
             p,
             &format!("{} (invalid registration; unavailable)", py_repr(env)),
         );
-    }
-    if !invalid.is_empty() {
-        ui::info("Run 'kv env repair-names' to preview config-only recovery.");
     }
     if unlocked {
         let mut failed = false;

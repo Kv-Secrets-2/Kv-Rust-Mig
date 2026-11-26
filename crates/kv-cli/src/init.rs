@@ -544,6 +544,16 @@ pub fn cmd_init(p: &Palette, location: Option<&str>, path: Option<&str>) -> CmdR
     print_recovery_key_box(p, &token, false, &target.root, &wrap)?;
     ui::blank();
     ui::info(&format!("{}Quick start:{}", p.white, p.reset));
+    if !is_within(&target.workspace, &target.root) {
+        ui::cmd(
+            p,
+            &format!(
+                "cd {}",
+                crate::render::shell_quote(&target.root.to_string_lossy())
+            ),
+            "Open the new vault directory",
+        );
+    }
     ui::cmd(
         p,
         "kv vault approve-config",

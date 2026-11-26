@@ -112,7 +112,7 @@ pub fn prepare_vault_access(p: &Palette, root: &Path) -> CmdResult {
         .unwrap_or(false);
     if pending {
         eprintln!(
-            "kv: Recovery key display was interrupted or unconfirmed; run kv recovery-key rotate after login."
+            "kv: Recovery key display was interrupted or unconfirmed; this vault's recovery key is not confirmed."
         );
     }
     Ok(())
@@ -242,10 +242,6 @@ pub fn get_store(p: &Palette) -> CmdResult<Opened> {
     if !terminal::stdin_is_tty() {
         if is_agent_running(&root) {
             ui::error(p, "this command requires interactive passphrase input");
-            ui::info(&format!(
-                "{}use kv_api or kv_run MCP tools instead (they use the daemon){}",
-                p.dim, p.reset
-            ));
         } else {
             ui::error(
                 p,
@@ -253,10 +249,6 @@ pub fn get_store(p: &Palette) -> CmdResult<Opened> {
             );
             ui::info(&format!(
                 "{}start the daemon first: kv unlock (from a terminal){}",
-                p.dim, p.reset
-            ));
-            ui::info(&format!(
-                "{}then use kv_api or kv_run \u{2014} they don't need a passphrase{}",
                 p.dim, p.reset
             ));
         }
@@ -286,7 +278,7 @@ pub fn get_store(p: &Palette) -> CmdResult<Opened> {
     if has_totp {
         return Err(quiet_error(
             p,
-            "two-factor unlock is not supported by this build yet; use the Python kv for this vault",
+            "two-factor vaults are not supported by the Linux v1 surface",
         ));
     }
     let (identity, passphrase) = prompt_verified_passphrase(p, &root)?;

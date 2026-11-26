@@ -37,9 +37,6 @@ fn main() {
         help::show_cli_help(&p);
         std::process::exit(0);
     }
-    if argv.first().map(String::as_str) == Some("mcp-server") {
-        std::process::exit(kv_mcp::main(&argv[1..]));
-    }
     let code = match args::parse(&argv) {
         Err(args::ParseError::Usage(text)) => {
             eprint!("{text}");
