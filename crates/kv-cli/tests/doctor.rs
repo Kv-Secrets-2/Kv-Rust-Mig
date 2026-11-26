@@ -468,13 +468,19 @@ fn doctor_does_not_open_vault_paths_on_linux() {
     );
     let trace = std::fs::read_to_string(&trace_path).unwrap();
     let binary_text = kv_bin();
+    let secrets_text = secrets.to_string_lossy();
     assert!(
         trace
             .lines()
             .any(|line| line.contains("execve(") && line.contains(binary_text)),
         "strace did not record launching kv doctor"
     );
-    let secrets_text = secrets.to_string_lossy();
+    assert!(
+        trace
+            .lines()
+            .any(|line| line.contains(secrets_text.as_ref())),
+        "strace did not record doctor inspecting vault metadata"
+    );
     let opened = trace
         .lines()
         .filter(|line| {
