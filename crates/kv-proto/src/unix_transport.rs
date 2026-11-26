@@ -1412,6 +1412,32 @@ finally:
     }
 
     #[test]
+    fn framed_status_skips_preflight_and_fields_cannot_forge_command_or_token() {
+        let path = SocketPath::new();
+        let listener = UnixListener::bind(&path.0).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut socket = accept_bounded(&listener);
+            let request = read_frame_request_until(&mut socket, deadline)
+                .unwrap()
+                .expect("framed status request");
+            assert_eq!(request["cmd"], "status");
+            assert_eq!(request["token"], "trusted-token");
+            write_frame_response_until(&mut socket, &serde_json::json!({"ok":true}), deadline)
+                .unwrap();
+        });
+        let mut fields = serde_json::Map::new();
+        fields.insert("cmd".into(), serde_json::json!("forged"));
+        fields.insert("token".into(), serde_json::json!("forged"));
+        fields.insert("dummy_secret".into(), serde_json::json!("dummy"));
+        let request = crate::request_document("status", "trusted-token".into(), &fields, true);
+        let answer =
+            crate::framed_agent_exchange(&path.0, &request, Duration::from_secs(2)).unwrap();
+        assert_eq!(answer, serde_json::json!({"ok":true}));
+        server.join().unwrap();
+    }
+
+    #[test]
     fn framed_agent_deadline_spans_preflight_and_request() {
         let path = SocketPath::new();
         let listener = UnixListener::bind(&path.0).unwrap();
