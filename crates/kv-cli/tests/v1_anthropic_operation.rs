@@ -686,7 +686,7 @@ fn expired_fixed_operation_permit_never_reaches_provider() {
     let _daemon = fixture.start_daemon_with_clock_scale(Some("10"));
     let (request_id, permit_id) = request(&fixture);
     approve_permit(&fixture, &request_id);
-    fs::write(fixture.root.join("permit-clock-offset"), "595").unwrap();
+    fs::write(fixture.root.join("permit-clock-offset"), "601").unwrap();
     let args = operation_args(Some(&permit_id), INPUT);
     let (code, expired) = fixture.kv(&args);
     assert_ne!(code, 0);
