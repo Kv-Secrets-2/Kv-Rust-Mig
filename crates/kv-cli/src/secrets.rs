@@ -454,7 +454,6 @@ pub fn cmd_envs(p: &Palette) -> CmdResult {
     ui::info(&format!("{}Commands:{}", p.dim, p.reset));
     ui::cmd(p, "kv env create <name>", "Create new environment");
     ui::cmd(p, "kv set -e <env> KEY", "Store in specific environment");
-    ui::cmd(p, "kv run -e <env> CMD", "Run with specific environment");
     ui::blank();
     Ok(())
 }

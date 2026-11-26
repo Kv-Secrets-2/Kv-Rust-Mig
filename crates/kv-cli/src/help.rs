@@ -106,7 +106,7 @@ pub fn show_cli_help(p: &Palette) {
         "Approve where this vault may send credentials",
     );
     ui::blank();
-    ui::info("Other commands of the Python release are not part of this build yet.");
+    ui::info("This Linux v1 surface is intentionally limited to supported local vault commands.");
     ui::info(&format!(
         "{}Use 'kv COMMAND --help' for per-command flags. Version: {VERSION}{}",
         p.dim, p.reset
