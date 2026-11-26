@@ -122,7 +122,9 @@ the only effect-callback path. `run` returns `Execution`; calling
 through the same full-verification, durable-append, checkpoint-publication
 critical section. If the outcome cannot be committed, `OutcomeError` retains
 the effect output so the caller cannot mistake the already-run effect for an
-unexecuted one.
+unexecuted one. Its default `Debug`/`Display` formatting redacts that output
+because effect results can carry provider data; callers must retrieve it
+explicitly.
 
 A dropped `Admission`, a panic or process exit before `finish`, or an outcome
 failure before any outcome bytes are appended leaves no outcome record. In a

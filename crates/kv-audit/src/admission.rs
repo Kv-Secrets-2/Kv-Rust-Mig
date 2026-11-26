@@ -497,7 +497,8 @@ impl<T> Execution<T> {
 }
 
 /// Effect output paired with the lifecycle error that prevented its terminal
-/// outcome from being committed.
+/// outcome from being committed. Default formatting redacts the output because
+/// it can carry provider results; retrieve it explicitly when the caller needs it.
 pub struct OutcomeError<T> {
     pub error: LifecycleError,
     pub output: T,
@@ -509,11 +510,11 @@ impl<T> OutcomeError<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for OutcomeError<T> {
+impl<T> fmt::Debug for OutcomeError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OutcomeError")
             .field("error", &self.error)
-            .field("output", &self.output)
+            .field("output", &"<redacted>")
             .finish()
     }
 }
@@ -528,7 +529,7 @@ impl<T> fmt::Display for OutcomeError<T> {
     }
 }
 
-impl<T: fmt::Debug> std::error::Error for OutcomeError<T> {}
+impl<T> std::error::Error for OutcomeError<T> {}
 
 /// Observed state of one authenticated admission.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

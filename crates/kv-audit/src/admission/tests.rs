@@ -469,6 +469,32 @@ fn outcome_write_failure_preserves_effect_output_and_leaves_admission_unknown() 
 }
 
 #[test]
+fn outcome_error_formatting_redacts_output_but_explicit_retrieval_preserves_it() {
+    let fixture = fixture();
+    let marker = "synthetic-provider-result-marker";
+    let execution = fixture
+        .journal
+        .admit("broker.http.get", Map::new())
+        .unwrap()
+        .run(|_| marker);
+    fixture
+        .append_failures
+        .lock()
+        .unwrap()
+        .push_back(DurableAppendFailure::WriteFailed);
+    let error = execution
+        .finish(TerminalOutcome::Completed, Map::new())
+        .unwrap_err();
+
+    let debug = format!("{error:?}");
+    let display = error.to_string();
+    assert!(!debug.contains(marker));
+    assert!(!display.contains(marker));
+    assert!(debug.contains("<redacted>"));
+    assert_eq!(error.into_output(), marker);
+}
+
+#[test]
 fn outcome_checkpoint_publish_failure_preserves_output_and_fails_scans_closed() {
     let fixture = fixture();
     let execution = fixture
