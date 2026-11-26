@@ -858,6 +858,13 @@ fn read_exact_at(file: &std::fs::File, buffer: &mut [u8], start: u64) -> Result<
     Ok(())
 }
 
+fn tail_read_len(position: u64, line_len: usize) -> usize {
+    let capacity = MAX_CHAIN_ENTRY_BYTES + 1 - line_len;
+    position
+        .min(TAIL_READ_CHUNK_BYTES as u64)
+        .min(capacity as u64) as usize
+}
+
 fn read_tail_line(directory: &Directory) -> Result<Option<Vec<u8>>, TailFailure> {
     let file = match directory.open_single_read(LOG) {
         Ok(file) => file,
@@ -878,8 +885,7 @@ fn read_tail_line(directory: &Directory) -> Result<Option<Vec<u8>>, TailFailure>
     let mut line_len = 0_usize;
     let mut chunks: Vec<Vec<u8>> = Vec::new();
     while position > 0 {
-        let capacity = MAX_CHAIN_ENTRY_BYTES + 1 - line_len;
-        let read_len = (position as usize).min(TAIL_READ_CHUNK_BYTES).min(capacity);
+        let read_len = tail_read_len(position, line_len);
         let start = position - read_len as u64;
         let mut chunk = vec![0_u8; read_len];
         read_exact_at(&file, &mut chunk, start)?;

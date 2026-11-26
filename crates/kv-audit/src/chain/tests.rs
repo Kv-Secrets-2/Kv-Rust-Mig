@@ -628,6 +628,13 @@ fn authenticated_writer_preserves_the_vault_label_metadata_rule() {
 }
 
 #[test]
+fn tail_read_lengths_stay_nonzero_beyond_thirty_two_bit_offsets() {
+    for position in [1_u64 << 32, (1_u64 << 32) + 1, u64::MAX] {
+        assert_eq!(tail_read_len(position, 0), TAIL_READ_CHUNK_BYTES);
+    }
+}
+
+#[test]
 fn writer_scans_a_tail_record_across_read_chunks_before_appending() {
     let temp = Temp::new();
     let directory = temp.audit_dir();
